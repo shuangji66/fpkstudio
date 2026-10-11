@@ -93,6 +93,19 @@
   .mono {
     font-family: var(--font-mono);
   }
+
+  /* 文件树工具栏的图标按钮：el-button 默认内边距偏宽，侧栏缩到 180px 会溢出 */
+  .tree-tool {
+    @apply px-1 py-0.5;
+  }
+
+  /* 横向标签栏：滚轮（兼容 utils/scroll.ts）/ 触摸板 / 触摸都能滚 */
+  .hscroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 /* CodeMirror 与 xterm 的容器需要明确高度，否则折叠成 0 */

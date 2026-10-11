@@ -103,6 +103,8 @@ interface FieldDef {
   type: FieldType
   placeholder?: string
   options?: { label: string; value: string }[]
+  /** switch 关闭时删掉这个键，而不是写 false（例如 micro_app）。 */
+  removeWhenOff?: boolean
 }
 
 const props = defineProps<EditorProps>()
@@ -169,6 +171,7 @@ const fields: FieldDef[] = [
   { key: 'service_port', type: 'input' },
   { key: 'checkport', type: 'switch' },
   { key: 'disable_authorization_path', type: 'switch' },
+  { key: 'micro_app', type: 'switch', removeWhenOff: true },
   { key: 'changelog', type: 'input' },
 ]
 
@@ -179,7 +182,7 @@ interface Model {
   lists: Record<string, string[]>
 }
 
-const { model } = useEditor<Model>(
+const { model, api } = useEditor<Model>(
   props,
   emit,
   (text) => {
@@ -203,7 +206,13 @@ const { model } = useEditor<Model>(
   (value) => {
     for (const field of fields) {
       if (field.type === 'switch') {
-        value.manifest.set(field.key, value.bools[field.key] ? 'true' : 'false')
+        // removeWhenOff：关闭 = 不声明。写 micro_app = false 和删掉它语义不同，
+        // fnOS 只认「有这个键且为 true」，所以关掉时直接把键去掉。
+        if (field.removeWhenOff && !value.bools[field.key]) {
+          value.manifest.remove(field.key)
+        } else {
+          value.manifest.set(field.key, value.bools[field.key] ? 'true' : 'false')
+        }
       } else if (field.type === 'list') {
         value.manifest.set(field.key, (value.lists[field.key] ?? []).join(':'))
       } else {
@@ -232,4 +241,6 @@ const platformWarning = computed(() => {
 const otherKeys = computed(() =>
   model.value.manifest.keys().filter((key) => !fields.some((f) => f.key === key) && key !== 'arch'),
 )
+
+defineExpose(api)
 </script>

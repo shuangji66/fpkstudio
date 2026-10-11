@@ -56,6 +56,18 @@
         </p>
 
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.entryId') }}</span>
+          <el-input
+            v-model="idDraft"
+            size="small"
+            class="mono w-64"
+            placeholder="myapp.Application"
+            @keydown.enter="commitId"
+            @blur="commitId"
+          />
+        </div>
+
+        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
           <span class="text-right text-xs text-slate-600">{{ t('uiConfig.title') }}</span>
           <el-input v-model="current.value.title" size="small" class="w-64" />
         </div>
@@ -110,7 +122,13 @@
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
           <span class="text-right text-xs text-slate-600">{{ t('uiConfig.accessPerm') }}</span>
-          <el-select v-model="current.value.control.accessPerm" size="small" class="w-64">
+          <!-- 所有用户可见时，逐个用户的权限设置没有意义，直接禁用 -->
+          <el-select
+            v-model="current.value.control.accessPerm"
+            size="small"
+            class="w-64"
+            :disabled="current.value.allUsers"
+          >
             <el-option :label="t('uiConfig.permEditable')" value="editable" />
             <el-option :label="t('uiConfig.permReadonly')" value="readonly" />
             <el-option :label="t('uiConfig.permHidden')" value="hidden" />
@@ -131,8 +149,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessage } from 'element-plus'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import { parseJSON, stringifyOrdered, useEditor, type EditorProps } from '../useEditor'
 
@@ -147,6 +166,8 @@ interface UiEntry {
   gatewaySocket: string
   fileTypes: string[]
   allUsers: boolean
+  /** 源文件里是否显式写了 allUsers（没写就别在保存时凭空加一个键）。 */
+  allUsersSet: boolean
   noDisplay: boolean
   control: { accessPerm: string }
   [key: string]: unknown
@@ -174,12 +195,13 @@ function normalizeEntry(raw: Record<string, unknown>): UiEntry {
     gatewaySocket: String(raw.gatewaySocket ?? ''),
     fileTypes: Array.isArray(raw.fileTypes) ? (raw.fileTypes as string[]) : [],
     allUsers: raw.allUsers !== false,
+    allUsersSet: 'allUsers' in raw,
     noDisplay: raw.noDisplay === true,
     control: { accessPerm: String(control.accessPerm ?? 'editable') },
   }
 }
 
-const { model } = useEditor<Model>(
+const { model, api } = useEditor<Model>(
   props,
   emit,
   (text) => {
@@ -202,7 +224,10 @@ const { model } = useEditor<Model>(
       if (entry.url) item.url = entry.url
       if (entry.gatewayPrefix) item.gatewayPrefix = entry.gatewayPrefix
       if (entry.gatewaySocket) item.gatewaySocket = entry.gatewaySocket
-      if (entry.allUsers) item.allUsers = true
+      // allUsers 缺键的语义是 true，所以「取消勾选」必须显式写 false，
+      // 否则文件里没有这个键 → 又被当成 true，勾选状态根本存不下来。
+      // 反过来，原本没写、用户也没动过时不写，避免一保存就给文件加键。
+      if (entry.allUsers === false || entry.allUsersSet) item.allUsers = entry.allUsers
       if (entry.noDisplay) item.noDisplay = true
       if (entry.fileTypes.length) item.fileTypes = [...entry.fileTypes]
       if (entry.control.accessPerm !== 'editable') item.control = { ...entry.control }
@@ -213,6 +238,38 @@ const { model } = useEditor<Model>(
 )
 
 const selected = ref(Object.keys(model.value.urls)[0] ?? '')
+
+/**
+ * 入口标识的编辑草稿。
+ *
+ * 标识是 `.url` 这个对象的键，不能直接 v-model 绑键——改名等于「删旧键、插新键」，
+ * 得切换选中项并保持键序，所以用一个草稿值 + 失焦/回车提交。
+ */
+const idDraft = ref(selected.value)
+
+watch(selected, (id) => {
+  idDraft.value = id
+})
+
+function commitId() {
+  const from = selected.value
+  const to = idDraft.value.trim()
+  const entry = model.value.urls[from]
+  if (!entry) return
+  if (!to || to === from) {
+    idDraft.value = from
+    return
+  }
+  if (model.value.urls[to]) {
+    ElMessage.warning(t('uiConfig.entryIdExists'))
+    idDraft.value = from
+    return
+  }
+  const next: Record<string, UiEntry> = {}
+  for (const [id, value] of Object.entries(model.value.urls)) next[id === from ? to : id] = value
+  model.value.urls = next
+  selected.value = to
+}
 const adding = ref(false)
 const newId = ref('')
 const addInput = ref<HTMLInputElement | null>(null)
@@ -241,4 +298,6 @@ function removeEntry(id: string) {
   delete model.value.urls[id]
   selected.value = Object.keys(model.value.urls)[0] ?? ''
 }
+
+defineExpose(api)
 </script>

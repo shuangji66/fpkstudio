@@ -1,0 +1,52 @@
+<template>
+  <div class="flex h-full min-h-0 items-center justify-center overflow-auto thin-scroll bg-slate-100 p-4">
+    <img
+      v-if="!failed"
+      :src="url"
+      :alt="path"
+      class="max-h-full max-w-full rounded-md shadow-sm"
+      @error="failed = true"
+    />
+    <p v-else class="text-center text-xs leading-relaxed text-slate-500">
+      {{ t('editor.imageFailed') }}<br />
+      <span class="mono text-[11px] text-slate-400">{{ url }}</span>
+    </p>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { rawURL } from '@/api/client'
+import type { EditorApi, EditorContent, EditorProps } from '../useEditor'
+
+/**
+ * 图片预览。
+ *
+ * 读文件接口对二进制只回 `text:false`（不带内容），所以这里不读内容，直接把
+ * 下载地址塞给 <img>，由浏览器自己取——顺带也省掉一次 base64 编解码。
+ *
+ * 它自己不接受编辑，但会把外面传进来的文本原样托管（props.origin / original）：
+ * svg 这种「既能当图看、又是文本」的文件，从源码视图切回预览时靠它保住未保存的
+ * 修改和 dirty 状态；真正的图片 origin 是空串，getContent 直接返回 null，
+ * 不会因为误点保存把文件写成空。
+ */
+const props = defineProps<EditorProps>()
+const { t } = useI18n()
+
+const failed = ref(false)
+
+const url = computed(() => {
+  const full = props.project ? `${props.project}/${props.path}` : props.path
+  return rawURL('/api/fs/download', { path: full })
+})
+
+const baseline = () => props.original ?? props.origin
+
+defineExpose({
+  isDirty: () => props.origin !== baseline(),
+  getContent: (): EditorContent | null =>
+    props.origin ? { path: props.path, content: props.origin } : null,
+  reset: () => {},
+} satisfies EditorApi)
+</script>

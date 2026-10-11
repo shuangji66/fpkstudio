@@ -31,6 +31,12 @@ function buildQuery(query?: Record<string, QueryValue>): string {
   return parts.length ? `?${parts.join('&')}` : ''
 }
 
+/** 把响应体裁成一小段，用于把「不是 JSON」的回包原样暴露出来。 */
+function snippet(text: string, max = 200): string {
+  const one = text.replace(/\s+/g, ' ').trim()
+  return one.length > max ? `${one.slice(0, max)}…` : one
+}
+
 async function extractError(res: Response): Promise<never> {
   let detail = `${res.status} ${res.statusText}`
   try {
@@ -41,7 +47,9 @@ async function extractError(res: Response): Promise<never> {
         if (parsed.error) detail = parsed.error
         else detail = text
       } catch {
-        detail = text
+        // 不是后端的 {error:…}：多半是中间的网关 / 反代插了一脚（登录页、
+        // 令牌提示之类）。原样带出来，不然只会看到一个 JSON 解析错误。
+        detail = `HTTP ${res.status} 返回的不是 JSON：${snippet(text)}`
       }
     }
   } catch {
@@ -69,7 +77,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (res.status === 204) return undefined as T
   const text = await res.text()
   if (!text) return undefined as T
-  return JSON.parse(text) as T
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new ApiError(res.status, `HTTP ${res.status} 返回的不是 JSON：${snippet(text)}`)
+  }
 }
 
 /** 发一个返回纯文本的请求（文件内容、下载等）。 */
@@ -120,10 +132,20 @@ export function upload<T>(
   })
 }
 
+/**
+ * 拼一个「原始文件」地址。
+ *
+ * 给浏览器自己发请求的场景用：下载、图片预览（<img src>）。注意这类请求不会
+ * 走 request()，所以后端返回什么就是什么。
+ */
+export function rawURL(path: string, query?: Record<string, QueryValue>): string {
+  return apiURL(path) + buildQuery(query)
+}
+
 /** 触发浏览器下载。 */
 export function download(path: string, query?: Record<string, QueryValue>): void {
   const a = document.createElement('a')
-  a.href = apiURL(path) + buildQuery(query)
+  a.href = rawURL(path, query)
   a.rel = 'noopener'
   document.body.appendChild(a)
   a.click()

@@ -4,7 +4,7 @@ import PrivilegeEditor from './editors/PrivilegeEditor.vue'
 import ResourceEditor from './editors/ResourceEditor.vue'
 import UiConfigEditor from './editors/UiConfigEditor.vue'
 import WizardEditor from './editors/WizardEditor.vue'
-import CmdEditor from './editors/CmdEditor.vue'
+import ImagePreview from './editors/ImagePreview.vue'
 import SourceEditor from './editors/SourceEditor.vue'
 
 export interface EditorDef {
@@ -14,6 +14,13 @@ export interface EditorDef {
   component: Component
   /** 是否同时提供源码视图（表单编辑器为真）。 */
   hasForm: boolean
+  /**
+   * 非文本文件也能渲染（图片预览）。
+   *
+   * 后端对二进制只回 `text:false`，普通文件这时会落到「这是二进制文件」提示；
+   * 标了这个的编辑器照常渲染，自己按路径去取原始内容。
+   */
+  previews?: boolean
 }
 
 /**
@@ -29,7 +36,15 @@ export const editors: EditorDef[] = [
   { name: 'resource', match: /^config\/resource$/, component: ResourceEditor, hasForm: true },
   { name: 'ui-config', match: /^app\/[^/]+\/config$/, component: UiConfigEditor, hasForm: true },
   { name: 'wizard', match: /^wizard\//, component: WizardEditor, hasForm: true },
-  { name: 'cmd', match: /^cmd\//, component: CmdEditor, hasForm: false },
+  // 图片一律先预览。svg 是文本，同时给源码视图，方便直接改。
+  {
+    name: 'image',
+    match: /\.(png|jpe?g|gif|webp|bmp|avif|ico)$/i,
+    component: ImagePreview,
+    hasForm: false,
+    previews: true,
+  },
+  { name: 'svg', match: /\.svg$/i, component: ImagePreview, hasForm: true, previews: true },
   { name: 'source', match: /.*/, component: SourceEditor, hasForm: false },
 ]
 

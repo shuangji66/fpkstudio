@@ -32,6 +32,12 @@ const (
 	maxImportFiles = 200000
 )
 
+// defaultPlatforms 是新建项目时预置的架构目录，对应 fpk 的 platform 值。
+var defaultPlatforms = []string{"arm", "x86"}
+
+// maxModTimeScan 是算「最后修改时间」时最多看的条目数（见 Manager.Info）。
+const maxModTimeScan = 20000
+
 // ProjectInfo 是项目列表里的一项。
 type ProjectInfo struct {
 	Name        string `json:"name"`
@@ -182,6 +188,12 @@ func (m *Manager) Info(name string) (ProjectInfo, error) {
 	}
 
 	info := ProjectInfo{Name: name, ModTime: st.ModTime}
+	// 列表里显示的是「最后修改时间」：目录自身的 mtime 只在增删条目时变，
+	// 改 manifest、换 building 里的产物都看不出来，所以取整棵树里最新的。
+	// 限制扫描条目数，避免大项目把一个时间扫穿。
+	if newest, err := m.prj.LatestModTime(rel, maxModTimeScan); err == nil && !newest.IsZero() {
+		info.ModTime = newest.Format("2006-01-02 15:04:05")
+	}
 	if data, err := m.prj.ReadFile(rel + "/manifest"); err == nil {
 		kv := parseManifest(string(data))
 		info.AppName = kv["appname"]
@@ -222,18 +234,38 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 		return fmt.Errorf("项目 %s 已存在", name)
 	}
 
-	if _, err := m.fn.Create(ctx, m.cfg.ProjectsDir, name, docker, withUI); err != nil {
+	out, err := m.fn.Create(ctx, m.cfg.ProjectsDir, name, docker, withUI)
+	if err != nil {
 		return fmt.Errorf("fnpack create 失败: %w", err)
 	}
+	// fnpack create 失败时退出码仍然是 0（错误只打在 stdout 上），所以这里以
+	// 「目录 / manifest 有没有真的落地」为判据，并把 fnpack 的原话带出来——
+	// 否则用户只会看到一句没头没脑的「报告成功但目录没生成」，不知道是自己
+	// 项目名不合规。
 	if _, err := m.prj.Stat(rel); err != nil {
-		return fmt.Errorf("fnpack 报告成功，但目录 %s 没有生成", rel)
+		if reason := fnpack.FailureReason(out); reason != "" {
+			return fmt.Errorf("fnpack create 失败: %s", reason)
+		}
+		return fmt.Errorf("fnpack create 没有生成项目目录 %s，请查看日志里 fnpack 的输出", rel)
+	}
+	if !m.exists(rel + "/manifest") {
+		return fmt.Errorf("fnpack create 没有生成项目骨架（缺少 %s/manifest）", rel)
 	}
 
 	// fnpack 模板里带了 .DS_Store，在部分文件系统上会让后续 build 直接失败。
 	if n := stripJunk(m.prj, rel); n > 0 {
 		m.log.Infof("清理模板里的冗余文件 %d 个", n)
 	}
-	for _, d := range []string{rel + "/building", rel + "/building/platform"} {
+	// 这里刻意不修模式位（打包时会修暂存副本）：fnpack 新建的文件在飞牛卷上
+	// 可能没有执行位，但那是「产物要不要可执行」的问题，Pack 前会统一修一次；
+	// 在此处 chmod 反而会把项目目录的 ACL 换成模式位，动到用户的文件权限。
+	// 建工作目录：building/platform 下预置 arm / x86，多架构发布勾一下就能用
+	// （架构目录名就是 fpk 的 platform 值，内容会被复制到 app/server 再打包）。
+	dirs := []string{rel + "/building", rel + "/building/platform"}
+	for _, arch := range defaultPlatforms {
+		dirs = append(dirs, rel+"/building/platform/"+arch)
+	}
+	for _, d := range dirs {
 		if err := m.prj.Mkdir(d, true); err != nil {
 			return err
 		}

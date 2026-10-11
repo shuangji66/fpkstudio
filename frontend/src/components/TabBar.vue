@@ -1,5 +1,9 @@
 <template>
-  <div class="flex min-w-0 items-end gap-0.5 overflow-x-auto thin-scroll">
+  <div
+    ref="scroller"
+    class="hscroll thin-scroll flex min-w-0 items-end gap-0.5"
+    @wheel="wheelToHorizontal"
+  >
     <button
       v-for="tab in tabs.tabs"
       :key="tab.id"
@@ -47,17 +51,28 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { revealActive, wheelToHorizontal } from '@/utils/scroll'
 
 const { t } = useI18n()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
 
 const menu = reactive({ show: false, x: 0, y: 0, id: '' })
+const scroller = ref<HTMLElement | null>(null)
+
+// 切/开标签时把它滚进可视区，否则新开的项目标签可能落在滚动区外面
+watch(
+  () => tabs.activeId,
+  async () => {
+    await nextTick()
+    revealActive(scroller.value, '.tab-chip-active')
+  },
+)
 
 function dirty(project: string): number {
   return project ? workspace.dirtyCount(project) : 0

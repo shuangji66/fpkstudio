@@ -282,11 +282,38 @@ func errText(err error) string {
 }
 
 func queryRel(r *http.Request) (string, error) {
-	p := r.URL.Query().Get("path")
+	p, err := pathParam(r)
+	if err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(p) == "" {
 		return ".", nil
 	}
-	// 前端统一用 "projects/<name>/..." 这种以 projects 根为基准的路径。
+	// 路径一律以 projects 根为基准，例如 "myapp/config/privilege"。
 	p = strings.TrimPrefix(path.Clean("/"+p), "/")
 	return p, nil
+}
+
+// pathParam 取出 path 参数：先看查询串，查询串里没有再看 JSON 请求体。
+//
+// 两种都认，是因为反代 / 网关不保证把查询串原样送到后端；一旦 path 丢了，列目录
+// 就退化成列项目根目录或者直接报错，表现为「文件列表永远是空的」。POST + JSON body
+// 这条路是稳的——所有写接口本来就走它，所以前端把 list / read 的 path 放进了 body。
+// 查询串形式留着，方便 curl 和文档里的例子。
+func pathParam(r *http.Request) (string, error) {
+	if p := r.URL.Query().Get("path"); p != "" {
+		return p, nil
+	}
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		return "", nil
+	}
+	if r.Body == nil {
+		return "", nil
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	// 解不出来不算错：查询串本来就允许为空（表示项目根目录）。
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req)
+	return req.Path, nil
 }

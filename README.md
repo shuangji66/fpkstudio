@@ -140,7 +140,7 @@ cd frontend && npm run dev           # 只起 Vite 开发服务器
 ## 前端
 
 Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Element Plus 2，
-代码编辑器 CodeMirror 6，构建输出控制台用 xterm 6，路由 vue-router 5，国际化 vue-i18n 11。
+代码编辑器 CodeMirror 6，构建日志弹窗用 xterm 6，路由 vue-router 5，国际化 vue-i18n 11。
 
 几个刻意的设计：
 
@@ -165,7 +165,7 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
 |---|---|---|
 | GET | `/api/system/info` | 版本、目录、socket、fnpack 探测结果 |
 | GET | `/api/projects` | 项目列表 |
-| POST | `/api/projects/create` | `{name, docker, ui}` → 调 `fnpack create` |
+| POST | `/api/projects/create` | `{name, docker, ui}` → 调 `fnpack create`；项目名需 3–32 位、字母数字开头结尾，中间可含 `. _ -` |
 | POST | `/api/projects/delete` | `{name}` |
 | GET | `/api/projects/exists?name=` | 是否存在、是否 docker、是否有桌面入口 |
 | GET | `/api/projects/platforms?name=` | `building/platform/` 下的架构目录 |
@@ -173,8 +173,8 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
 | POST | `/api/projects/import` | multipart 上传 `.fpk`，解包成项目 |
 | POST | `/api/projects/pack` | `{name, platforms[], serverDir, copyOut}` |
 | GET | `/api/projects/artifacts?name=` | 产物列表（项目内 + 输出目录） |
-| GET | `/api/fs/list?path=` | 目录列表 |
-| GET | `/api/fs/read?path=` | 读文件（二进制会返回 `text:false`，不带内容） |
+| GET/POST | `/api/fs/list?path=` | 目录列表，`path` 也可以放在 JSON body 里（前端就是这么调的） |
+| GET/POST | `/api/fs/read?path=` | 读文件（二进制会返回 `text:false`，不带内容） |
 | PUT | `/api/fs/write` | `{path, content}` |
 | POST | `/api/fs/create` \| `delete` \| `rename` \| `copy` | 文件操作 |
 | POST | `/api/fs/upload` | multipart，`app/server/` 下的文件按 0755 落地 |

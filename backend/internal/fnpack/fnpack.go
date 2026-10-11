@@ -1,7 +1,10 @@
 // Package fnpack 包装飞牛官方的 fnpack 命令行工具。
 //
 // 只做三件事：定位、执行、把输出逐行转给日志器。
-// 不做任何「靠 stdout 文案判断成败」的事——fnpack 已经提供了退出码。
+//
+// 成败判断以退出码为准，`build` 是这样的。`create` 不是：项目名非法时（太短、
+// 含非法字符）它照样以退出码 0 结束，只把错误打在 stdout 上。所以调用 create
+// 的一方除了退出码，还得回读输出——见 FailureReason。
 package fnpack
 
 import (
@@ -19,6 +22,23 @@ import (
 )
 
 var versionRe = regexp.MustCompile(`(?i)version\s+v?([0-9][0-9A-Za-z.\-]*)`)
+
+// create 失败时的输出形如：
+//
+//	Create application name ab error : appname ilegal,app name (ab) length must be between 3 and 32
+var failureRe = regexp.MustCompile(`(?i)\berror\b\s*:`)
+
+// FailureReason 从命令输出里取出 fnpack 自己给出的失败原因，没有则返回空串。
+//
+// 存在的原因只有一个：fnpack create 失败时退出码还是 0，判断成败只能看输出。
+func FailureReason(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if line = strings.TrimSpace(line); line != "" && failureRe.MatchString(line) {
+			return line
+		}
+	}
+	return ""
+}
 
 // Client 是 fnpack 的调用入口。
 type Client struct {
@@ -136,13 +156,16 @@ func (c *Client) Run(ctx context.Context, dir string, source string, args ...str
 }
 
 // Create 创建项目骨架。dir 是父目录，name 是项目名。
+//
+// 参数校验由 fnpack 负责：项目名必须是 3–32 位、以字母或数字开头结尾、中间可含
+// . _ -。校验不过时它不会创建任何东西，也不会改退出码，只打印一行错误。
 func (c *Client) Create(ctx context.Context, dir, name string, docker, withUI bool) (string, error) {
 	args := []string{"create", name}
 	if docker {
 		args = append(args, "--template", "docker")
 	}
 	if !withUI {
-		args = append(args, "--without-ui", "true")
+		args = append(args, "--without-ui")
 	}
 	return c.Run(ctx, dir, logging.SourceFnpack, args...)
 }

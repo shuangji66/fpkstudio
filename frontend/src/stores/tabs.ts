@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { i18n } from '@/i18n'
 
 /**
  * 主标签模型。
@@ -27,7 +28,10 @@ export type Tab = HomeTab | ProjectTab
 export const HOME_TAB_ID = 'home'
 
 export const useTabsStore = defineStore('tabs', () => {
-  const tabs = ref<Tab[]>([{ id: HOME_TAB_ID, kind: 'home', title: '项目管理器', closable: false }])
+  // 首页标签的标题走 i18n，别再硬编码（以前写死「项目管理器」，英文界面也是中文）
+  const tabs = ref<Tab[]>([
+    { id: HOME_TAB_ID, kind: 'home', title: i18n.global.t('tab.home'), closable: false },
+  ])
   const activeId = ref<string>(HOME_TAB_ID)
 
   const active = computed(() => tabs.value.find((t) => t.id === activeId.value) ?? null)

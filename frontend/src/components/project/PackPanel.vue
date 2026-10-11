@@ -61,13 +61,6 @@
             >
               {{ state.packing ? t('pack.packing') : t('pack.start') }}
             </el-button>
-            <el-button
-              size="small"
-              :icon="Tickets"
-              @click="logs.panelOpen = true"
-            >
-              {{ t('log.title') }}
-            </el-button>
           </div>
         </div>
       </section>
@@ -126,9 +119,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Box, Download, Refresh, Tickets } from '@element-plus/icons-vue'
+import { Box, Download, Refresh } from '@element-plus/icons-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useLogsStore } from '@/stores/logs'
 import { useSystemStore } from '@/stores/system'
 import { downloadEntry } from '@/api/endpoints'
 import type { Artifact } from '@/api/types'
@@ -138,7 +130,6 @@ const props = defineProps<{ project: string }>()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
-const logs = useLogsStore()
 const system = useSystemStore()
 
 const state = computed(() => workspace.state(props.project))

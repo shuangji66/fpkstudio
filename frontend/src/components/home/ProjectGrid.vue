@@ -20,25 +20,26 @@
       <div class="flex items-start gap-2">
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
-            <h3 class="truncate text-sm font-semibold text-slate-800" :title="item.name">
-              {{ item.displayName || item.name }}
+            <h3 class="mono truncate text-sm font-semibold text-slate-800" :title="item.name">
+              {{ projectLabel(item) }}
             </h3>
-            <el-tag size="small" :type="item.docker ? 'warning' : 'success'" effect="plain">
+            <!-- 只在需要提醒时打标签：docker、以及没有桌面入口的原生项目 -->
+            <el-tag v-if="kindLabel(item)" size="small" :type="kindType(item)" effect="plain">
               {{ kindLabel(item) }}
             </el-tag>
           </div>
-          <p class="mono mt-0.5 truncate text-[11px] text-slate-500" :title="item.appname">
-            {{ item.appname || item.name }}
+          <p
+            v-if="item.name !== projectLabel(item)"
+            class="mono mt-0.5 truncate text-[11px] text-slate-500"
+            :title="item.name"
+          >
+            {{ item.name }}
           </p>
         </div>
       </div>
 
-      <dl class="mt-2 grid grid-cols-[3.5rem_1fr] gap-x-2 gap-y-0.5 text-[11px]">
-        <dt class="text-slate-400">version</dt>
-        <dd class="mono truncate text-slate-600">{{ item.version || '-' }}</dd>
-        <dt class="text-slate-400">platform</dt>
-        <dd class="mono truncate text-slate-600">{{ item.platform || '-' }}</dd>
-        <dt class="text-slate-400">mtime</dt>
+      <dl class="mt-2 grid grid-cols-[4rem_1fr] gap-x-2 gap-y-0.5 text-[11px]">
+        <dt class="text-slate-400">{{ t('home.modifiedAt') }}</dt>
         <dd class="truncate text-slate-600">{{ item.modTime }}</dd>
       </dl>
 
@@ -56,6 +57,7 @@
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useProjectsStore } from '@/stores/projects'
+import { projectLabel } from '@/utils/format'
 import type { ProjectInfo } from '@/api/types'
 
 const emit = defineEmits<{
@@ -66,10 +68,20 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const projects = useProjectsStore()
 
+/**
+ * 卡片上的类型标签。
+ *
+ * 只在「需要知道」时才显示：docker 项目、以及没有桌面入口的原生项目。
+ * 原生 + 入口是最常见的情况，再挂个「原生」标签只是噪声。
+ */
 function kindLabel(item: ProjectInfo): string {
   if (item.docker) return t('project.kindDocker')
-  if (item.ui) return t('project.kindNativeUI')
-  return t('project.kindNative')
+  if (!item.ui) return t('project.kindNoEntry')
+  return ''
+}
+
+function kindType(item: ProjectInfo): 'warning' | 'info' {
+  return item.docker ? 'warning' : 'info'
 }
 
 async function remove(item: ProjectInfo) {

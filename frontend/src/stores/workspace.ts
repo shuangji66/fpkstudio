@@ -94,8 +94,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function state(name: string): ProjectState {
     let s = states.value[name]
     if (!s) {
-      s = emptyState(name)
-      states.value[name] = s
+      states.value[name] = emptyState(name)
+      // 必须回读一次，不能直接 return 刚创建的那个对象：写进 states 的是原始
+      // 对象，第一次调用拿到的引用是非响应式的，在它上面改 dirs / expanded
+      // 不触发更新。症状是「新建项目后第一次进项目，文件树是空的，刷新一下
+      // 才出来」——因为刷新时这次走的是代理。openFile 里的 push 是同一类坑。
+      s = states.value[name]
     }
     return s
   }
@@ -107,17 +111,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     s.loading = true
     s.error = ''
     try {
-      const [root] = await Promise.all([listDir(`${name}`)])
+      const root = await listDir(name)
+      // 返回里没有 entries 说明中间有东西插了一脚（网关/反代的页面、空回包…）。
+      // 这种情况必须报出来，否则文件树只会画成「空目录」，看不出是失败了。
+      if (!root || !Array.isArray(root.entries)) {
+        throw new Error('列目录的返回里没有 entries，可能被中间的网关/反代改写了')
+      }
       s.dirs[name] = root.entries
       s.expanded[name] = true
-      if (!s.dirs[`${name}/app`]) {
-        // 预先展开 app/ 与 config/，这是最常编辑的两个目录。
-        for (const dir of ['app', 'config', 'cmd']) {
-          if (root.entries.some((e) => e.name === dir && e.dir)) {
-            await loadDir(name, `${name}/${dir}`)
-            s.expanded[`${name}/${dir}`] = true
-          }
-        }
+      // 预先展开 app/ config/ cmd/，这是最常编辑的三个目录。单个目录拉不动
+      // 不影响整棵树（展开时会再拉一次，那时候报错更贴切）。
+      for (const dir of ['app', 'config', 'cmd']) {
+        const child = `${name}/${dir}`
+        if (!root.entries.some((e) => e.name === dir && e.dir)) continue
+        await loadDir(name, child).catch(() => undefined)
+        s.expanded[child] = true
       }
       await reloadPackageInfo(name)
       s.loaded = true
@@ -133,6 +141,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const s = state(name)
     if (s.dirs[path] && !force) return
     const res = await listDir(path)
+    if (!res || !Array.isArray(res.entries)) {
+      throw new Error(`${path} 的列目录返回里没有 entries`)
+    }
     s.dirs[path] = res.entries
   }
 
@@ -154,11 +165,54 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (s.dirs[path]) await loadDir(name, path, true)
   }
 
+  /**
+   * 递归展开所有目录（文件树的「全部展开」）。
+   *
+   * 逐层拉取：没拉过的目录先 loadDir 才知道下面有什么。符号链接目录不进去
+   * （Entry.symlink 为真时 dir 不可信），并用 MAX 兜底，避免病态目录把接口打满。
+   */
+  async function expandAll(name: string) {
+    const s = state(name)
+    const MAX_DIRS = 500
+    s.expanded[name] = true
+    const queue: string[] = [name]
+    let visited = 0
+    while (queue.length && visited < MAX_DIRS) {
+      const dir = queue.shift()!
+      visited += 1
+      if (!s.dirs[dir]) await loadDir(name, dir).catch(() => undefined)
+      for (const entry of s.dirs[dir] ?? []) {
+        if (!entry.dir || entry.symlink) continue
+        const child = `${dir}/${entry.name}`
+        s.expanded[child] = true
+        queue.push(child)
+      }
+    }
+  }
+
+  /**
+   * 重新拉一遍文件树：已经加载过的目录 + 项目根目录。
+   *
+   * 根目录一定要带上——树为空（首次加载失败）时 `dirs` 里一个键都没有，
+   * 以前这里会什么都不干，「刷新」看着毫无反应。根目录失败记在 state.error 上，
+   * 单个子目录失败不阻塞整棵树。
+   */
   async function reloadTree(name: string) {
     const s = state(name)
     const paths = Object.keys(s.dirs)
-    await Promise.all(paths.map((p) => loadDir(name, p, true).catch(() => undefined)))
+    if (!paths.includes(name)) paths.push(name)
+    s.error = ''
+    let rootErr: unknown = null
+    for (const p of paths) {
+      try {
+        await loadDir(name, p, true)
+      } catch (e) {
+        if (p === name) rootErr = e
+      }
+    }
     await reloadPackageInfo(name)
+    if (rootErr) s.error = errText(rootErr)
+    else s.loaded = true
   }
 
   async function reloadPackageInfo(name: string) {
@@ -208,7 +262,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tab.text = res.text
       tab.sizeRaw = res.sizeRaw
       tab.origin = res.content
-      if (!res.text) tab.error = '这是二进制文件，无法以文本方式编辑'
+      // 二进制不写 error：是不是「不可编辑」由 EditorHost 按注册表判断
+      // （图片有自己的预览器），error 只留真正的失败。
     } catch (e) {
       tab.error = errText(e)
     } finally {
@@ -248,7 +303,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tab.text = res.text
       tab.sizeRaw = res.sizeRaw
       tab.origin = res.content
-      tab.error = res.text ? '' : '这是二进制文件，无法以文本方式编辑'
+      tab.error = ''
     } catch (e) {
       tab.error = errText(e)
     } finally {
@@ -356,6 +411,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loadDir,
     toggleDir,
     refreshDir,
+    expandAll,
     reloadTree,
     reloadPackageInfo,
     openFile,

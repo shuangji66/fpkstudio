@@ -72,9 +72,18 @@ export const importProject = (file: File, onProgress?: (percent: number) => void
 
 // ---- 文件 ----
 
-export const listDir = (path: string) => request<FsListing>('/api/fs/list', { query: { path } })
+/**
+ * 读接口的 path 走 JSON body，而不是查询串。
+ *
+ * 后端两种都认（见 server.pathParam）。不用查询串的原因：反代 / 网关不保证把
+ * 查询串原样送到后端，path 一丢就退化成「列项目根目录」或直接报错，表现为文件树
+ * 永远是空的、还看不出原因。POST + JSON body 这条路是稳的——所有写接口都走它。
+ */
+export const listDir = (path: string) =>
+  request<FsListing>('/api/fs/list', { method: 'POST', json: { path } })
 
-export const readFile = (path: string) => request<FileContent>('/api/fs/read', { query: { path } })
+export const readFile = (path: string) =>
+  request<FileContent>('/api/fs/read', { method: 'POST', json: { path } })
 
 export const writeFile = (path: string, content: string) =>
   request<{ ok: boolean; path: string; size: number }>('/api/fs/write', {

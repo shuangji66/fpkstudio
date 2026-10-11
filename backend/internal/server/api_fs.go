@@ -21,6 +21,8 @@ func (s *Server) handleFsList(w http.ResponseWriter, r *http.Request) error {
 	root := s.prj.Root()
 	entries, err := root.List(rel)
 	if err != nil {
+		// 前端拿到失败只会把文件树画成空的，原因必须落在日志里，否则无从查起。
+		s.log.Warnf("列出目录 %s（%s）失败: %v", rel, root.Abs(rel), err)
 		return notFound("读取目录失败: %v", err)
 	}
 	return writeJSON(w, map[string]any{
@@ -46,6 +48,7 @@ func (s *Server) handleFsRead(w http.ResponseWriter, r *http.Request) error {
 	root := s.prj.Root()
 	data, err := root.ReadFile(rel)
 	if err != nil {
+		s.log.Warnf("读取文件 %s（%s）失败: %v", rel, root.Abs(rel), err)
 		return notFound("读取文件失败: %v", err)
 	}
 

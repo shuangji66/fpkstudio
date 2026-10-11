@@ -5,11 +5,20 @@ export interface EditorContent {
   content: string
 }
 
-/** 每个编辑器组件通过 defineExpose 暴露的接口。 */
+/**
+ * 每个编辑器组件通过 defineExpose 暴露的接口。
+ *
+ * 组件里必须 `const { model, api } = useEditor(...)` 之后 `defineExpose(api)`：
+ * `<script setup>` 默认是封闭的，不 expose 的话 EditorHost 拿不到 getContent，
+ * 「保存」会静默失效（表单编辑器全都踩过这个坑）。EditorHost 现在会在取不到
+ * 内容时报错，但还是别忘了 expose。
+ */
 export interface EditorApi {
   isDirty(): boolean
   getContent(): EditorContent | null
   reset(): void
+  /** 可选：外部整体写入内容（「插入模板」这类按钮用）。 */
+  setContent?(text: string): void
 }
 
 export interface EditorProps {

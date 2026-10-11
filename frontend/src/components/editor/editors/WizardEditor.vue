@@ -151,7 +151,7 @@ function emptyItem(type = 'text'): WizardItem {
   }
 }
 
-const { model } = useEditor<Model>(
+const { model, api } = useEditor<Model>(
   props,
   emit,
   (text) => {
@@ -227,4 +227,6 @@ function addStep() {
 function addItem(step: WizardStep) {
   step.items.push(emptyItem())
 }
+
+defineExpose(api)
 </script>

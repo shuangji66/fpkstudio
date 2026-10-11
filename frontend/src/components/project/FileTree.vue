@@ -1,22 +1,27 @@
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex shrink-0 items-center gap-0.5 border-b border-slate-200 px-1.5 py-1">
-      <span class="mr-1 text-xs font-medium text-slate-600">{{ t('tree.title') }}</span>
-      <span class="flex-1" />
+    <!-- 工具栏：按钮紧凑排布，窄侧边栏（最小 180px）也放得下；再窄就换行 -->
+    <div class="flex shrink-0 flex-wrap items-center gap-0 border-b border-slate-200 px-1 py-0.5">
       <el-tooltip :content="t('tree.newFile')" placement="bottom">
-        <el-button text size="small" :icon="DocumentAdd" @click="startCreate(false)" />
+        <el-button text size="small" class="tree-tool" :icon="DocumentAdd" @click="startCreate(false)" />
       </el-tooltip>
       <el-tooltip :content="t('tree.newDir')" placement="bottom">
-        <el-button text size="small" :icon="FolderAdd" @click="startCreate(true)" />
+        <el-button text size="small" class="tree-tool" :icon="FolderAdd" @click="startCreate(true)" />
       </el-tooltip>
       <el-tooltip :content="t('tree.upload')" placement="bottom">
-        <el-button text size="small" :icon="UploadFilled" @click="pickFiles" />
+        <el-button text size="small" class="tree-tool" :icon="UploadFilled" @click="pickFiles" />
       </el-tooltip>
       <el-tooltip :content="t('common.refresh')" placement="bottom">
-        <el-button text size="small" :icon="Refresh" @click="refreshAll" />
+        <el-button text size="small" class="tree-tool" :icon="Refresh" @click="refreshAll" />
       </el-tooltip>
-      <el-tooltip :content="t('tree.collapseAll')" placement="bottom">
-        <el-button text size="small" :icon="Fold" @click="collapseAll" />
+      <el-tooltip :content="allCollapsed ? t('tree.expandAll') : t('tree.collapseAll')" placement="bottom">
+        <el-button
+          text
+          size="small"
+          class="tree-tool"
+          :icon="allCollapsed ? Expand : Fold"
+          @click="allCollapsed ? expandAll() : collapseAll()"
+        />
       </el-tooltip>
     </div>
 
@@ -32,8 +37,14 @@
         {{ t('common.loading') }}
       </div>
 
-      <div v-else-if="!rows.length" class="px-3 py-4 text-center text-xs text-slate-400">
-        {{ t('tree.emptyDir') }}
+      <div v-else-if="!rows.length" class="px-3 py-4 text-center text-xs">
+        <template v-if="state.error">
+          <p class="text-left leading-relaxed break-all text-red-600">{{ state.error }}</p>
+          <el-button text size="small" class="mt-1" :icon="Refresh" @click="refreshAll">
+            {{ t('common.retry') }}
+          </el-button>
+        </template>
+        <span v-else class="text-slate-400">{{ t('tree.emptyDir') }}</span>
       </div>
 
       <template v-for="row in rows" :key="row.path">
@@ -74,6 +85,16 @@
               {{ humanSize(row.size) }}
             </span>
           </template>
+
+          <!-- 和右键菜单同一个入口：常驻但低调，省得靠猜（右键仍然可用） -->
+          <el-icon
+            class="shrink-0 rounded p-0.5 transition-colors hover:bg-slate-200 hover:text-slate-700"
+            :class="selected === row.path ? 'text-slate-500' : 'text-slate-300'"
+            :title="t('tree.more')"
+            @click.stop="openMenu(row.path, row.dir, $event)"
+          >
+            <MoreFilled />
+          </el-icon>
         </div>
 
         <div
@@ -117,10 +138,6 @@
       </div>
     </div>
 
-    <p class="shrink-0 border-t border-slate-200 px-2 py-1 text-[10px] leading-tight text-slate-400">
-      {{ t('tree.hint') }}
-    </p>
-
     <input ref="fileInput" type="file" multiple class="hidden" @change="onFiles" />
 
     <div
@@ -151,10 +168,12 @@ import {
   CaretRight,
   Document,
   DocumentAdd,
+  Expand,
   Folder,
   FolderAdd,
   FolderOpened,
   Fold,
+  MoreFilled,
   Refresh,
   UploadFilled,
 } from '@element-plus/icons-vue'
@@ -220,10 +239,19 @@ async function onClick(row: { path: string; dir: boolean }) {
   }
 }
 
+/** 可见的目录一个都没展开 → 工具栏按钮切成「全部展开」。 */
+const allCollapsed = computed(() =>
+  rows.value.every((row) => !row.dir || !state.value.expanded[row.path]),
+)
+
 async function collapseAll() {
   for (const key of Object.keys(state.value.expanded)) {
     if (key !== props.project) state.value.expanded[key] = false
   }
+}
+
+async function expandAll() {
+  await workspace.expandAll(props.project)
 }
 
 async function refreshAll() {

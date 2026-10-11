@@ -75,7 +75,7 @@ const props = defineProps<EditorProps>()
 const emit = defineEmits<{ dirty: [value: boolean] }>()
 const { t } = useI18n()
 
-const { model } = useEditor<Model>(
+const { model, api } = useEditor<Model>(
   props,
   emit,
   (text) => {
@@ -109,4 +109,6 @@ const { model } = useEditor<Model>(
     return stringifyOrdered(out)
   },
 )
+
+defineExpose(api)
 </script>

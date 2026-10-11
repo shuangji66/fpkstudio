@@ -17,8 +17,10 @@ export interface ManifestEntry {
   raw: string
   key: string
   value: string
-  /** `=` 两侧的空白风格，例如 `=` 或 ` = ` */
-  sep: string
+  /** `=` 左边原样保留的文本（含对齐用的空格）；新建的键是 `key + ' '`。 */
+  left: string
+  /** `=` 右边原样的空格，例如对齐模板里 `= value` 的那一个空格。 */
+  pre: string
 }
 
 function splitLines(text: string): string[] {
@@ -38,23 +40,26 @@ export class Manifest {
       const trimmed = line.trim()
 
       if (trimmed === '' || trimmed.startsWith('#')) {
-        m.push({ kind: 'raw', raw: line, key: '', value: '', sep: '' })
+        m.push({ kind: 'raw', raw: line, key: '', value: '', left: '', pre: '' })
         continue
       }
 
       const eq = trimmed.indexOf('=')
       if (eq <= 0) {
-        m.push({ kind: 'raw', raw: line, key: '', value: '', sep: '' })
+        m.push({ kind: 'raw', raw: line, key: '', value: '', left: '', pre: '' })
         continue
       }
 
       const left = trimmed.slice(0, eq)
       const right = trimmed.slice(eq + 1)
       const key = left.trim()
-      const sep = `${left === key ? '' : ' '}=${right === right.trimStart() ? '' : ' '}`
+      // 原样记住 "=" 两边的空白：fnpack 的模板是对齐过的，保存时不能压成
+      // `key = value`，否则「只改一个字段」会把整份文件重排（模块注释的承诺）。
+      const pad = left === key ? key : left
+      const pre = right.slice(0, right.length - right.trimStart().length) || ' '
 
       if (!key) {
-        m.push({ kind: 'raw', raw: line, key: '', value: '', sep: '' })
+        m.push({ kind: 'raw', raw: line, key: '', value: '', left: '', pre: '' })
         continue
       }
 
@@ -62,18 +67,16 @@ export class Manifest {
       if (right.trimStart().startsWith('"""')) {
         const stripped = right.trimStart().slice(3)
         if (stripped.endsWith('"""') && stripped.length >= 3) {
-          m.push({ kind: 'kv', raw: line, key, value: stripped.slice(0, -3), sep })
+          m.push({ kind: 'kv', raw: line, key, value: stripped.slice(0, -3), left: pad, pre })
           continue
         }
         const buffer = [stripped]
-        let closed = false
         while (i + 1 < lines.length) {
           i += 1
           const next = lines[i]!
           const at = next.indexOf('"""')
           if (at >= 0) {
             buffer.push(next.slice(0, at))
-            closed = true
             break
           }
           buffer.push(next)
@@ -82,14 +85,14 @@ export class Manifest {
           kind: 'kv',
           raw: line,
           key,
-          value: closed ? buffer.join('\n') : buffer.join('\n'),
-          sep,
+          value: buffer.join('\n'),
+          left: pad,
+          pre,
         })
         continue
       }
 
-      m.push({ kind: 'kv', raw: line, key, value: unquote(right.trim()), sep: sep || '=' })
-      if (!sep) m.entries[m.entries.length - 1]!.sep = '='
+      m.push({ kind: 'kv', raw: line, key, value: unquote(right.trim()), left: pad, pre })
     }
 
     return m
@@ -115,7 +118,6 @@ export class Manifest {
     if (at !== undefined) {
       const existing = this.entries[at]!
       existing.value = value
-      if (!existing.sep) existing.sep = '='
       return
     }
     // 新键插到末尾空行之前，保持文件结尾整洁
@@ -124,7 +126,8 @@ export class Manifest {
       this.entries[insertAt - 1]!.raw.trim() === '') {
       insertAt -= 1
     }
-    const entry: ManifestEntry = { kind: 'kv', raw: '', key, value, sep: '=' }
+    // 新键写成 `key = value`（与模板的写法一致）
+    const entry: ManifestEntry = { kind: 'kv', raw: '', key, value, left: `${key} `, pre: ' ' }
     this.entries.splice(insertAt, 0, entry)
     this.reindex()
   }
@@ -160,7 +163,7 @@ export class Manifest {
     return this.entries
       .map((entry) => {
         if (entry.kind === 'raw') return entry.raw
-        return `${entry.key}${entry.sep}${renderValue(entry.value)}`
+        return `${entry.left || entry.key}=${entry.pre}${renderValue(entry.value)}`
       })
       .join('\n')
   }

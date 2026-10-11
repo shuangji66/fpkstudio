@@ -1,5 +1,9 @@
 <template>
-  <div class="flex shrink-0 items-stretch gap-0.5 overflow-x-auto thin-scroll border-b border-slate-200 bg-slate-50 px-1">
+  <div
+    ref="scroller"
+    class="hscroll thin-scroll flex shrink-0 items-stretch gap-0.5 border-b border-slate-200 bg-slate-50 px-1"
+    @wheel="wheelToHorizontal"
+  >
     <button
       type="button"
       class="subtab"
@@ -37,10 +41,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import { useWorkspaceStore, PACK_TAB } from '@/stores/workspace'
+import { revealActive, wheelToHorizontal } from '@/utils/scroll'
 
 const props = defineProps<{ project: string }>()
 
@@ -48,6 +53,16 @@ const { t } = useI18n()
 const workspace = useWorkspaceStore()
 
 const state = computed(() => workspace.state(props.project))
+const scroller = ref<HTMLElement | null>(null)
+
+// 打开/切换文件时把它滚进可视区，省得手动找
+watch(
+  () => state.value.activeTab,
+  async () => {
+    await nextTick()
+    revealActive(scroller.value, '.subtab-active')
+  },
+)
 
 async function close(path: string) {
   const file = state.value.files.find((f) => f.path === path)

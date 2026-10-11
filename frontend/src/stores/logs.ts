@@ -16,8 +16,8 @@ export const useLogsStore = defineStore('logs', () => {
   const connected = ref(false)
   const sourceFilter = ref<string>('')
   const textFilter = ref('')
-  /** 底部构建输出面板是否展开。 */
-  const panelOpen = ref(false)
+  /** 日志 / 构建输出弹窗是否打开。 */
+  const dialogOpen = ref(false)
 
   let stream: EventSource | null = null
   let lastSeq = 0
@@ -83,23 +83,13 @@ export const useLogsStore = defineStore('logs', () => {
     return list
   })
 
-  const buildOutput = computed(() =>
-    entries.value.filter((e) => e.source === 'build' || e.source === 'fnpack'),
-  )
-
-  const errorCount = computed(
-    () => entries.value.filter((e) => e.level === 'error' && e.seq > lastSeq - 500).length,
-  )
-
   return {
     entries,
     connected,
     sourceFilter,
     textFilter,
-    panelOpen,
+    dialogOpen,
     visible,
-    buildOutput,
-    errorCount,
     connect,
     disconnect,
     clear,

@@ -15,13 +15,14 @@ export default {
     search: '搜索',
     copied: '已复制',
     ok: '已完成',
+    retry: '重试',
   },
   app: {
     name: 'fpkstudio',
     tagline: '飞牛 fpk 打包工作台',
   },
   tab: {
-    home: '项目管理器',
+    home: '项目',
     close: '关闭标签',
     closeOthers: '关闭其他标签',
     closeDirty: '「{name}」还有未保存的改动，确定关闭吗？',
@@ -29,6 +30,7 @@ export default {
   },
   home: {
     subtitle: '共 {count} 个项目',
+    modifiedAt: '修改时间',
     searchPlaceholder: '搜索项目名 / 应用名',
     newProject: '新建项目',
     importFpk: '导入 fpk',
@@ -43,7 +45,7 @@ export default {
     create: {
       title: '新建项目',
       name: '项目名',
-      namePlaceholder: '例如 myapp，只能包含字母数字和 - _',
+      namePlaceholder: '例如 myapp，3–32 位，只能包含字母数字和 - _ .',
       nameRequired: '请填写项目名',
       kind: '项目类型',
       docker: 'Docker 应用',
@@ -65,8 +67,7 @@ export default {
   },
   project: {
     kindDocker: 'Docker',
-    kindNativeUI: '原生 + 入口',
-    kindNative: '原生',
+    kindNoEntry: '无入口',
     reload: '重新载入',
     deletedTip: '项目已被删除',
     notFound: '项目不存在',
@@ -87,16 +88,19 @@ export default {
     uploadDone: '已上传 {count} 个文件',
     uploading: '正在上传…',
     hint: '右键节点可以新建 / 重命名 / 复制 / 删除',
+    more: '更多操作',
   },
   editor: {
     form: '表单',
     source: '源码',
     save: '保存',
     saving: '保存中…',
+    notReady: '编辑器没有就绪，无法保存',
     revert: '还原',
     saved: '已保存 {path}',
     unsaved: '未保存',
     binary: '这是二进制文件，无法以文本方式编辑。可以下载后本地查看。',
+    imageFailed: '图片加载失败',
     readFailed: '读取失败',
     noFile: '从左侧选择一个文件开始编辑',
     noFileHint: '已识别为 fpk 配置文件的会提供表单化编辑；其余文件用源码编辑器打开。',
@@ -124,11 +128,12 @@ export default {
     outputDir: '输出目录',
     scopeProject: '项目内',
     scopeOutput: '输出目录',
-    failedTip: '打包失败，详情见构建输出',
+    failedTip: '打包失败，详情见日志',
     selectPlatform: '请至少选择一个架构',
   },
   log: {
-    title: '构建输出',
+    title: '日志',
+    dialogTitle: '构建日志',
     clear: '清空',
     connected: '实时',
     disconnected: '已断开',
@@ -176,6 +181,7 @@ export default {
     checkport: '启动前检查端口',
     disable_authorization_path: '隐藏授权目录设置',
     changelog: '更新说明',
+    micro_app: '调用飞牛API',
     fnpackup: '静态托管目录（本项目不使用）',
   },
   fieldsHelp: {
@@ -217,11 +223,36 @@ export default {
     add: '添加',
     empty: '未声明任何资源',
     hint: '只声明应用真正需要的能力，多余的声明会扩大权限面。',
+    apiScope: '飞牛 API 调用列表',
+    apiScopeHint: '勾选应用需要调用的飞牛 API，写入 config/resource 的 api-scope。',
+    api: {
+      sharedAccess: {
+        title: '应用共享授权管理',
+        desc: '让管理员为应用授权目录，并查询或删除这些授权目录',
+      },
+      userAccess: {
+        title: '用户授权管理',
+        desc: '让当前用户选择并授权自己的目录或文件，并查询或删除授权结果',
+      },
+      userAcl: {
+        title: '文件权限检查',
+        desc: '检查某个用户对指定路径是否可读、可写或可删除',
+      },
+      path: {
+        title: '路径转换',
+        desc: '把 /vol1/... 这类内部路径转换成适合展示给用户看的路径',
+      },
+      platformConfig: {
+        title: '平台配置读取',
+        desc: '在后端读取系统语言和系统版本',
+      },
+    },
   },
   uiConfig: {
     entries: '入口',
     addEntry: '新增入口',
     entryId: '入口 ID',
+    entryIdExists: '入口 ID 已存在',
     title: '标题',
     icon: '图标',
     type: '打开方式',
@@ -270,7 +301,6 @@ export default {
     },
   },
   cmdEditor: {
-    hint: '生命周期脚本由 fnOS 调用，$1 为 start / stop / status。',
     template: '插入模板',
   },
 }

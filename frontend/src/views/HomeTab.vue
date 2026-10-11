@@ -2,12 +2,9 @@
   <div class="flex h-full min-h-0 flex-col">
     <div class="flex-1 overflow-y-auto thin-scroll p-4">
       <div class="mb-3 flex flex-wrap items-center gap-3">
-        <div>
-          <h1 class="text-lg font-semibold text-slate-800">{{ t('tab.home') }}</h1>
-          <p class="mt-0.5 text-xs text-slate-500">
-            {{ t('home.subtitle', { count: projects.count }) }}
-          </p>
-        </div>
+        <p class="text-xs text-slate-500">
+          {{ t('home.subtitle', { count: projects.count }) }}
+        </p>
 
         <span class="flex-1" />
 
@@ -49,24 +46,12 @@
       <ImportFpkForm v-else-if="panel === 'import'" class="mb-3" @done="onImported" @cancel="panel = ''" />
 
       <ProjectGrid @open="openProject" @deleted="onDeleted" />
-
-      <details class="panel mt-4 px-3 py-2">
-        <summary class="cursor-pointer select-none text-xs font-medium text-slate-600">
-          {{ t('system.title') }}
-        </summary>
-        <div class="mt-2 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-xs">
-          <template v-for="row in infoRows" :key="row.label">
-            <div class="text-slate-500">{{ row.label }}</div>
-            <div class="mono break-all text-slate-700">{{ row.value }}</div>
-          </template>
-        </div>
-      </details>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
@@ -74,40 +59,24 @@ import CreateProjectForm from '@/components/home/CreateProjectForm.vue'
 import ImportFpkForm from '@/components/home/ImportFpkForm.vue'
 import ProjectGrid from '@/components/home/ProjectGrid.vue'
 import { useProjectsStore } from '@/stores/projects'
-import { useSystemStore } from '@/stores/system'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { projectLabel } from '@/utils/format'
 import type { ProjectInfo } from '@/api/types'
 
 const { t } = useI18n()
 const projects = useProjectsStore()
-const system = useSystemStore()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
 
 const panel = ref<'create' | 'import' | ''>('')
-
-const infoRows = computed(() => {
-  const info = system.info
-  if (!info) return []
-  return [
-    { label: t('system.version'), value: `fpkstudio ${info.version}` },
-    { label: t('system.fnpack'), value: `${info.fnpack.bin} ${info.fnpack.version || ''}`.trim() },
-    { label: t('system.dataDir'), value: info.dataDir },
-    { label: t('system.projectsDir'), value: info.projectsDir },
-    { label: t('system.outputDir'), value: info.outputDir },
-    { label: t('system.socket'), value: info.socket },
-    { label: t('system.logFile'), value: info.logFile },
-    { label: t('system.pid'), value: String(info.pid) },
-  ]
-})
 
 function toggle(next: 'create' | 'import') {
   panel.value = panel.value === next ? '' : next
 }
 
 function openProject(info: ProjectInfo) {
-  tabs.openProject(info.name, info.displayName || info.name)
+  tabs.openProject(info.name, projectLabel(info))
   void workspace.ensure(info.name)
 }
 

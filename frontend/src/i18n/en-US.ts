@@ -15,6 +15,7 @@ export default {
     search: 'Search',
     copied: 'Copied',
     ok: 'Done',
+    retry: 'Retry',
   },
   app: {
     name: 'fpkstudio',
@@ -29,6 +30,7 @@ export default {
   },
   home: {
     subtitle: '{count} project(s)',
+    modifiedAt: 'Modified',
     searchPlaceholder: 'Search by folder or app name',
     newProject: 'New project',
     importFpk: 'Import fpk',
@@ -44,7 +46,7 @@ export default {
     create: {
       title: 'New project',
       name: 'Folder name',
-      namePlaceholder: 'e.g. myapp — letters, digits, - and _ only',
+      namePlaceholder: 'e.g. myapp — 3–32 chars, letters, digits, - _ . only',
       nameRequired: 'Folder name is required',
       kind: 'Project type',
       docker: 'Docker app',
@@ -66,8 +68,7 @@ export default {
   },
   project: {
     kindDocker: 'Docker',
-    kindNativeUI: 'Native + entry',
-    kindNative: 'Native',
+    kindNoEntry: 'No entry',
     reload: 'Reload',
     deletedTip: 'Project was deleted',
     notFound: 'Project not found',
@@ -88,16 +89,19 @@ export default {
     uploadDone: 'Uploaded {count} file(s)',
     uploading: 'Uploading…',
     hint: 'Right-click a node to create / rename / copy / delete',
+    more: 'More actions',
   },
   editor: {
     form: 'Form',
     source: 'Source',
     save: 'Save',
     saving: 'Saving…',
+    notReady: 'Editor is not ready — cannot save',
     revert: 'Revert',
     saved: 'Saved {path}',
     unsaved: 'Unsaved',
     binary: 'Binary file — cannot be edited as text. Download it instead.',
+    imageFailed: 'Failed to load image',
     readFailed: 'Failed to read',
     noFile: 'Pick a file on the left to start editing',
     noFileHint:
@@ -126,11 +130,12 @@ export default {
     outputDir: 'Output dir',
     scopeProject: 'In project',
     scopeOutput: 'Output dir',
-    failedTip: 'Packing failed — see build output',
+    failedTip: 'Packing failed — see the logs',
     selectPlatform: 'Select at least one architecture',
   },
   log: {
-    title: 'Build output',
+    title: 'Logs',
+    dialogTitle: 'Build log',
     clear: 'Clear',
     connected: 'Live',
     disconnected: 'Disconnected',
@@ -178,6 +183,7 @@ export default {
     checkport: 'Check port on start',
     disable_authorization_path: 'Hide folder authorization',
     changelog: 'Changelog',
+    micro_app: 'Call fnOS APIs',
     fnpackup: 'Static hosting dir (unused here)',
   },
   fieldsHelp: {
@@ -219,11 +225,36 @@ export default {
     add: 'Add',
     empty: 'No resource declared',
     hint: 'Declare only what the app really needs — every extra entry widens the attack surface.',
+    apiScope: 'fnOS API calls',
+    apiScopeHint: 'Selects the fnOS APIs this app may call; written to api-scope in config/resource.',
+    api: {
+      sharedAccess: {
+        title: 'App shared-access management',
+        desc: 'Lets an admin authorize directories for the app, and list or revoke those grants',
+      },
+      userAccess: {
+        title: 'User access management',
+        desc: 'Lets the current user pick and authorize their own folders or files, and list or revoke the result',
+      },
+      userAcl: {
+        title: 'File permission check',
+        desc: 'Checks whether a user can read, write or delete a given path',
+      },
+      path: {
+        title: 'Path conversion',
+        desc: 'Converts internal paths like /vol1/... into something fit to show a user',
+      },
+      platformConfig: {
+        title: 'Platform config read',
+        desc: 'Reads the system language and version on the backend',
+      },
+    },
   },
   uiConfig: {
     entries: 'Entries',
     addEntry: 'Add entry',
     entryId: 'Entry id',
+    entryIdExists: 'Entry id already exists',
     title: 'Title',
     icon: 'Icon',
     type: 'Open as',
@@ -273,7 +304,6 @@ export default {
     },
   },
   cmdEditor: {
-    hint: 'Lifecycle scripts are invoked by fnOS with $1 = start / stop / status.',
     template: 'Insert template',
   },
 }

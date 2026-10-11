@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ErrNotExist 表示目标不存在。
@@ -489,6 +490,35 @@ func (x *Root) ZipDir(rel string, w io.Writer) error {
 		_, err = io.Copy(fw, f)
 		return err
 	})
+}
+
+// ErrWalkStop 用于在遍历回调里提前结束（不算失败）。
+var ErrWalkStop = errors.New("停止遍历")
+
+// LatestModTime 返回 base 子树里最新的 mtime（含 base 自身），最多看 limit 个条目。
+//
+// 用途：目录自身的 mtime 只在增删条目时变，改文件内容不会动它。项目列表要显示
+// 「最后修改时间」，就得看整棵树。limit <= 0 表示不限制；超出 limit 时返回目前
+// 找到的最新时间（宁可少看几个，也不要为了一个时间把大项目扫一遍）。
+func (x *Root) LatestModTime(base string, limit int) (time.Time, error) {
+	var (
+		newest time.Time
+		seen   int
+	)
+	err := x.walk(base, func(_ string, fi os.FileInfo) error {
+		seen++
+		if fi.ModTime().After(newest) {
+			newest = fi.ModTime()
+		}
+		if limit > 0 && seen >= limit {
+			return ErrWalkStop
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, ErrWalkStop) {
+		return newest, err
+	}
+	return newest, nil
 }
 
 // Walk 深度优先遍历，回调收到相对路径、是否目录、以及基础名。
