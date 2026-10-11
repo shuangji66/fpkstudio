@@ -1,4 +1,4 @@
-import { ref, watch, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 
 export interface EditorContent {
   path: string
@@ -34,7 +34,12 @@ export interface EditorProps {
   path: string
   /** 用于初始解析 / 加载的文本。表单与源码视图互相切换时，这里放的是切换前的实时内容。 */
   origin: string
-  /** 磁盘上的内容，作为「未改动」基线。缺省等于 origin。 */
+  /**
+   * 磁盘上的内容。缺省等于 origin。
+   *
+   * 「未改动」是相对它算的，但比的是**它走一遍解析 + 回写之后的结果**（见 useEditor
+   * 里的 baseline），不是逐字节相等。
+   */
   original?: string
   /** 所属项目名，供编辑器做上下文相关的校验提示。 */
   project?: string
@@ -56,10 +61,24 @@ export function useEditor<M>(
   const model = ref(load(props.origin)) as Ref<M>
 
   const serialize = (): string => dump(model.value)
-  const baseline = (): string => props.original ?? props.origin
+
+  /**
+   * 「未改动」的基线：**磁盘上那份文本走一遍同样的解析 + 回写**，而不是原文本身。
+   *
+   * 回写本来就会把格式归一（JSON 的缩进与键序、manifest 补默认键），所以拿原文当
+   * 基线的话，一份**没编辑过**的脚手架文件（fnpack 生成的 `config/privilege` 是
+   * 4 空格缩进、结尾不带换行）在挂载那一刻就算「脏」。表单视图看不出来——这个 watch
+   * 不是 immediate，而 EditorHost 挂载时不问 isDirty；但源码视图的判据是「文本 ≠
+   * 磁盘原文」，一按「源码」就凭空显示「未保存」。
+   *
+   * 基线走同一条归一，脏标记才真的等于「模型被改过」：没编辑过是干净的，改了再改
+   * 回来也会自己变干净。基线是磁盘内容的纯函数，所以保存 / 还原换了 origin 之后
+   * 会跟着重算。
+   */
+  const baseline = computed(() => dump(load(props.original ?? props.origin)))
 
   watch(serialize, (value) => {
-    emit('dirty', value !== baseline())
+    emit('dirty', value !== baseline.value)
   })
 
   // 外部内容变化（例如「还原」后重新读取）时重新解析。
@@ -72,7 +91,7 @@ export function useEditor<M>(
   )
 
   const api: EditorApi = {
-    isDirty: () => serialize() !== baseline(),
+    isDirty: () => serialize() !== baseline.value,
     getContent: () => ({ path: props.path, content: serialize() }),
     reset: () => {
       model.value = load(props.origin)

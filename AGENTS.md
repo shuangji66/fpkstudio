@@ -21,8 +21,9 @@ make clean               # 删二进制与 embed
 
 cd frontend
 npm run typecheck        # vue-tsc，类型检查（改了 .vue / .ts 必跑）
-npm run check            # 六个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
-                         #   （含 manifest 回写）+ 语义路径 + 文件管理器 store（重命名 / 保存）
+npm run check            # 七个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
+                         #   （含 manifest 回写）+ 编辑器脏判据 + 语义路径 + 文件管理器 store
+                         #   （重命名 / 保存）
 npm run build            # vite 构建到 frontend/dist
 ```
 
@@ -187,6 +188,13 @@ frontend/src/
   另一套宿主）。编辑器里没保存的内容靠 `FileTab.draft` 在 `EditorHost.onBeforeUnmount`
   里接力；**新增编辑器组件时，`getContent()` 要能拿到当前文本**，否则这份接力会断，
   表现是「切一下布局，改到一半的内容没了，但脏标记还亮着」。
+- **脏标记的两套判据要对齐**：表单编辑器说「脏」是「模型被改过」（`useEditor` 的基线 =
+  磁盘那份走一遍解析 + 回写，**不是磁盘原文**），源码视图说「脏」是「文本 ≠ 磁盘原文」。
+  把基线写回 `props.original` 原文、或者切视图时把表单的回写结果当源码视图的初值，
+  表现都是「一份没编辑过的脚手架文件（fnpack 的 `config/privilege` 是 4 空格缩进、
+  结尾不带换行）一按『源码』就显示未保存、保存按钮跟着亮」。切视图那条在
+  `EditorHost.vue` 的 `watch(mode)`：表单干净就交 `tab.origin`。`check:editor` 盯着
+  前一半，后一半只能按「怎么真跑起来」手点。
 - **`style.css` 的层序会吃掉你的规则**：`@layer theme, base, element, components, utilities`
   是级联层，**层序比选择器权重更硬**——写在 `components` 层里的规则永远压不过元素上
   直接写的 Tailwind 工具类（`.grid` / `.text-right` 都在 `utilities` 层），表现是

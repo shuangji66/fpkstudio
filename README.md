@@ -411,6 +411,12 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
   那个文件在 fnOS 里直接失效。认格式的只有这几类：manifest（有不是 `key = value`
   的行）、几份 JSON 配置（privilege / resource / app/ui/config / i18n 文案）和向导；
   **生命周期脚本（cmd/*）和普通文本不校验**——脚本语法不该由这里说了算。
+- **「未保存」判的是模型有没有被改过，不是文本和磁盘逐字节相等**：表单类编辑器的回写
+  本来就会归一格式（JSON 的缩进与键序、manifest 补默认键），所以 `useEditor` 的基线取
+  「磁盘上那份走一遍解析 + 回写」的结果——否则一份没编辑过的脚手架文件（fnpack 生成的
+  `config/privilege` 是 4 空格缩进、结尾不带换行）一打开就算脏。切视图同理：表单不脏时
+  交给源码视图的是**磁盘原文**，脏的时候才交回写结果，这样「切一下视图」本身不会凭空
+  冒出未保存标记，两个视图的脏标记也才对得上（规则钉在 `scripts/check-editor.mjs`）。
 - **编辑器按路径注册**：`src/components/editor/registry.ts` 把「路径正则 → 组件」
   集中管理，加一种文件类型只需要加一个组件和一行注册。已知的 fpk 配置
   （manifest / privilege / resource / app/ui/config / wizard / cmd）都有表单化编辑器，

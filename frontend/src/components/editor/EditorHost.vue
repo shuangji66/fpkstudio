@@ -209,12 +209,22 @@ onBeforeUnmount(() => {
 })
 
 watch(mode, async (next, previous) => {
+  const editor = inner.value
   if (previous === 'form' && next === 'source') {
-    // 表单 → 源码：把序列化结果带过去，避免用户刚才的编辑消失
-    handoff.value = inner.value?.getContent?.()?.content ?? tab.value?.origin ?? ''
+    // 表单 → 源码：把序列化结果带过去，避免用户刚才的编辑消失。
+    //
+    // **表单不脏时带磁盘原文**：表单的回写会把格式归一（JSON 的缩进与键序、manifest
+    // 补默认键），而源码视图的脏判据是「文本 ≠ 磁盘原文」——把归一结果当初值，一份
+    // 没编辑过的脚手架文件（`config/privilege` 是 4 空格缩进）一按「源码」就显示
+    // 「未保存」，保存按钮也跟着亮起来。干净的时候两边看到的是同一份文本，才谈得上
+    // 「切视图不算改动」。
+    const dirty = editor?.isDirty?.() ?? false
+    handoff.value = dirty
+      ? (editor?.getContent?.()?.content ?? tab.value?.origin ?? '')
+      : (tab.value?.origin ?? '')
   } else if (previous === 'source' && next === 'form') {
     // 源码 → 表单：把源码内容作为解析输入
-    handoff.value = inner.value?.getText?.() ?? tab.value?.origin ?? ''
+    handoff.value = editor?.getText?.() ?? tab.value?.origin ?? ''
   }
   await nextTick()
   onDirty(inner.value?.isDirty?.() ?? false)
