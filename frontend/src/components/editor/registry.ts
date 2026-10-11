@@ -1,0 +1,39 @@
+import type { Component } from 'vue'
+import ManifestEditor from './editors/ManifestEditor.vue'
+import PrivilegeEditor from './editors/PrivilegeEditor.vue'
+import ResourceEditor from './editors/ResourceEditor.vue'
+import UiConfigEditor from './editors/UiConfigEditor.vue'
+import WizardEditor from './editors/WizardEditor.vue'
+import CmdEditor from './editors/CmdEditor.vue'
+import SourceEditor from './editors/SourceEditor.vue'
+
+export interface EditorDef {
+  name: string
+  /** 匹配相对于项目根的路径。 */
+  match: RegExp
+  component: Component
+  /** 是否同时提供源码视图（表单编辑器为真）。 */
+  hasForm: boolean
+}
+
+/**
+ * 编辑器注册表。
+ *
+ * 与 fnpackup 的做法一致：按路径挑编辑器；区别是匹配规则集中在这里，
+ * 组件本身不再持有 match 与弹窗尺寸这类耦合 DOM 的信息。
+ * 顺序有意义——先匹配到的先赢，兜底放最后。
+ */
+export const editors: EditorDef[] = [
+  { name: 'manifest', match: /^manifest$/, component: ManifestEditor, hasForm: true },
+  { name: 'privilege', match: /^config\/privilege$/, component: PrivilegeEditor, hasForm: true },
+  { name: 'resource', match: /^config\/resource$/, component: ResourceEditor, hasForm: true },
+  { name: 'ui-config', match: /^app\/[^/]+\/config$/, component: UiConfigEditor, hasForm: true },
+  { name: 'wizard', match: /^wizard\//, component: WizardEditor, hasForm: true },
+  { name: 'cmd', match: /^cmd\//, component: CmdEditor, hasForm: false },
+  { name: 'source', match: /.*/, component: SourceEditor, hasForm: false },
+]
+
+export function resolveEditor(path: string): EditorDef {
+  const normalized = path.replace(/^\.?\//, '')
+  return editors.find((def) => def.match.test(normalized)) ?? editors[editors.length - 1]!
+}

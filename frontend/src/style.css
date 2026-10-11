@@ -1,0 +1,117 @@
+/*
+ * 样式分层。
+ *
+ * Element Plus 的样式放进 element 层，Tailwind 的 utilities 放在它之后，
+ * 这样在 Element Plus 组件上直接写 Tailwind 工具类也能生效；
+ * 同时 preflight（base 层）不会去覆盖 Element Plus 自身的重置。
+ * 顺序不能改：层声明的先后就是优先级的先后。
+ */
+@layer theme, base, element, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/preflight.css' layer(base);
+@import 'element-plus/dist/index.css' layer(element);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme {
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* 细滚动条，标签页多的时候视觉噪声小一些 */
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+  }
+
+  .thin-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .thin-scroll::-webkit-scrollbar-thumb {
+    background: rgb(148 163 184 / 0.45);
+    border-radius: 4px;
+  }
+
+  .thin-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgb(100 116 139 / 0.6);
+  }
+
+  .thin-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* 主标签：底部用一条内嵌阴影表示选中，比整块变色更安静 */
+  .tab-chip {
+    @apply relative flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-sm transition-colors;
+  }
+
+  .tab-chip-active {
+    @apply border-slate-300 bg-white font-medium text-sky-700;
+  }
+
+  .tab-chip-idle {
+    @apply border-transparent bg-transparent text-slate-500 hover:bg-white/60 hover:text-slate-700;
+  }
+
+  /* 文件子标签同构但更小 */
+  .subtab {
+    @apply relative flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-1.5 text-[13px] transition-colors;
+  }
+
+  .subtab-active {
+    @apply border-sky-500 bg-white text-sky-700;
+  }
+
+  .subtab-idle {
+    @apply border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-700;
+  }
+
+  .panel {
+    @apply rounded-lg border border-slate-200 bg-white;
+  }
+
+  .label-text {
+    @apply text-xs font-medium text-slate-500;
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* CodeMirror 与 xterm 的容器需要明确高度，否则折叠成 0 */
+.cm-host .v-codemirror,
+.cm-host .cm-editor {
+  height: 100%;
+}
+
+.cm-host .cm-editor {
+  border: 0;
+}
+
+.cm-host .cm-scroller {
+  font-family: var(--font-mono) !important;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.term-host .xterm {
+  height: 100%;
+  padding: 6px 8px;
+}

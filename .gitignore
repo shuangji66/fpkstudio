@@ -1,0 +1,19 @@
+# 构建产物
+/fpkstudio
+
+# Frontend build artifacts / node_modules
+/frontend/dist/
+/frontend/node_modules/
+
+# 构建期临时目录（//go:embed 的输入，编译后即删）
+/backend/embed/
+
+# 本地 Go 缓存与构建临时目录（Makefile 默认放这里）
+/.gocache/
+/.gopath/
+/.tmp/
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store

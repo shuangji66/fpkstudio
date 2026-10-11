@@ -1,0 +1,170 @@
+// Package config 负责 fpkstudio 的全部运行时配置。
+//
+// 设计原则：所有可变路径都由环境变量统一提供，程序自身不假设任何部署形态。
+// 数据目录（projects / logs / run / tmp / state.json）与打包输出目录分开配置，
+// 日志、PID、socket、临时文件全部落在数据目录下。
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// 环境变量名。所有变量都以 FPKSTUDIO_ 为前缀。
+const (
+	EnvDataDir   = "FPKSTUDIO_DATA_DIR"
+	EnvOutputDir = "FPKSTUDIO_OUTPUT_DIR"
+	EnvSocket    = "FPKSTUDIO_SOCKET"
+	EnvBaseURL   = "FPKSTUDIO_BASE_URL"
+	EnvFnpack    = "FPKSTUDIO_FNPACK"
+	EnvLogLevel  = "FPKSTUDIO_LOG_LEVEL"
+	EnvRingSize  = "FPKSTUDIO_LOG_RING"
+)
+
+// unix socket 的 sun_path 上限（Linux）。留一点余量给结尾的 \0。
+const maxSocketPath = 100
+
+// Config 是解析完成的运行时配置。
+type Config struct {
+	Version string
+
+	// DataDir 是数据根目录，下面挂 ProjectsDir/LogDir/RunDir/TmpDir。
+	DataDir string
+	// OutputDir 是打包产物目录，允许在 DataDir 之外（例如挂到共享目录）。
+	OutputDir string
+
+	ProjectsDir string
+	LogDir      string
+	RunDir      string
+	TmpDir      string
+
+	SocketPath string
+	PIDFile    string
+	StateFile  string
+
+	// BaseURL 形如 "/" 或 "/app/fpkstudio"，永远不会以 "/" 结尾（根除外）。
+	BaseURL string
+
+	// FnpackBin 是 fnpack 可执行文件的路径或名字。
+	FnpackBin string
+	LogLevel  string
+	LogRing   int
+}
+
+func env(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
+}
+
+// NormalizeBaseURL 把任意用户输入规整成 "/" 或 "/a/b" 的形式。
+func NormalizeBaseURL(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "//", "/")
+	if s == "" || s == "/" {
+		return "/"
+	}
+	if !strings.HasPrefix(s, "/") {
+		s = "/" + s
+	}
+	s = strings.TrimRight(s, "/")
+	if s == "" {
+		return "/"
+	}
+	return s
+}
+
+// Load 读取环境变量、创建目录、写出 PID 文件之外的一切准备工作。
+func Load(version string) (*Config, error) {
+	dataDir, err := filepath.Abs(env(EnvDataDir, defaultDataDir()))
+	if err != nil {
+		return nil, fmt.Errorf("解析数据目录失败: %w", err)
+	}
+
+	c := &Config{
+		Version:   version,
+		DataDir:   filepath.Clean(dataDir),
+		OutputDir: cleanAbs(env(EnvOutputDir, filepath.Join(dataDir, "output"))),
+		BaseURL:   NormalizeBaseURL(env(EnvBaseURL, "/")),
+		FnpackBin: env(EnvFnpack, "fnpack"),
+		LogLevel:  strings.ToLower(env(EnvLogLevel, "info")),
+		LogRing:   atoiDefault(env(EnvRingSize, ""), 5000),
+	}
+
+	c.ProjectsDir = filepath.Join(c.DataDir, "projects")
+	c.LogDir = filepath.Join(c.DataDir, "logs")
+	c.RunDir = filepath.Join(c.DataDir, "run")
+	c.TmpDir = filepath.Join(c.DataDir, "tmp")
+	c.SocketPath = cleanAbs(env(EnvSocket, filepath.Join(c.RunDir, "fpkstudio.sock")))
+	c.PIDFile = filepath.Join(c.RunDir, "fpkstudio.pid")
+	c.StateFile = filepath.Join(c.DataDir, "state.json")
+
+	for _, d := range []string{c.DataDir, c.OutputDir, c.ProjectsDir, c.LogDir, c.RunDir, c.TmpDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return nil, fmt.Errorf("创建目录 %s 失败: %w", d, err)
+		}
+	}
+
+	if len(c.SocketPath) > maxSocketPath {
+		return nil, fmt.Errorf(
+			"unix socket 路径过长（%d 字节，上限 %d）：%s\n请用 %s 指定一个更短的路径，例如 /tmp/fpkstudio.sock",
+			len(c.SocketPath), maxSocketPath, c.SocketPath, EnvSocket)
+	}
+	return c, nil
+}
+
+// LogFile 返回主日志文件路径。
+func (c *Config) LogFile() string { return filepath.Join(c.LogDir, "fpkstudio.log") }
+
+// Env 返回用于注入子进程的环境变量，让 fnpack 把临时文件写在数据目录里。
+//
+// 这不是洁癖：fnpack 会在 TMPDIR 里复制整个项目再打包，如果 TMPDIR 跨挂载点
+// 或者落在受限目录（某些 NAS 系统上 /tmp 有 ACL 限制），fnpack 会在
+// "Copy pack ... to tmp dir" 这一步直接失败。
+func (c *Config) Env() []string {
+	env := os.Environ()
+	env = append(env,
+		"TMPDIR="+c.TmpDir,
+		"TMP="+c.TmpDir,
+		"TEMP="+c.TmpDir,
+	)
+	return env
+}
+
+func defaultDataDir() string {
+	if x := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); x != "" {
+		return filepath.Join(x, "fpkstudio")
+	}
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return filepath.Join(h, ".local", "share", "fpkstudio")
+	}
+	return "fpkstudio-data"
+}
+
+func cleanAbs(p string) string {
+	a, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return filepath.Clean(a)
+}
+
+func atoiDefault(s string, def int) int {
+	n := 0
+	if s == "" {
+		return def
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return def
+		}
+		n = n*10 + int(r-'0')
+	}
+	if n <= 0 {
+		return def
+	}
+	return n
+}
