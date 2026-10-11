@@ -47,6 +47,39 @@ export function humanSize(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`
 }
 
+/**
+ * 是不是能解的压缩包。
+ *
+ * 判据必须和后端 `fsx.ArchiveKindOf` 一致：菜单里给了「解压」入口、点下去却报
+ * 「不支持的格式」是最难解释的一类不一致。tar 家族按压缩算法各有后缀，单个文件
+ * 的 .gz/.bz2/.xz/.zst 也算，外加 zip。
+ */
+export function isArchive(name: string): boolean {
+  return /\.(?:tar\.gz|tgz|tar\.bz2|tbz2|tbz|tar\.xz|txz|tar\.zst|tzst|tar|gz|bz2|xz|zst|zip)$/i.test(
+    name,
+  )
+}
+
+/**
+ * 展示用的修改时间。
+ *
+ * 后端给的是 `2006-01-02 15:04:05` 这种固定格式，这里只把它压短一点给列表的
+ * 「修改时间」列用：今天的只留时分，今年内的省掉年份。解析不了就原样返回——
+ * 宁可显示长一点，也不要显示空白。
+ *
+ * `now` 只为可测：算「今天」得有个参照，默认取当前时间。
+ */
+export function formatTime(stamp: string, now: Date = new Date()): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/.exec(stamp)
+  if (!m) return stamp
+  const [, year, month, day, time] = m
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  if (`${year}-${month}-${day}` === today) return time ?? ''
+  if (year === String(now.getFullYear())) return `${month}-${day} ${time}`
+  return `${year}-${month}-${day}`
+}
+
 /** 判断某个路径是否命中编辑器的匹配规则。 */
 export function matchesPath(pattern: RegExp, path: string): boolean {
   return pattern.test(path.replace(/^\.?\//, ''))

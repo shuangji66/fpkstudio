@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -22,7 +23,8 @@ func (s *Server) handleFsList(w http.ResponseWriter, r *http.Request) error {
 	entries, err := root.List(rel)
 	if err != nil {
 		// 前端拿到失败只会把文件树画成空的，原因必须落在日志里，否则无从查起。
-		s.log.Warnf("列出目录 %s（%s）失败: %v", rel, root.Abs(rel), err)
+		// 「不存在」是例外：图标目录这类可选目录本来就可能没有，见 logFsMiss。
+		s.logFsMiss("列出目录", rel, root.Abs(rel), err)
 		return notFound("读取目录失败: %v", err)
 	}
 	return writeJSON(w, map[string]any{
@@ -30,6 +32,18 @@ func (s *Server) handleFsList(w http.ResponseWriter, r *http.Request) error {
 		"abs":     root.Abs(rel),
 		"entries": entries,
 	})
+}
+
+// logFsMiss 记录一次「读不到」，但**目标不存在时不记**。
+//
+// 目标不存在在这个应用里是正常状态：向导 / 生命周期脚本常常还没创建（打开它们本来
+// 就是「按空内容新建」的入口），图标目录也可能没有。这些都会走 404 返回给前端，
+// 前端按「未创建」正常处理，日志里再灌一条警告只会把真正的故障淹掉。
+func (s *Server) logFsMiss(action, rel, abs string, err error) {
+	if errors.Is(err, fsx.ErrNotExist) {
+		return
+	}
+	s.log.Warnf("%s %s（%s）失败: %v", action, rel, abs, err)
 }
 
 type readResponse struct {
@@ -48,7 +62,7 @@ func (s *Server) handleFsRead(w http.ResponseWriter, r *http.Request) error {
 	root := s.prj.Root()
 	data, err := root.ReadFile(rel)
 	if err != nil {
-		s.log.Warnf("读取文件 %s（%s）失败: %v", rel, root.Abs(rel), err)
+		s.logFsMiss("读取文件", rel, root.Abs(rel), err)
 		return notFound("读取文件失败: %v", err)
 	}
 
@@ -198,6 +212,30 @@ func (s *Server) handleFsUpload(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("没有收到文件")
 	}
 	return writeJSON(w, map[string]any{"ok": true, "files": written})
+}
+
+// handleFsExtract 把压缩包解压到它自己所在的目录。
+//
+// 只认 tar / tar.gz / tgz / gz，实际解压交给系统 tar / gzip（见 fsx.Extract）；
+// 同名文件一律跳过，不覆盖用户已有的内容，跳过的数量回给界面。
+func (s *Server) handleFsExtract(w http.ResponseWriter, r *http.Request) error {
+	var req pathReq
+	if err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		return badRequest("缺少 path")
+	}
+	res, err := s.prj.Root().Extract(req.Path)
+	if err != nil {
+		s.log.Warnf("解压 %s 失败: %v", req.Path, err)
+		return internal("解压失败: %v", err)
+	}
+	s.log.Infof(
+		"解压 %s 到 %s（%d 个文件，跳过 %d 个已存在）",
+		req.Path, res.Dir, res.Files, res.Skipped,
+	)
+	return writeJSON(w, res)
 }
 
 // handleFsDownload 下载单个文件，或者把目录打成 zip。

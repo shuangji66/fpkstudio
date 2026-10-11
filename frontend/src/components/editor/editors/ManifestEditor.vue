@@ -1,5 +1,8 @@
 <template>
-  <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3">
+  <div
+    class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3"
+    :class="{ 'form-stack': layout.isMobile }"
+  >
     <div class="mx-auto max-w-3xl">
       <div
         v-if="platformWarning"
@@ -12,9 +15,10 @@
       <div
         v-for="field in fields"
         :key="field.key"
-        class="grid grid-cols-[10rem_1fr] items-start gap-x-3 py-1.5"
+        class="form-row grid grid-cols-[10rem_1fr] items-start gap-x-3 py-1.5"
+        :class="field.type === 'switch' ? 'form-row-inline' : ''"
       >
-        <div class="flex items-center justify-end gap-1 pt-1">
+        <div class="form-label flex items-center justify-end gap-1 pt-1">
           <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t(`fields.${field.key}`) }}</span>
           <el-tooltip v-if="HAS_HELP.has(field.key)" placement="top" :show-after="300">
             <template #content>
@@ -83,6 +87,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { QuestionFilled, WarningFilled } from '@element-plus/icons-vue'
 import { Manifest } from '@/utils/manifest'
+import { useLayoutStore } from '@/stores/layout'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useEditor, type EditorProps } from '../useEditor'
 
@@ -103,6 +108,7 @@ const props = defineProps<EditorProps>()
 const emit = defineEmits<{ dirty: [value: boolean] }>()
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const layout = useLayoutStore()
 
 const HAS_HELP = new Set([
   'appname',
@@ -122,6 +128,14 @@ const BOOL_DEFAULT: Record<string, boolean> = {
   checkport: true,
   disable_authorization_path: false,
 }
+/**
+ * 「安装位置 = 存储位置」在界面上的哨兵值。
+ *
+ * 它在 manifest 里的真正写法是「不声明 install_type」，所以读写模型时都要和空字符串
+ * 互转（见下面的 load / dump）——绝不能让它漏进用户的 manifest。
+ */
+const INSTALL_STORAGE = '__storage__'
+
 /** 值为空时仍然保留的键（其余空值会被删掉，等于「不声明」）。 */
 const KEEP_WHEN_EMPTY = ['appname', 'version', 'display_name', 'platform', 'source', 'desktop_uidir']
 
@@ -154,9 +168,10 @@ const fields: FieldDef[] = [
     key: 'install_type',
     type: 'select',
     // 存储位置就是「留空」：清空的值会被 compact 从 manifest 里删掉，等于不声明这个键；
-    // 系统分区写入 install_type=root。
+    // 系统分区写入 install_type=root。这里用一个哨兵值而不是 ''——el-select 对空字符串
+    // 会显示占位符（看着像没选），哨兵值才真的把「存储位置」选中；读写模型时翻回去。
     options: [
-      { label: t('fields.installTypeStorage'), value: '' },
+      { label: t('fields.installTypeStorage'), value: INSTALL_STORAGE },
       { label: t('fields.installTypeRoot'), value: 'root' },
     ],
   },
@@ -193,7 +208,8 @@ const { model, api } = useEditor<Model>(
       } else if (field.type === 'list') {
         lists[field.key] = raw ? raw.split(':').filter(Boolean) : []
       } else {
-        form[field.key] = raw
+        // 没声明 install_type = 装到存储位置，界面上要显示成选中而不是空
+        form[field.key] = field.key === 'install_type' && !raw ? INSTALL_STORAGE : raw
       }
     }
     return { manifest, form, bools, lists }
@@ -211,7 +227,11 @@ const { model, api } = useEditor<Model>(
       } else if (field.type === 'list') {
         value.manifest.set(field.key, (value.lists[field.key] ?? []).join(':'))
       } else {
-        value.manifest.set(field.key, (value.form[field.key] ?? '').trim())
+        const raw = (value.form[field.key] ?? '').trim()
+        value.manifest.set(
+          field.key,
+          field.key === 'install_type' && raw === INSTALL_STORAGE ? '' : raw,
+        )
       }
     }
     value.manifest.compact(KEEP_WHEN_EMPTY)

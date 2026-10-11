@@ -11,7 +11,7 @@
     {{ t('home.noMatch') }}
   </div>
 
-  <!-- 平铺：卡片自适应列宽 -->
+  <!-- 网格：卡片自适应列宽 -->
   <div
     v-else-if="view === 'grid'"
     class="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3"

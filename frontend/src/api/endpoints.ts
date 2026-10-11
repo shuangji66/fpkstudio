@@ -2,6 +2,7 @@ import { apiURL } from '@/runtime'
 import { download, request, requestText, upload } from './client'
 import type {
   Artifact,
+  ExtractResult,
   FileContent,
   FsListing,
   LogEntry,
@@ -153,6 +154,15 @@ export const renameEntry = (path: string, to: string) =>
 
 export const copyEntry = (path: string, to: string) =>
   request<{ ok: boolean }>('/api/fs/copy', { json: { path, to } })
+
+/**
+ * 解压到压缩包自己所在的目录。
+ *
+ * 实际解压由后端调系统 tar / gzip 完成（见 `fsx.Extract`），同名文件一律跳过、
+ * 不覆盖已有内容，所以返回里的 `skipped` 要告诉用户。
+ */
+export const extractEntry = (path: string) =>
+  request<ExtractResult>('/api/fs/extract', { json: { path } })
 
 export const uploadFiles = (
   dir: string,

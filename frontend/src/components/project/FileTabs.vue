@@ -1,8 +1,8 @@
 <template>
   <div class="flex shrink-0 items-stretch border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
     <!--
-      三个固定子标签钉在最左边，不参与横向滚动：打开一堆文件之后滚轮只滚文件标签，
-      总览 / 快捷设置 / 图标始终在视野里。
+      固定子标签钉在最左边，不参与横向滚动：打开一堆文件之后滚轮只滚文件标签，
+      固定标签始终在视野里。
     -->
     <div class="flex shrink-0 items-stretch gap-0.5 pl-1">
       <button
@@ -19,11 +19,17 @@
           v-if="tab.id === OVERVIEW_TAB && state.packing"
           class="ml-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500"
         />
+        <!-- 移动端没有文件标签栏，开着的文件只藏在这个入口后面，得让它露个点 -->
+        <span
+          v-else-if="tab.id === FILES_TAB && hiddenDirty"
+          class="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
+          :title="t('editor.unsaved')"
+        />
       </button>
     </div>
 
     <!-- 固定标签与文件标签之间留一条分隔线，避免把两者看成一类 -->
-    <span v-if="state.files.length" class="mx-1 w-px shrink-0 self-stretch bg-slate-200 dark:bg-slate-800" />
+    <span v-if="files.length" class="mx-1 w-px shrink-0 self-stretch bg-slate-200 dark:bg-slate-800" />
 
     <div
       ref="scroller"
@@ -31,7 +37,7 @@
       @wheel="wheelToHorizontal"
     >
       <button
-        v-for="file in state.files"
+        v-for="file in files"
         :key="file.path"
         type="button"
         class="subtab group max-w-[16rem]"
@@ -57,11 +63,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessageBox } from 'element-plus'
-import { DocumentAdd, Operation, Picture, Odometer } from '@element-plus/icons-vue'
+import { DocumentAdd, FolderOpened, Operation, Picture, Odometer } from '@element-plus/icons-vue'
+import { useCloseFile } from './useCloseFile'
 import {
+  FILES_TAB,
   ICON_TAB,
   OVERVIEW_TAB,
   SHORTCUTS_TAB,
@@ -69,25 +76,43 @@ import {
 } from '@/stores/workspace'
 import { revealActive, wheelToHorizontal } from '@/utils/scroll'
 
-const props = defineProps<{ project: string }>()
+const props = defineProps<{
+  project: string
+  /** 移动端：只留固定标签，打开的文件走子页面（见 ProjectTab 的说明）。 */
+  mobile?: boolean
+}>()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const { closeFile } = useCloseFile()
 
 const state = computed(() => workspace.state(props.project))
 const scroller = ref<HTMLElement | null>(null)
 
+/** 移动端不渲染文件标签，那些开着的文件只能从这里看出来（从桌面切过去时会碰上）。 */
+const files = computed(() => (props.mobile ? [] : state.value.files))
+const hiddenDirty = computed(() => props.mobile && state.value.files.some((f) => f.dirty))
+
 /**
- * 固定的三个子标签：总览（原打包页）、快捷设置、图标。
+ * 固定的子标签：文件、总览（原打包页）、快捷设置、图标。
  *
  * 顺序固定、不可关闭，文件子标签永远排在它们后面。i18n 是响应式的，所以这里
  * 用 computed 而不是常量数组。
+ *
+ * 「文件」只在标签页模式（或移动端，那边固定就是这个形态）里出现：左栏文件树
+ * 模式下文件树就长在侧边栏里，再给一个同名标签是重复的。
  */
-const fixedTabs = computed(() => [
-  { id: OVERVIEW_TAB, label: t('overview.title'), icon: Odometer },
-  { id: SHORTCUTS_TAB, label: t('shortcuts.title'), icon: Operation },
-  { id: ICON_TAB, label: t('iconTab.title'), icon: Picture },
-])
+const fixedTabs = computed<{ id: string; label: string; icon: Component }[]>(() => {
+  const tabs: { id: string; label: string; icon: Component }[] = [
+    { id: OVERVIEW_TAB, label: t('overview.title'), icon: Odometer },
+    { id: SHORTCUTS_TAB, label: t('shortcuts.title'), icon: Operation },
+    { id: ICON_TAB, label: t('iconTab.title'), icon: Picture },
+  ]
+  if (props.mobile || state.value.viewMode === 'tabs') {
+    tabs.unshift({ id: FILES_TAB, label: t('files.title'), icon: FolderOpened })
+  }
+  return tabs
+})
 
 // 打开/切换文件时把它滚进可视区，省得手动找
 watch(
@@ -98,23 +123,5 @@ watch(
   },
 )
 
-async function close(path: string) {
-  const file = state.value.files.find((f) => f.path === path)
-  if (file?.dirty) {
-    try {
-      await ElMessageBox.confirm(
-        t('tab.closeDirty', { name: file.name }),
-        t('common.tip'),
-        {
-          type: 'warning',
-          confirmButtonText: t('common.confirm'),
-          cancelButtonText: t('common.cancel'),
-        },
-      )
-    } catch {
-      return
-    }
-  }
-  workspace.closeFile(props.project, path)
-}
+const close = (path: string) => void closeFile(props.project, path)
 </script>

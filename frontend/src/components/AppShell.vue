@@ -22,6 +22,7 @@
         v-show="tabs.activeId === tab.id"
         :key="tab.id"
         :name="tab.project"
+        :mobile="layout.isMobile"
       />
     </main>
 
@@ -40,6 +41,7 @@ import ProjectTab from '@/views/ProjectTab.vue'
 import TabBar from '@/components/TabBar.vue'
 import LogDialog from '@/components/LogDialog.vue'
 import { HOME_TAB_ID, useTabsStore } from '@/stores/tabs'
+import { useLayoutStore } from '@/stores/layout'
 import { useSystemStore } from '@/stores/system'
 import { useProjectsStore } from '@/stores/projects'
 import { useLogsStore } from '@/stores/logs'
@@ -49,6 +51,7 @@ import { projectLabel } from '@/utils/format'
 
 const { t } = useI18n()
 const tabs = useTabsStore()
+const layout = useLayoutStore()
 const system = useSystemStore()
 const projects = useProjectsStore()
 const logs = useLogsStore()
@@ -114,6 +117,8 @@ watch(
 onMounted(() => {
   void system.load()
   void projects.refresh()
+  // 窄屏判断要跟着窗口大小实时走，否则把窗口拉窄之后还得刷新页面才切过去。
+  layout.init()
   // 日志流跟着应用的生命周期走，而不是跟着日志弹窗：弹窗关闭时也要继续收，
   // 这样「已连接」指示灯和未读状态才是准的。
   logs.connect()

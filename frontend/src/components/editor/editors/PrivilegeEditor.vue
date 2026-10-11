@@ -1,30 +1,33 @@
 <template>
-  <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3">
+  <div
+    class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3"
+    :class="{ 'form-stack': layout.isMobile }"
+  >
     <div class="mx-auto max-w-2xl">
       <div v-if="model.error" class="mb-3 rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
         {{ t('editor.readFailed') }}: {{ model.error }}
       </div>
 
-      <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.runAs') }}</span>
+      <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
+        <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.runAs') }}</span>
         <el-select v-model="model.root.defaults['run-as']" size="small" class="w-64">
           <el-option :label="t('privilege.package')" value="package" />
           <el-option :label="t('privilege.root')" value="root" />
         </el-select>
       </div>
 
-      <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.username') }}</span>
+      <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
+        <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.username') }}</span>
         <el-input v-model="model.root.username" size="small" class="w-64" placeholder="（按 appname 生成）" />
       </div>
 
-      <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.groupname') }}</span>
+      <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
+        <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.groupname') }}</span>
         <el-input v-model="model.root.groupname" size="small" class="w-64" placeholder="（按 appname 生成）" />
       </div>
 
-      <div class="grid grid-cols-[10rem_1fr] items-start gap-x-3 py-2">
-        <span class="pt-1.5 text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.joinGroups') }}</span>
+      <div class="form-row grid grid-cols-[10rem_1fr] items-start gap-x-3 py-2">
+        <span class="form-label pt-1.5 text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.joinGroups') }}</span>
         <el-select
           v-model="model.root['join-groups']"
           size="small"
@@ -56,6 +59,7 @@
 <script setup lang="ts">
 import { WarningFilled } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
+import { useLayoutStore } from '@/stores/layout'
 import { parseJSON, stringifyOrdered, useEditor, type EditorProps } from '../useEditor'
 
 interface PrivRoot {
@@ -74,6 +78,7 @@ interface Model {
 const props = defineProps<EditorProps>()
 const emit = defineEmits<{ dirty: [value: boolean] }>()
 const { t } = useI18n()
+const layout = useLayoutStore()
 
 const { model, api } = useEditor<Model>(
   props,
@@ -110,5 +115,16 @@ const { model, api } = useEditor<Model>(
   },
 )
 
-defineExpose(api)
+defineExpose({
+  ...api,
+  /**
+   * 解析失败时拦住保存。
+   *
+   * 解析失败 = 表单里那份模型是空的，`getContent()` 交出去的是一份空配置。直接保存
+   * 就会把用户那份（也许只是少了个括号、还能救的）文件覆盖掉——不可逆，所以宁可
+   * 不让存：在源码视图里改回来再存。
+   */
+  saveBlocked: () =>
+    model.value.error ? t('editor.formatJson', { detail: model.value.error }) : '',
+})
 </script>

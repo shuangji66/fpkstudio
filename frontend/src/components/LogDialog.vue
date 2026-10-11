@@ -2,13 +2,17 @@
   <el-dialog
     v-model="logs.dialogOpen"
     :title="t('log.dialogTitle')"
-    width="78%"
-    top="7vh"
+    class="app-dialog"
+    modal-class="app-modal"
+    :width="layout.isMobile ? '95%' : '78%'"
+    align-center
+    lock-scroll
+    append-to-body
     :close-on-click-modal="false"
     @open="onOpen"
     @opened="fitNow"
   >
-    <div class="flex h-[62vh] min-h-0 flex-col">
+    <div class="flex h-full min-h-0 flex-col">
       <div class="flex shrink-0 items-center gap-2 pb-2 text-xs">
         <el-select v-model="logs.sourceFilter" size="small" class="w-[7.5rem]" :teleported="false">
           <el-option :label="t('log.all')" value="" />
@@ -24,14 +28,6 @@
           clearable
           :placeholder="t('log.filterText')"
         />
-
-        <span class="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
-          <span
-            class="inline-block h-1.5 w-1.5 rounded-full"
-            :class="logs.connected ? 'bg-emerald-400' : 'bg-slate-500'"
-          />
-          {{ logs.connected ? t('log.connected') : t('log.disconnected') }}
-        </span>
 
         <span class="text-[11px] text-slate-500 dark:text-slate-400">{{ logs.visible.length }} 条</span>
 
@@ -53,11 +49,13 @@ import { useI18n } from 'vue-i18n'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { useLayoutStore } from '@/stores/layout'
 import { useLogsStore } from '@/stores/logs'
 import type { LogEntry } from '@/api/types'
 
 const { t } = useI18n()
 const logs = useLogsStore()
+const layout = useLayoutStore()
 
 const host = useTemplateRef<HTMLDivElement>('host')
 

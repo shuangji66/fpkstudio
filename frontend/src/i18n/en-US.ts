@@ -109,9 +109,25 @@ export default {
     pasteListFailed: 'Could not read "{name}" — refresh and try again.',
     confirmDelete: 'Delete "{name}"?',
     uploadDone: 'Uploaded {count} file(s)',
-    uploading: 'Uploading…',
-    hint: 'Right-click a node to create / rename / copy / cut / paste / delete',
+    uploading: 'Uploading {percent}%',
+    uploadFailed: 'Upload failed: {error}',
+    extract: 'Extract here',
+    extractDone: 'Extracted "{name}": {files} file(s)',
+    extractSkipped: 'Extracted "{name}": {files} file(s), skipped {skipped} existing',
+    hint: 'Right-click a node for its menu: folders can create files / folders and paste, both files and folders can be renamed / copied / cut / downloaded / deleted, and archives get an extra “Extract here”.',
     more: 'More actions',
+  },
+  files: {
+    title: 'Files',
+    back: 'Back',
+    forward: 'Forward',
+    name: 'Name',
+    size: 'Size',
+    modified: 'Modified',
+    list: 'List view',
+    grid: 'Grid view',
+    switchToTree: 'Switch back to the sidebar tree',
+    switchToTabs: 'Switch to tab view',
   },
   editor: {
     form: 'Form',
@@ -124,6 +140,10 @@ export default {
     unsaved: 'Unsaved',
     notCreated: 'Not created',
     missing: 'Not on disk yet — it is created when you save',
+    formatJson: 'Invalid JSON — saving was blocked (nothing was cleared): {detail}',
+    formatWizard: 'Invalid wizard content — saving was blocked (nothing was cleared): {detail}',
+    formatManifest:
+      'manifest has a line that is not key = value — saving was blocked (nothing was cleared): {line}',
     binary: 'Binary file — cannot be edited as text. Download it instead.',
     imageFailed: 'Failed to load image',
     readFailed: 'Failed to read',
@@ -209,7 +229,7 @@ export default {
     entryPrefixHint: 'Fill in a prefix to generate the <prefix>_256.png / <prefix>_64.png targets for this entry.',
     removeEntry: 'Remove this group',
     targetHint:
-      'Size is the internal processing resolution (256 is plenty). The small scale is relative to the large icon; the 1/4 default keeps a 256px large icon at 64px. Writing overwrites existing files.',
+      'Size is the internal processing resolution (256 is plenty). The small scale is relative to the large icon and defaults to "same"; pick 1/4 to match the icon_64.png filename. Writing overwrites existing files.',
   },
   envVars: {
     button: 'Env vars',
@@ -300,8 +320,6 @@ export default {
     title: 'Logs',
     dialogTitle: 'Build log',
     clear: 'Clear',
-    connected: 'Live',
-    disconnected: 'Disconnected',
     empty: 'No output yet',
     filterSource: 'Source',
     filterText: 'Filter text',
@@ -415,7 +433,6 @@ export default {
     },
   },
   uiConfig: {
-    entries: 'Entries',
     addEntry: 'Add entry',
     entryId: 'Entry id',
     entryIdExists: 'Entry id already exists',
@@ -437,7 +454,6 @@ export default {
     permReadonly: 'Read only',
     permHidden: 'Hidden',
     removeEntry: 'Remove entry',
-    hint: 'With the unified gateway use gatewayPrefix + gatewaySocket; protocol and port are ignored.',
   },
   wizard: {
     title: 'Install wizard',
@@ -473,13 +489,12 @@ export default {
     empty: 'No wizard step yet — use "Add step" at the top right',
     moveUp: 'Move up',
     moveDown: 'Move down',
-    copyFrom: 'Copy from wizard',
-    copyConfirm:
-      'Overwrite this wizard with the content of "{name}"? The current content is replaced (written to disk only when you save).',
-    copyConfirmOk: 'Overwrite',
-    copied: 'Copied "{name}" — save to apply',
-    copyFailed: 'Failed to read "{name}": {error}',
-    copyNotText: '"{name}" is not a text file and cannot be copied',
+    overwrite: 'Overwrite other wizards',
+    overwriteAll: 'Overwrite all',
+    overwriteConfirm:
+      'Write the content of this wizard into "{names}"? What is already there is replaced.',
+    overwriteOk: 'Overwrite',
+    overwritten: 'Overwrote "{names}"',
     types: {
       text: 'Text',
       password: 'Password',
@@ -500,6 +515,12 @@ export default {
       light: 'Light',
       dark: 'Dark',
       system: 'System',
+    },
+    layout: {
+      title: 'Layout',
+      auto: 'Auto',
+      desktop: 'Desktop',
+      mobile: 'Mobile',
     },
     dirs: {
       title: 'Directories',
@@ -534,6 +555,7 @@ export default {
       title: 'About',
       repo: 'View the source on GitHub',
       desc: 'An fpk packaging workbench for fnOS: browse and edit fpk package folders in the browser, then build with the official fnpack.',
+      thanks: 'Thanks to snltty for the online fpk project that has been with us all along.',
     },
   },
   trim: {

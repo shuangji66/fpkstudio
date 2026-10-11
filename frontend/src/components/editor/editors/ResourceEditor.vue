@@ -304,5 +304,16 @@ const showDocker = computed(() => {
   return projects.find(props.project ?? '')?.docker === true
 })
 
-defineExpose(api)
+defineExpose({
+  ...api,
+  /**
+   * 解析失败时拦住保存。
+   *
+   * 解析失败 = 表单里那份模型是空的，`getContent()` 交出去的是一份空配置。直接保存
+   * 就会把用户那份（也许只是少了个括号、还能救的）文件覆盖掉——不可逆，所以宁可
+   * 不让存：在源码视图里改回来再存。
+   */
+  saveBlocked: () =>
+    model.value.error ? t('editor.formatJson', { detail: model.value.error }) : '',
+})
 </script>

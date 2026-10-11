@@ -1,12 +1,16 @@
 /**
- * 校验路径与命名的小工具（src/utils/format.ts）。
+ * 路径 / 命名 / 文本格式的小工具（src/utils/format.ts、src/utils/validate.ts）。
  *
  *   npm run check:format
  *
- * 现在只有 uniqueName 一个：粘贴时靠它挑一个不重名的名字。它要是算错，
- * 表现是「粘贴把已有的文件覆盖掉」——这种事不能只靠手点来看。
+ * 这些都是「算错了很难看出来」的那类：uniqueName 算错的表现是粘贴把已有的文件
+ * 覆盖掉；isArchive 算错的表现是菜单里给了一个点了就报错的「解压」；formatTime
+ * 算错则只是列表里的时间变得莫名其妙；checkFormat 判错的表现是**源码视图里一份
+ * 写坏的配置被直接写进文件**（fnOS 那边直接失效），或者反过来把好好的文件拦住
+ * 不让存。都不适合只靠手点。
  */
-import { uniqueName } from '../src/utils/format.ts'
+import { formatTime, isArchive, uniqueName } from '../src/utils/format.ts'
+import { checkFormat } from '../src/utils/validate.ts'
 
 let failed = 0
 const check = (name, got, want) => {
@@ -36,5 +40,62 @@ check('多个点的文件只切最后一段扩展名', uniqueName(names('a.tar.g
   check('结果一定不在已有名字里', taken.some((entry) => entry.name === got), false)
 }
 
-console.log(failed ? `\n${failed} 项不通过` : '\n路径与命名检查全部通过')
+// 能不能解压的判据必须和后端 fsx.ArchiveKindOf 一致（少一个就是「菜单里没有解压」）
+for (const name of [
+  'app.tar',
+  'app.tar.gz',
+  'app.tgz',
+  'app.tar.bz2',
+  'app.tbz2',
+  'app.tbz',
+  'app.tar.xz',
+  'app.txz',
+  'app.tar.zst',
+  'app.tzst',
+  'app.zip',
+  'data.gz',
+  'data.bz2',
+  'data.xz',
+  'data.zst',
+]) {
+  check(`${name} 认得出`, isArchive(name), true)
+}
+check('大小写不敏感', isArchive('APP.TAR.GZ') && isArchive('APP.ZIP'), true)
+for (const name of ['app.7z', 'app.rar', 'app.tar.Z', 'mytar', 'manifest', 'a.gz.txt']) {
+  check(`${name} 不认`, isArchive(name), false)
+}
+
+// 修改时间的展示格式（参照时刻固定，不然测试会随日期变）
+{
+  const now = new Date('2026-07-11T20:00:00')
+  check('今天的只留时分', formatTime('2026-07-11 09:05:00', now), '09:05')
+  check('今年的省掉年份', formatTime('2026-03-02 09:05:00', now), '03-02 09:05')
+  check('往年的只留日期', formatTime('2025-03-02 09:05:00', now), '2025-03-02')
+  check('解析不了就原样返回', formatTime('—', now), '—')
+}
+
+// 源码视图保存前的格式校验：该拦的拦住，不该拦的别拦
+check('manifest 正常不报', checkFormat('manifest', 'appname = demo\nversion = 1.0.0\n'), null)
+check('manifest 注释和空行不算错', checkFormat('manifest', '# 说明\n\nappname = demo\n'), null)
+check(
+  'manifest 多行值里的续行不算错',
+  checkFormat('manifest', 'desc = """第一行\n第二行"""\nappname = demo\n'),
+  null,
+)
+check(
+  'manifest 缺等号的行要报',
+  checkFormat('manifest', 'appname = demo\noops\n')?.key,
+  'editor.formatManifest',
+)
+check('privilege 的坏 JSON 要报', checkFormat('config/privilege', '{"run-as":}')?.key, 'editor.formatJson')
+check('privilege 的好 JSON 不报', checkFormat('config/privilege', '{"run-as":"package"}'), null)
+check('入口配置的坏 JSON 要报', checkFormat('app/ui/config', '{oops}')?.key, 'editor.formatJson')
+check('i18n 文案的坏 JSON 要报', checkFormat('i18n/zh-CN', '{oops}')?.key, 'editor.formatJson')
+check('向导的坏 JSON 要报', checkFormat('wizard/install', '[{]')?.key, 'editor.formatWizard')
+check('向导的空数组不报', checkFormat('wizard/install', '[]'), null)
+check('向导的空文件不报', checkFormat('wizard/install', ''), null)
+check('生命周期脚本不校验', checkFormat('cmd/main', 'if [ -z "$x" ]; then'), null)
+check('普通文本不校验', checkFormat('notes.txt', '随便写点什么 {'), null)
+
+console.log(failed ? `\n${failed} 项不通过` : '\n路径 / 命名 / 文本格式检查全部通过')
 process.exit(failed ? 1 : 0)

@@ -92,6 +92,18 @@ export interface FileContent {
   content: string
 }
 
+/** 解压结果（`/api/fs/extract`）。 */
+export interface ExtractResult {
+  /** 识别出来的归档类型：tar / tar.gz / gz。 */
+  kind: string
+  /** 解压到的目录（相对项目根目录）。 */
+  dir: string
+  /** 本次真正写进去的文件数。 */
+  files: number
+  /** 因为同名已存在而跳过的文件数。 */
+  skipped: number
+}
+
 export interface LogEntry {
   seq: number
   time: string

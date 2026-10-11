@@ -40,7 +40,7 @@
 
         <span class="flex-1" />
 
-        <!-- 显示切换：平铺（卡片）/ 列表（一行一个），两个独立按钮，记住上一次的选择 -->
+        <!-- 显示切换：网格（卡片）/ 列表（一行一个），两个独立按钮，记住上一次的选择 -->
         <div class="flex items-center gap-2">
           <el-button
             size="small"
@@ -113,7 +113,7 @@ const workspace = useWorkspaceStore()
 const panel = ref<'create' | 'import' | ''>('')
 const settingsOpen = ref(false)
 
-/** 显示方式：平铺（卡片）/ 列表（一行一个）。和侧栏宽度一样记在本地。 */
+/** 显示方式：网格（卡片）/ 列表（一行一个）。和侧栏宽度一样记在本地。 */
 type ViewMode = 'grid' | 'list'
 const storedView = window.localStorage.getItem('fpkstudio.homeView')
 const view = ref<ViewMode>(storedView === 'list' ? 'list' : 'grid')

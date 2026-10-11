@@ -1,48 +1,78 @@
 <template>
   <div v-if="tab" class="flex h-full min-h-0 flex-col bg-white dark:bg-slate-800">
-    <div class="flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-2 py-1">
-      <el-icon class="shrink-0 text-slate-400 dark:text-slate-500"><Document /></el-icon>
-      <span class="mono min-w-0 flex-1 truncate text-[11px] text-slate-500 dark:text-slate-400">{{ tab.path }}</span>
-      <!-- 磁盘上还没有这个文件：说「未创建」比说「未保存」准确 -->
-      <span v-if="tab.missing" class="shrink-0 text-[11px] text-emerald-700 dark:text-emerald-400">
-        ● {{ t('editor.notCreated') }}
-      </span>
-      <span v-else-if="tab.dirty" class="shrink-0 text-[11px] text-amber-600 dark:text-amber-400">
-        ● {{ t('editor.unsaved') }}
-      </span>
+    <!--
+      工具栏分两组：左边「后退 + 文件名 + 改动状态」，右边所有按钮。
+      窄屏（移动端）放不下时整组按钮换行，而不是从中间随便断——一组按钮被拆散比
+      整体下移难认得多。
 
-      <el-radio-group v-if="def.hasForm && tab.text" v-model="mode" size="small">
-        <el-radio-button value="form">{{ t('editor.form') }}</el-radio-button>
-        <el-radio-button value="source">{{ t('editor.source') }}</el-radio-button>
-      </el-radio-group>
+      左组那个 min-w 是让换行按「组」发生的：flex 换行看的是各项目的基准宽度，
+      左组是 flex-1（基准 0）的话它永远"放得下"，右组就不会整组下去，而是被挤在
+      同一行里各自折行。给左组一个下限，宽度不够时右组才会整块换行。
+      右组的 ml-auto 管的是换行之后的落位：它单独占一行时靠右对齐（同一行时
+      剩余空间都被左组的 flex-1 吃掉了，auto margin 分不到东西，等于没设）。
+    -->
+    <div class="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 dark:border-slate-700 px-2 py-1">
+      <div class="flex min-w-[12rem] flex-1 items-center gap-2">
+        <!--
+          移动端：文件是在子页面里打开的，后退就是关掉这个文件标签。只画一个左箭头
+          ——这一行本来就窄，而且它旁边就是文件名，写「后退」两个字是多余的。
+          （不加 tooltip：触屏上点一下就会弹出来挡着，见 AGENTS 里的记录。）
+        -->
+        <el-button
+          v-if="back"
+          text
+          size="small"
+          class="tree-tool"
+          :icon="ArrowLeft"
+          :aria-label="t('files.back')"
+          @click="back()"
+        />
+        <el-icon class="shrink-0 text-slate-400 dark:text-slate-500"><Document /></el-icon>
+        <span class="mono min-w-0 flex-1 truncate text-[11px] text-slate-500 dark:text-slate-400">{{ tab.path }}</span>
+        <!-- 磁盘上还没有这个文件：说「未创建」比说「未保存」准确 -->
+        <span v-if="tab.missing" class="shrink-0 text-[11px] text-emerald-700 dark:text-emerald-400">
+          ● {{ t('editor.notCreated') }}
+        </span>
+        <span v-else-if="tab.dirty" class="shrink-0 text-[11px] text-amber-600 dark:text-amber-400">
+          ● {{ t('editor.unsaved') }}
+        </span>
+      </div>
 
-      <el-button v-if="canInsertTemplate" size="small" @click="insertTemplate">
-        {{ t('cmdEditor.template') }}
-      </el-button>
-      <el-button v-if="isLifecycle" size="small" :icon="MessageBox" @click="envOpen = true">
-        {{ t('envVars.button') }}
-      </el-button>
+      <div class="ml-auto flex flex-wrap items-center gap-2">
+        <el-radio-group v-if="def.hasForm && tab.text" v-model="mode" size="small">
+          <el-radio-button value="form">{{ t('editor.form') }}</el-radio-button>
+          <el-radio-button value="source">{{ t('editor.source') }}</el-radio-button>
+        </el-radio-group>
 
-      <!-- 安装 / 更新 / 配置向导常常是同一套表单，允许互相整体覆盖 -->
-      <el-dropdown v-if="wizardSources.length" trigger="click" @command="copyWizard">
-        <el-button size="small" :icon="CopyDocument">
-          {{ t('wizard.copyFrom') }}<el-icon class="ml-1"><ArrowDown /></el-icon>
+        <el-button v-if="templateText" size="small" @click="insertTemplate">
+          {{ t('cmdEditor.template') }}
         </el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item v-for="source in wizardSources" :key="source" :command="source">
-              {{ t(wizardNameKey(source)) }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
+        <el-button v-if="isLifecycle" size="small" :icon="MessageBox" @click="envOpen = true">
+          {{ t('envVars.button') }}
+        </el-button>
 
-      <el-button size="small" :disabled="!tab.dirty" @click="revert">
-        {{ t('editor.revert') }}
-      </el-button>
-      <el-button size="small" type="primary" :disabled="!tab.dirty" :loading="saving" @click="save">
-        {{ saving ? t('editor.saving') : t('editor.save') }}
-      </el-button>
+        <!-- 安装 / 更新 / 配置向导常常是同一套表单：把手上这份写进别的向导 -->
+        <el-dropdown v-if="wizardTargets.length" trigger="click" @command="onOverwrite">
+          <el-button size="small" :icon="CopyDocument">
+            {{ t('wizard.overwrite') }}<el-icon class="ml-1"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="name in wizardTargets" :key="name" :command="name">
+                {{ t(wizardNameKey(name)) }}
+              </el-dropdown-item>
+              <el-dropdown-item divided command="all">{{ t('wizard.overwriteAll') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
+        <el-button size="small" :disabled="!tab.dirty" @click="revert">
+          {{ t('editor.revert') }}
+        </el-button>
+        <el-button size="small" type="primary" :disabled="!tab.dirty" :loading="saving" @click="save">
+          {{ saving ? t('editor.saving') : t('editor.save') }}
+        </el-button>
+      </div>
     </div>
 
     <div
@@ -81,18 +111,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, CopyDocument, Document, MessageBox } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowLeft, CopyDocument, Document, MessageBox } from '@element-plus/icons-vue'
 import SourceEditor from './editors/SourceEditor.vue'
 import EnvVarsDialog from './EnvVarsDialog.vue'
 import { resolveEditor } from './registry'
 import type { EditorApi, EditorContent } from './useEditor'
-import { readFile } from '@/api/endpoints'
 import { useWorkspaceStore } from '@/stores/workspace'
 
-const props = defineProps<{ project: string; path: string }>()
+const props = defineProps<{
+  project: string
+  path: string
+  /** 移动端传进来：在工具栏最左边渲染一个后退按钮（等价于关掉这个文件标签）。 */
+  back?: () => void
+}>()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -122,9 +156,13 @@ const def = computed(() => resolveEditor(props.path))
  *
  * handoff 里放的是"切换视图那一刻的实时内容"，两种视图都要用它——不能只在源码
  * 视图用：源码改完切回表单时，如果这里退回磁盘上的 tab.origin，未保存的修改就
- * 被丢掉了。只有 handoff 为空（刚打开 / 保存后 / 还原后）才回落到磁盘内容。
+ * 被丢掉了。
+ *
+ * draft 是上一次卸载这个编辑器时存下的内容：切换桌面 / 移动布局会把编辑器宿主
+ * 整个换掉，没有它的话重新挂载会退回磁盘上那一份，未保存的编辑就这么没了。
+ * 两者都为空（刚打开 / 保存后 / 还原后）才回落到磁盘内容。
  */
-const loadText = computed(() => handoff.value || tab.value?.origin || '')
+const loadText = computed(() => handoff.value || tab.value?.draft || tab.value?.origin || '')
 
 const activeComponent = computed(() => {
   const d = def.value
@@ -144,6 +182,17 @@ watch(
   },
 )
 
+// 卸载前把手里没保存的内容交回 store（见 loadText 的说明）。父组件的
+// beforeUnmount 先于子组件卸载执行，所以这时候 inner 还是活的。
+onBeforeUnmount(() => {
+  try {
+    const content = inner.value?.getContent?.()?.content
+    if (typeof content === 'string') workspace.setDraft(props.project, props.path, content)
+  } catch {
+    // 编辑器没就绪就算了：宁可丢这一份草稿，也不要让卸载过程抛错
+  }
+})
+
 watch(mode, async (next, previous) => {
   if (previous === 'form' && next === 'source') {
     // 表单 → 源码：把序列化结果带过去，避免用户刚才的编辑消失
@@ -161,13 +210,21 @@ function onDirty(value: boolean) {
 }
 
 /**
- * 只有卸载回调脚本给「插入模板」。
+ * 「插入模板」的内容按路径给，没有就说明这份文件没有通用模板，按钮不出现。
  *
- * fnOS 卸载时会调用它，并按向导里收集的 $wizard_data_action 决定删不删数据；
- * 这份骨架就是那个标准写法。其他 cmd 脚本（main/start/stop…）各写各的，
- * 没有通用模板可插，所以按钮不出现。
+ * 卸载回调脚本：fnOS 卸载时会调用它，并按向导里收集的 $wizard_data_action 决定
+ * 删不删数据；这份骨架就是那个标准写法。其他 cmd 脚本（main/start/stop…）各写各的。
+ * 卸载向导：它和上面那个脚本是一对——向导收集 wizard_data_action，脚本照着执行，
+ * 所以给一份配套的向导骨架（数据保留 / 删除二选一）。
  */
-const canInsertTemplate = computed(() => props.path === 'cmd/uninstall_callback')
+function templateFor(path: string): string {
+  // 写成函数而不是常量表：模板常量在下面，常量表会在求值时就踩到 TDZ。
+  if (path === 'cmd/uninstall_callback') return UNINSTALL_SCRIPT
+  if (path === 'wizard/uninstall') return UNINSTALL_WIZARD
+  return ''
+}
+
+const templateText = computed(() => templateFor(props.path))
 
 /**
  * 生命周期脚本（cmd/ 下的安装、卸载、升级、配置、启停脚本）。
@@ -178,21 +235,26 @@ const canInsertTemplate = computed(() => props.path === 'cmd/uninstall_callback'
 const isLifecycle = computed(() => props.path.startsWith('cmd/'))
 
 /**
- * 可以整体复制过来的其他向导。
+ * 安装 / 更新 / 配置三份向导往往就是同一套表单，所以给一个「覆盖其他向导」的入口：
+ * 把手上这份的内容写进**另外的向导**（卸载向导的表单通常不一样，不参与）。
  *
- * 安装 / 更新 / 配置三份向导往往就是同一套表单（fnpackup 里只能开着源码手动复制
- * 粘贴），所以给这三份之间做一个「整份覆盖」的入口；卸载向导的表单通常不一样，
- * 不参与互拷。
+ * 覆盖哪一份由用户在菜单里挑，或者选「全部覆盖」一次写两份——一次写两份是破坏性的，
+ * 不该是唯一的选项。覆盖完顺手把目标文件打开：写磁盘的动作，用户总得能立刻看到
+ * 写成了什么。
+ *
+ * 和以前的「复制其他向导」方向相反：那时是拉别人的内容进来、只改内存，得自己再
+ * 打开目标文件保存一次。
  */
-const WIZARD_COPYABLE = ['install', 'upgrade', 'config']
+const WIZARD_GROUP = ['install', 'upgrade', 'config']
 
 const currentWizard = computed(() => {
   const match = /^wizard\/([^/]+)$/.exec(props.path)
-  return match && WIZARD_COPYABLE.includes(match[1]!) ? match[1]! : ''
+  return match && WIZARD_GROUP.includes(match[1]!) ? match[1]! : ''
 })
 
-const wizardSources = computed(() =>
-  currentWizard.value ? WIZARD_COPYABLE.filter((name) => name !== currentWizard.value) : [],
+/** 会被覆盖的另外两份向导。 */
+const wizardTargets = computed(() =>
+  currentWizard.value ? WIZARD_GROUP.filter((name) => name !== currentWizard.value) : [],
 )
 
 /** 向导文件的显示名复用快捷设置里的那套文案。 */
@@ -200,41 +262,48 @@ function wizardNameKey(name: string): string {
   return `shortcuts.wizard${name.charAt(0).toUpperCase()}${name.slice(1)}`
 }
 
-/** 把另一份向导的内容整份覆盖到当前编辑器（只改内存，保存后才落盘）。 */
-async function copyWizard(source: string) {
-  const label = t(wizardNameKey(source))
+function onOverwrite(command: string) {
+  const targets = command === 'all' ? wizardTargets.value : [command]
+  void overwriteWizards(targets)
+}
+
+async function overwriteWizards(targets: string[]) {
+  if (!targets.length) return
+  const names = targets.map((name) => t(wizardNameKey(name))).join(' / ')
+
   try {
-    await ElMessageBox.confirm(t('wizard.copyConfirm', { name: label }), t('common.tip'), {
+    await ElMessageBox.confirm(t('wizard.overwriteConfirm', { names }), t('common.tip'), {
       type: 'warning',
-      confirmButtonText: t('wizard.copyConfirmOk'),
+      confirmButtonText: t('wizard.overwriteOk'),
       cancelButtonText: t('common.cancel'),
     })
   } catch {
     return
   }
 
-  const editor = inner.value
-  if (!editor?.setContent) {
+  const payload = inner.value?.getContent?.() ?? null
+  if (!payload) {
     ElMessage.error(t('editor.notReady'))
     return
   }
 
   try {
-    const res = await readFile(`${props.project}/wizard/${source}`)
-    if (!res.text) {
-      ElMessage.error(t('wizard.copyNotText', { name: label }))
-      return
+    for (const target of targets) {
+      const rel = `wizard/${target}`
+      // saveFile 会连父目录一起建出来，所以目标文件不存在时这里就是「创建」。
+      await workspace.saveFile(props.project, rel, payload.content)
+      // 打开（或切到）这份文件；已经开着的那份要重新读一次，否则标签里还是旧内容。
+      await workspace.openFile(props.project, `${props.project}/${rel}`)
+      await workspace.reloadFile(props.project, rel)
     }
-    editor.setContent(res.content)
-    await nextTick()
-    onDirty(editor.isDirty?.() ?? false)
-    ElMessage.success(t('wizard.copied', { name: label }))
+    await workspace.refreshDir(props.project, `${props.project}/wizard`).catch(() => undefined)
+    ElMessage.success(t('wizard.overwritten', { names }))
   } catch (e) {
-    ElMessage.error(t('wizard.copyFailed', { name: label, error: e instanceof Error ? e.message : String(e) }))
+    ElMessage.error(e instanceof Error ? e.message : String(e))
   }
 }
 
-const UNINSTALL_TEMPLATE = `#!/bin/bash
+const UNINSTALL_SCRIPT = `#!/bin/bash
 
 # 获取用户在向导中的选择
 WIZARD_DATA_ACTION="$wizard_data_action"
@@ -252,15 +321,73 @@ fi
 exit 0
 `
 
+/**
+ * 卸载向导的骨架：先让用户选数据怎么处理，再把选择交给上面那个卸载回调脚本
+ * （`$wizard_data_action`）。两份是一套的，所以放在一起。
+ */
+const UNINSTALL_WIZARD = `[
+  {
+    "stepTitle": "确认卸载",
+    "items": [
+      {
+        "type": "tips",
+        "field": "wizard_default",
+        "label": "示例项",
+        "rules": [],
+        "options": [],
+        "helpText": "您即将卸载此应用。请选择如何处理应用数据："
+      },
+      {
+        "type": "radio",
+        "field": "wizard_data_action",
+        "label": "数据保留选项",
+        "rules": [
+          {
+            "required": true,
+            "message": "请选择数据保留选项"
+          }
+        ],
+        "options": [
+          {
+            "label": "保留数据（推荐）- 将来重新安装时可恢复",
+            "value": "keep"
+          },
+          {
+            "label": "删除所有数据 - 此操作不可恢复！",
+            "value": "delete"
+          }
+        ],
+        "initValue": "keep"
+      },
+      {
+        "type": "tips",
+        "field": "wizard_default",
+        "label": "示例项",
+        "rules": [],
+        "options": [],
+        "helpText": "<strong>警告：</strong> 选择删除数据后，所有应用数据将永久丢失，无法恢复。"
+      }
+    ]
+  }
+]
+`
+
 async function insertTemplate() {
   const editor = inner.value
   if (!editor?.setContent) return
-  editor.setContent(UNINSTALL_TEMPLATE)
+  editor.setContent(templateText.value)
   await nextTick()
   onDirty(editor.isDirty?.() ?? false)
 }
 
 async function save() {
+  // 有些编辑器的内容现在就是不可信的（例如向导文件解析失败，表单里是空的）。
+  // 这种时候必须拦住：保存下去等于把用户的文件写成一份空向导。
+  const blocked = inner.value?.saveBlocked?.()
+  if (blocked) {
+    ElMessage.error(blocked)
+    return
+  }
   const payload: EditorContent | null = inner.value?.getContent?.() ?? null
   if (!payload) {
     // 取不到内容说明编辑器没有 defineExpose(api)。以前这里直接 return，
@@ -273,7 +400,7 @@ async function save() {
     await workspace.saveFile(props.project, props.path, payload.content)
     handoff.value = ''
     onDirty(false)
-    if (mode.value === 'source' && def.value.hasForm) mode.value = 'form'
+    // 不切回表单视图：在源码里改完还想接着改是常态，视图跳走只会让人再点回来。
     ElMessage.success(t('editor.saved', { path: props.path }))
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))

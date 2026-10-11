@@ -10,29 +10,35 @@
 
       <span class="flex-1" />
 
-      <el-button
-        text
-        size="small"
-        :icon="FolderOpened"
-        :disabled="!canOpenFolder"
-        :title="canOpenFolder ? t('settings.dirs.openFolder') : t('trim.error.hostUnavailable')"
-        @click="emit('openFolder')"
-      />
-      <el-button size="small" :disabled="pickDisabled" :title="pickTitle" @click="emit('pick')">
-        {{ fromUser ? t('settings.dirs.replace') : t('settings.dirs.add') }}
-      </el-button>
-      <!-- 取消设置是「回到默认」这种带副作用的动作，给它一个红框（但不填充）区别于旁边的更换按钮 -->
-      <el-button
-        v-if="fromUser"
-        size="small"
-        type="danger"
-        plain
-        class="border-red-400 bg-transparent hover:bg-red-50 disabled:opacity-50 dark:border-red-500/70 dark:hover:bg-red-950/40"
-        :disabled="busy"
-        @click="emit('clear')"
-      >
-        {{ t('settings.dirs.clear') }}
-      </el-button>
+      <!--
+        三个按钮是一组：宽度不够时整组下移一行、左对齐，而不是从中间拆开
+        （shrink-0 让这一组不会被挤扁，flex 换行才会把它整体放到下一行）。
+      -->
+      <div class="flex shrink-0 items-center gap-2">
+        <el-button
+          text
+          size="small"
+          :icon="FolderOpened"
+          :disabled="!canOpenFolder"
+          :title="canOpenFolder ? t('settings.dirs.openFolder') : t('trim.error.hostUnavailable')"
+          @click="emit('openFolder')"
+        />
+        <el-button size="small" :disabled="pickDisabled" :title="pickTitle" @click="emit('pick')">
+          {{ fromUser ? t('settings.dirs.replace') : t('settings.dirs.add') }}
+        </el-button>
+        <!-- 取消设置是「回到默认」这种带副作用的动作，给它一个红框（但不填充）区别于旁边的更换按钮 -->
+        <el-button
+          v-if="fromUser"
+          size="small"
+          type="danger"
+          plain
+          class="border-red-400 bg-transparent hover:bg-red-50 disabled:opacity-50 dark:border-red-500/70 dark:hover:bg-red-950/40"
+          :disabled="busy"
+          @click="emit('clear')"
+        >
+          {{ t('settings.dirs.clear') }}
+        </el-button>
+      </div>
     </div>
 
     <!--

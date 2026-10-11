@@ -474,10 +474,10 @@ const radius = ref(0)
 /**
  * 小图缩放。
  *
- * 默认 1/4：大图 256 时小图正好 64，和文件名（icon_64.png）对得上。
- * fnpackup 默认「不变」，会让 ICON.PNG 也落成 256px。
+ * 默认「不变」（1）：小图和大图一样大，也就是 ICON.PNG 落成 256px——按需求定的。
+ * 想跟文件名（icon_64.png）对上就手动选 1/4，那正好是 64。
  */
-const smallScale = ref(0.25)
+const smallScale = ref(1)
 
 const imageStyle = computed(() => {
   const img = image.value

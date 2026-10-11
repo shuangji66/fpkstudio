@@ -2,26 +2,21 @@
   <div class="flex h-full min-h-0 flex-col">
     <!-- 工具栏：按钮紧凑排布，窄侧边栏（最小 180px）也放得下；再窄就换行 -->
     <div class="flex shrink-0 flex-wrap items-center gap-0 border-b border-slate-200 dark:border-slate-700 px-1 py-0.5">
-      <el-tooltip :content="t('tree.newFile')" placement="bottom">
-        <el-button text size="small" class="tree-tool" :icon="DocumentAdd" @click="startCreate(false)" />
+      <el-tooltip :content="t('common.refresh')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
+        <el-button text size="default" class="tree-tool" :icon="Refresh" @click="refreshAll" />
       </el-tooltip>
-      <el-tooltip :content="t('tree.newDir')" placement="bottom">
-        <el-button text size="small" class="tree-tool" :icon="FolderAdd" @click="startCreate(true)" />
-      </el-tooltip>
-      <el-tooltip :content="t('tree.upload')" placement="bottom">
-        <el-button text size="small" class="tree-tool" :icon="UploadFilled" @click="pickFiles" />
-      </el-tooltip>
-      <el-tooltip :content="t('common.refresh')" placement="bottom">
-        <el-button text size="small" class="tree-tool" :icon="Refresh" @click="refreshAll" />
-      </el-tooltip>
-      <el-tooltip :content="allCollapsed ? t('tree.expandAll') : t('tree.collapseAll')" placement="bottom">
+      <el-tooltip :content="allCollapsed ? t('tree.expandAll') : t('tree.collapseAll')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
         <el-button
           text
-          size="small"
+          size="default"
           class="tree-tool"
           :icon="allCollapsed ? Expand : Fold"
           @click="allCollapsed ? expandAll() : collapseAll()"
         />
+      </el-tooltip>
+      <!-- 文件管理器的另一种形态：固定「文件」标签 + 列表 / 网格 -->
+      <el-tooltip :content="t('files.switchToTabs')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
+        <el-button text size="default" class="tree-tool" :icon="Switch" @click="toTabs" />
       </el-tooltip>
     </div>
 
@@ -86,9 +81,6 @@
           </template>
           <template v-else>
             <span class="min-w-0 flex-1 truncate" :title="row.path">{{ row.name }}</span>
-            <span v-if="!row.dir && row.size >= 0" class="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
-              {{ humanSize(row.size) }}
-            </span>
           </template>
 
           <!-- 和右键菜单同一个入口：常驻但低调，省得靠猜（右键仍然可用） -->
@@ -174,32 +166,42 @@ import {
   CaretBottom,
   CaretRight,
   Document,
-  DocumentAdd,
   Expand,
-  Folder,
-  FolderAdd,
-  FolderOpened,
   Fold,
+  Folder,
+  FolderOpened,
   MoreFilled,
   Refresh,
-  UploadFilled,
+  Switch,
 } from '@element-plus/icons-vue'
+import { useUpload } from './useUpload'
+import { useLayoutStore } from '@/stores/layout'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { humanSize, uniqueName } from '@/utils/format'
+import { isArchive } from '@/utils/format'
 
 const props = defineProps<{ project: string }>()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const { upload } = useUpload()
+const layout = useLayoutStore()
+
+/**
+ * 工具提示显示多久后自动收起来。
+ *
+ * 触屏上没有「把鼠标移开」这个动作，点一下按钮提示会一直挂在屏幕上挡着内容；
+ * 给个上限即可——鼠标用户也只是看到它自己收回去，不影响使用。
+ */
+const TOOLTIP_HIDE = 1500
 
 const state = computed(() => workspace.state(props.project))
 
 const rows = computed(() => {
-  const out: { path: string; name: string; dir: boolean; depth: number; size: number }[] = []
+  const out: { path: string; name: string; dir: boolean; depth: number }[] = []
   const walk = (path: string, depth: number) => {
     for (const entry of state.value.dirs[path] ?? []) {
       const child = `${path}/${entry.name}`
-      out.push({ path: child, name: entry.name, dir: entry.dir, depth, size: entry.size })
+      out.push({ path: child, name: entry.name, dir: entry.dir, depth })
       if (entry.dir && state.value.expanded[child]) walk(child, depth + 1)
     }
   }
@@ -211,7 +213,6 @@ const selected = ref(props.project)
 const renaming = ref('')
 const renameValue = ref('')
 const editing = ref<{ parent: string; name: string; dir: boolean } | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
 const renameInput = ref<HTMLInputElement[] | null>(null)
 const createInput = ref<HTMLInputElement[] | null>(null)
 
@@ -229,20 +230,12 @@ function firstEl(
 const menu = reactive({ show: false, x: 0, y: 0, path: '', dir: false })
 const menuEl = ref<HTMLElement | null>(null)
 
-/**
- * 剪贴板：复制 / 剪切的目标路径。
- *
- * 只记路径，不搬内容——粘贴时才真的落到磁盘上（复制走 copy 接口，剪切走 rename）。
- * 和常见文件管理器一致：复制可以粘很多次，剪切粘一次就清掉（剪切中的那一行在树里淡一半）。
- */
-const clipboard = ref<{ path: string; cut: boolean } | null>(null)
+/** 上传目标目录：菜单里点「上传文件」时记下来，选完文件才真的发请求。 */
+const uploadTarget = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
 
-const uploadTarget = computed(() => {
-  if (selected.value === props.project) return props.project
-  const row = rows.value.find((r) => r.path === selected.value)
-  if (!row) return props.project
-  return row.dir ? row.path : row.path.slice(0, row.path.lastIndexOf('/'))
-})
+/** 剪贴板住在 store 里：文件树和「文件」标签页是同一批文件的两个视图，得共用一份。 */
+const clipboard = computed(() => state.value.clipboard)
 
 // ---- 展开 / 收起 ----
 
@@ -274,13 +267,15 @@ async function refreshAll() {
   await workspace.reloadTree(props.project)
 }
 
+function toTabs() {
+  workspace.setViewMode(props.project, 'tabs')
+}
+
 // ---- 新建 / 重命名（内联输入，不弹窗） ----
 
-function startCreate(dir: boolean) {
-  const parent = uploadTarget.value
-  const known = rows.value.some((r) => r.path === parent && r.dir)
-  editing.value = { parent: known ? parent : props.project, name: '', dir }
-  if (known) state.value.expanded[parent] = true
+function startCreate(parent: string, dir: boolean) {
+  editing.value = { parent, name: '', dir }
+  state.value.expanded[parent] = true
   void nextTick(() => firstEl(createInput.value)?.focus())
 }
 
@@ -326,25 +321,6 @@ function cancelEdit() {
   renaming.value = ''
 }
 
-// ---- 上传 ----
-
-function pickFiles() {
-  fileInput.value?.click()
-}
-
-async function onFiles(event: Event) {
-  const files = Array.from((event.target as HTMLInputElement).files ?? [])
-  if (!files.length) return
-  try {
-    const res = await workspace.uploadTo(props.project, uploadTarget.value, files, true)
-    ElMessage.success(t('tree.uploadDone', { count: res.files?.length ?? files.length }))
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    if (fileInput.value) fileInput.value.value = ''
-  }
-}
-
 // ---- 右键菜单 ----
 
 /** 菜单离窗口边缘至少留这么多，免得被切掉 */
@@ -385,145 +361,126 @@ const menuDir = computed(() => {
 /** 剪切中的那一项（在树里淡一半，粘完就没了） */
 const cutPath = computed(() => (clipboard.value?.cut ? clipboard.value.path : ''))
 
-/**
- * 能不能粘到菜单指向的目录里。
- *
- * 除了「剪贴板里有东西」，还要挡住「把目录粘进它自己或者它的子孙里」——
- * 复制会无限递归，剪切会被后端拒绝（`fsx.Rename` 明确挡了这一条）。
- */
-const canPaste = computed(() => {
-  const clip = clipboard.value
-  if (!clip) return false
-  const dest = menuDir.value
-  return dest !== clip.path && !dest.startsWith(`${clip.path}/`)
-})
+const canPaste = computed(() => workspace.canPasteTo(props.project, menuDir.value))
 
-/**
- * 粘贴：复制走 copy，剪切走 rename（同一个存储卷，就是一次改名）。
- *
- * 目标重名时复制会自动换个名字（`xxx - 副本`），绝不覆盖；剪切则直接拒绝——
- * 改名到一个已存在的路径上，轻则报错重则覆盖，不如让用户自己决定。
- */
+/** 粘贴到菜单指向的目录；目标重名时复制换名字、剪切直接拒绝。 */
 async function paste() {
   const clip = clipboard.value
-  if (!clip || !canPaste.value) return
+  if (!clip) return
   const destDir = menuDir.value
   const name = clip.path.split('/').pop() ?? ''
-  if (!name) return
-
   hideMenu()
   try {
-    // 目标目录的内容必须现拉一次（force）：缓存里那份可能还是空的
-    // ——「粘贴时刚好同名」的判据全靠它，读旧了就会把别人的文件覆盖掉。
-    // 拉不到就干脆不粘：宁可让用户重试，也不冒覆盖的风险。
-    const fresh = await workspace
-      .loadDir(props.project, destDir, true)
-      .then(() => true)
-      .catch(() => false)
-    if (!fresh) {
-      ElMessage.error(t('tree.pasteListFailed', { name: destDir.split('/').pop() ?? destDir }))
-      return
-    }
-
-    const siblings = state.value.dirs[destDir] ?? []
-    const taken = siblings.some((entry) => entry.name === name)
-    if (taken && clip.cut) {
+    const outcome = await workspace.pasteInto(props.project, destDir)
+    if (outcome === 'exists') {
       ElMessage.warning(t('tree.pasteExists', { name }))
-      return
+    } else if (outcome === 'unreadable') {
+      ElMessage.error(t('tree.pasteListFailed', { name: destDir.split('/').pop() ?? destDir }))
     }
-    const to = `${destDir}/${uniqueName(siblings, name, t('tree.copySuffix'))}`
-
-    if (clip.cut) {
-      await workspace.renameEntryAt(props.project, clip.path, to)
-      clipboard.value = null
-      selected.value = to
-    } else {
-      await workspace.copyEntryAt(props.project, clip.path, to)
-    }
-    // 树里当下就能看到粘贴结果；复制 / 剪切都只刷了源目录，目标目录得自己补一次
-    state.value.expanded[destDir] = true
-    await workspace.refreshDir(props.project, destDir)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
   }
 }
 
-const menuItems = computed(() => {
+// ---- 上传 ----
+
+function pickFiles(dir: string) {
+  uploadTarget.value = dir
+  fileInput.value?.click()
+}
+
+async function onFiles(event: Event) {
+  const files = Array.from((event.target as HTMLInputElement).files ?? [])
+  try {
+    if (files.length) await upload(props.project, uploadTarget.value, files)
+  } finally {
+    if (fileInput.value) fileInput.value.value = ''
+  }
+}
+
+/** 解压到压缩包所在的目录（后端调系统 tar / gzip，同名文件跳过）。 */
+async function extract(path: string) {
+  hideMenu()
+  const name = path.split('/').pop() ?? path
+  try {
+    const res = await workspace.extractAt(props.project, path)
+    if (res.skipped > 0) {
+      ElMessage.warning(
+        t('tree.extractSkipped', { name, files: res.files, skipped: res.skipped }),
+      )
+    } else {
+      ElMessage.success(t('tree.extractDone', { name, files: res.files }))
+    }
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** 删除前确认；删掉的如果是剪贴板里那一项，顺手把剪贴板清掉。 */
+async function remove(path: string, dir: boolean) {
+  const name = path.split('/').pop() ?? path
+  try {
+    await ElMessageBox.confirm(t('tree.confirmDelete', { name }), t('common.tip'), {
+      type: 'warning',
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
+    })
+  } catch {
+    return
+  }
+  try {
+    await workspace.removeEntryAt(props.project, path, dir)
+    workspace.clearClipboard(props.project, path)
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+type MenuItem = { label: string; run: () => void; danger?: boolean; disabled?: boolean }
+
+const menuItems = computed<MenuItem[]>(() => {
   const path = menu.path
   const isRoot = path === props.project
   const dir = menuDir.value
-  return [
-    {
-      label: t('tree.newFile'),
-      run: () => {
-        editing.value = { parent: dir, name: '', dir: false }
-        state.value.expanded[dir] = true
-        void nextTick(() => firstEl(createInput.value)?.focus())
-      },
+  const name = path.split('/').pop() ?? path
+  const items: MenuItem[] = []
+
+  // 「新建文件 / 新建目录」只给目录：文件的菜单里再放这两个，点了其实是建在它的
+  // 父目录里，和用户看着的那一行对不上。
+  if (menu.dir) {
+    items.push(
+      { label: t('tree.newFile'), run: () => startCreate(dir, false) },
+      { label: t('tree.newDir'), run: () => startCreate(dir, true) },
+      { label: t('tree.upload'), run: () => pickFiles(dir) },
+    )
+  }
+  if (clipboard.value) {
+    items.push({ label: t('tree.paste'), disabled: !canPaste.value, run: () => void paste() })
+  }
+  if (isRoot) return items
+
+  items.push({ label: t('common.rename'), run: () => startRename(path) })
+  items.push({
+    label: t('tree.copy'),
+    run: () => {
+      workspace.copyToClipboard(props.project, path, false)
+      ElMessage.success(t('tree.copied', { name }))
     },
-    {
-      label: t('tree.newDir'),
-      run: () => {
-        editing.value = { parent: dir, name: '', dir: true }
-        state.value.expanded[dir] = true
-        void nextTick(() => firstEl(createInput.value)?.focus())
-      },
-    },
-    ...(clipboard.value
-      ? [
-          {
-            label: t('tree.paste'),
-            disabled: !canPaste.value,
-            run: () => void paste(),
-          },
-        ]
-      : []),
-    ...(isRoot
-      ? []
-      : [
-          { label: t('common.rename'), run: () => startRename(path) },
-          {
-            label: t('tree.copy'),
-            run: () => {
-              clipboard.value = { path, cut: false }
-              ElMessage.success(t('tree.copied', { name: path.split('/').pop() ?? path }))
-            },
-          },
-          {
-            label: t('tree.cut'),
-            run: () => {
-              clipboard.value = { path, cut: true }
-            },
-          },
-          { label: t('common.download'), run: () => workspace.downloadAt(path) },
-          {
-            label: t('common.delete'),
-            danger: true,
-            run: async () => {
-              const name = path.split('/').pop() ?? path
-              try {
-                await ElMessageBox.confirm(
-                  t('tree.confirmDelete', { name }),
-                  t('common.tip'),
-                  {
-                    type: 'warning',
-                    confirmButtonText: t('common.delete'),
-                    cancelButtonText: t('common.cancel'),
-                  },
-                )
-              } catch {
-                return
-              }
-              try {
-                await workspace.removeEntryAt(props.project, path, menu.dir)
-                if (clipboard.value?.path === path) clipboard.value = null
-              } catch (e) {
-                ElMessage.error(e instanceof Error ? e.message : String(e))
-              }
-            },
-          },
-        ]),
-  ]
+  })
+  items.push({
+    label: t('tree.cut'),
+    run: () => workspace.copyToClipboard(props.project, path, true),
+  })
+  items.push({ label: t('common.download'), run: () => workspace.downloadAt(path) })
+  if (!menu.dir && isArchive(name)) {
+    items.push({ label: t('tree.extract'), run: () => void extract(path) })
+  }
+  items.push({
+    label: t('common.delete'),
+    danger: true,
+    run: () => void remove(path, menu.dir),
+  })
+  return items
 })
 
 onMounted(() => {

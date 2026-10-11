@@ -107,30 +107,45 @@
             <li
               v-for="item in state.artifacts"
               :key="item.path"
-              class="flex items-center gap-2 px-3 py-2"
+              class="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2"
             >
               <el-tag size="small" effect="plain" type="info">
                 {{ item.scope === 'output' ? t('pack.scopeOutput') : t('pack.scopeProject') }}
               </el-tag>
-              <span class="mono min-w-0 flex-1 truncate text-xs text-slate-700 dark:text-slate-200" :title="item.path">
+              <!--
+                名字的 min-w 是让换行按「组」发生的：flex 换行看各项目的基准宽度，
+                名字是 flex-1（基准 0）的话它永远"放得下"，右边那组就不会整组下移，
+                而是被挤在同一行里各自折行。给个下限，窄屏才会整块换行。
+              -->
+              <span
+                class="mono min-w-[6rem] flex-1 truncate text-xs text-slate-700 dark:text-slate-200"
+                :title="item.path"
+              >
                 {{ item.name }}
               </span>
-              <span class="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">{{ item.sizeRaw }}</span>
-              <span class="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">{{ item.modTime }}</span>
-              <el-button
-                text
-                size="small"
-                :icon="FolderOpened"
-                :disabled="!hostAvailable"
-                :title="hostAvailable ? t('pack.openFolder') : t('trim.error.hostUnavailable')"
-                @click="openFolder(item)"
-              />
-              <el-button
-                text
-                size="small"
-                :icon="Download"
-                @click="downloadEntry(getDownloadPath(item))"
-              />
+              <!--
+                大小 / 时间 / 目录 / 下载是一组：窄屏放不下时整组下移一行、右对齐
+                （ml-auto 只在它单独占一行时起作用——同一行时剩余空间被名字的 flex-1
+                吃掉了，auto margin 分不到东西）。
+              -->
+              <div class="ml-auto flex shrink-0 items-center gap-2">
+                <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ item.sizeRaw }}</span>
+                <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ item.modTime }}</span>
+                <el-button
+                  text
+                  size="small"
+                  :icon="FolderOpened"
+                  :disabled="!hostAvailable"
+                  :title="hostAvailable ? t('pack.openFolder') : t('trim.error.hostUnavailable')"
+                  @click="openFolder(item)"
+                />
+                <el-button
+                  text
+                  size="small"
+                  :icon="Download"
+                  @click="downloadEntry(getDownloadPath(item))"
+                />
+              </div>
             </li>
           </ul>
           <p v-else class="px-3 py-3 text-xs text-slate-400 dark:text-slate-500">{{ t('pack.noArtifacts') }}</p>

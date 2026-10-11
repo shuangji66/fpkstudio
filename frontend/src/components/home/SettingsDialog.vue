@@ -2,9 +2,9 @@
   <el-dialog
     v-model="open"
     :title="t('settings.title')"
-    class="settings-dialog"
-    modal-class="settings-modal"
-    width="640px"
+    class="app-dialog"
+    modal-class="app-modal"
+    :width="layout.isMobile ? '95%' : '640px'"
     align-center
     lock-scroll
     append-to-body
@@ -24,6 +24,22 @@
             @click="onTheme(mode)"
           >
             {{ t(`settings.theme.${mode}`) }}
+          </el-button>
+        </div>
+      </section>
+
+      <!-- 界面形态 -->
+      <section>
+        <p class="label-text mb-2">{{ t('settings.layout.title') }}</p>
+        <div class="flex flex-wrap items-center gap-2">
+          <el-button
+            v-for="mode in LAYOUT_MODES"
+            :key="mode"
+            size="small"
+            :type="layout.mode === mode ? 'primary' : 'default'"
+            @click="layout.setMode(mode)"
+          >
+            {{ t(`settings.layout.${mode}`) }}
           </el-button>
         </div>
       </section>
@@ -107,6 +123,9 @@
         <p class="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
           {{ t('settings.about.desc') }}
         </p>
+        <p class="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+          {{ t('settings.about.thanks') }}
+        </p>
       </section>
     </div>
   </el-dialog>
@@ -129,11 +148,15 @@ import { isHostAvailable, openInFileManager, pickUserDirectory } from '@/trim/sd
 import { trimErrorMessage } from '@/trim/errors'
 import { indexSemantics } from '@/utils/semantic'
 import { useThemeStore, type ThemeMode } from '@/stores/theme'
+import { useLayoutStore, type LayoutMode } from '@/stores/layout'
 
 type Slot = 'projectRoot' | 'outputDir'
 
 /** 主题按钮的取值顺序，文案走 i18n 的 settings.theme.<mode>。 */
 const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system']
+
+/** 界面形态按钮的取值顺序，文案走 i18n 的 settings.layout.<mode>。 */
+const LAYOUT_MODES: LayoutMode[] = ['auto', 'desktop', 'mobile']
 
 /** 仓库地址：关于一节里的图标链到这里。 */
 const REPO_URL = 'https://github.com/shuangji66/fpkstudio'
@@ -146,6 +169,7 @@ const emit = defineEmits<{ saved: [] }>()
 
 const { t, te, locale } = useI18n()
 const theme = useThemeStore()
+const layout = useLayoutStore()
 
 const info = ref<SettingsInfo | null>(null)
 const semantics = ref<Record<string, string>>({})

@@ -19,6 +19,14 @@ export interface EditorApi {
   reset(): void
   /** 可选：外部整体写入内容（「插入模板」这类按钮用）。 */
   setContent?(text: string): void
+  /**
+   * 可选：返回一句「为什么现在不能保存」，空串表示可以保存。
+   *
+   * EditorHost 在取内容之前先问这个。向导文件解析失败时表单里是空的，这时候
+   * `getContent()` 交出去的会是一份空向导——保存等于把用户的文件清空，所以要在
+   * 那之前拦住。
+   */
+  saveBlocked?(): string
 }
 
 export interface EditorProps {

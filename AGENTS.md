@@ -66,8 +66,10 @@ backend/
   internal/server/           HTTP 路由、静态资源、各 API（/api/trim/* 是开放 API 的转发）
 frontend/src/
   api/                       endpoints（接口封装）、client（fetch 封装）、types
-  stores/                    pinia：projects / tabs / workspace / system / logs / theme
-  components/project/        项目内的固定页：总览 / 快捷设置 / 图标（+ 文件树、文件标签）
+  stores/                    pinia：projects / tabs / workspace / system / logs / theme / layout
+  components/project/        项目内的固定页：文件（标签页模式）/ 总览 / 快捷设置 / 图标，
+                             以及左栏文件树、文件标签；useCloseFile / useUpload 两个
+                             小组合函数也在这里（关标签的未保存提醒、带进度的上传）
   components/editor/         标签页编辑器宿主 + 按路径注册的表单编辑器
   components/home/           首页：项目卡片 / 新建 / 导入
   utils/                     manifest、wizard、icon、format 等纯逻辑（可单独跑检查）
@@ -85,6 +87,20 @@ frontend/src/
 - **文件权限要显式设置**。飞牛的存储卷上 `O_CREAT` 的 mode 会被忽略，新建文件会落成 `0000`，
   这种文件打不进 fpk。新增写文件 / 复制 / 上传的代码路径时要跟 `fsx` 一样补 `chmod`。
 - **所有文件操作走 `fsx.Root`**（`os.Root` 沙箱）。不要用 `os.Open` 直接拼路径。
+- **文件管理器有两个视图**（左栏文件树 / 「文件」标签页，见 `stores/workspace.ts` 的
+  `viewMode`），它们是同一批文件的两个入口：目录列表缓存（`state.dirs`）和剪贴板
+  （`state.clipboard`）都放在 store 里共用，**别在组件里各留一份**——各留一份的表现是
+  「在标签页里复制、切回文件树粘贴不了」。剪贴板粘一次就清空（复制和剪切都是），别把它
+  当成「能反复粘」的剪贴板。同理，「关掉一个文件标签」的未保存提醒在
+  `components/project/useCloseFile.ts`，桌面标签和移动端子页面都用它。
+- **表单行用 `form-row` / `form-label`**：编辑器的表单行挂这两个类（小控件再加
+  `form-row-inline`），表单根节点在窄屏下挂 `form-stack`（`:class="{ 'form-stack':
+  layout.isMobile }"`），桌面那套「固定宽度右对齐标题 + 控件」由元素上的 Tailwind 类
+  保留、窄屏的竖排由 `style.css` 覆盖。新写表单照这个来，别自己再排一套。
+- **弹窗只有一种形态**：所有 `el-dialog` 都挂 `class="app-dialog"` +
+  `modal-class="app-modal"`（样式在 `style.css`：90vh、居中、正文自己滚、遮罩模糊），
+  再加 `align-center` / `lock-scroll` / `append-to-body`。**新加弹窗照抄这三个属性和
+  两个类**，别再各写一套尺寸——「每个弹窗长得都不一样」正是这次统一掉的东西。
 - **语言包两份必须同步**。`npm run check:i18n` 会挡住键不一致；消息里的 `{` 是插值语法，
   想写字面量 `{` 要转义。一条消息写错，表现是「渲染到那个组件时整个弹窗画不出来」。
 - **`utils/` 里的纯逻辑要能单独验**。解析 / 回写 / 几何这类会写坏用户文件或算错图的计算，
@@ -145,6 +161,70 @@ frontend/src/
 - 宿主在用户**直接关掉选择器**时返回 `code: 1` + `msg: "Operation failed"`（没有业务码、
   没有可读原因）。别把它当错误抛出去——用户只是点了取消。`trim/sdk.ts` 把 `code: 1` 和
   「成功但没返回路径」都归一成空数组，调用方给一句「已取消」。
+- **「目标不存在」不记日志**（`Server.logFsMiss`）：向导 / 生命周期脚本常常还没创建，
+  图标目录也可能没有，这些都是正常状态，会以 404 回给前端、前端按「未创建」处理。
+  真错误（权限、EISDIR…）照记。启动日志同理只留一行「已启动」，运行参数要看就
+  `./fpkstudio -paths`。
+- `/api/fs/*` 的 `path` 是相对**项目根目录**（`projects/` 这个沙箱根）的，也就是
+  `demo/app/server` 这种带项目名的写法；返回里的路径（解压结果的 `dir`）同样是这一套。
+  **别再加一次项目名前缀**：算出来的缓存键（`state.dirs` 的键）根本不存在，`refreshDir`
+  会静默什么都不做，表现是「解压成功了，但列表里看不到新文件」。
+- 系统 `tar` 对越界成员（`/etc/passwd`、`../x`）**只给警告、退出码还是 0**，靠它挡不住；
+  `fsx.Extract` 是自己先用 `tar -t` 列成员名再判的。要动这段的话，别把成员校验去掉。
+- 切换桌面 / 移动布局会把编辑器宿主整块卸载重建（`ProjectTab` 里用 `v-if="!mobile"` 换了
+  另一套宿主）。编辑器里没保存的内容靠 `FileTab.draft` 在 `EditorHost.onBeforeUnmount`
+  里接力；**新增编辑器组件时，`getContent()` 要能拿到当前文本**，否则这份接力会断，
+  表现是「切一下布局，改到一半的内容没了，但脏标记还亮着」。
+- **`style.css` 的层序会吃掉你的规则**：`@layer theme, base, element, components, utilities`
+  是级联层，**层序比选择器权重更硬**——写在 `components` 层里的规则永远压不过元素上
+  直接写的 Tailwind 工具类（`.grid` / `.text-right` 都在 `utilities` 层），表现是
+  「规则写了、完全没生效」。要覆盖元素上的工具类，规则得放进 `@layer utilities`，
+  或者干脆别在元素上写那个工具类。`.form-stack` 那组就踩过这个坑。
+- **虚拟键盘不会让布局视口变矮**：iOS 只缩可视视口，Android 默认也只缩可视视口
+  （要连布局一起缩得靠 viewport meta 的 `interactive-widget=resizes-content`，只有
+  Chromium 认）。整块高度写死 `100%` 的应用（就是这个）底部会被键盘盖住。
+  适配在 `utils/viewport.ts`：把**可视视口的高度和上沿偏移**写进 `--vv-height` /
+  `--vv-top`，`style.css` 里 `#app`（`position: fixed` + `top: var(--vv-top)`）和
+  `.el-overlay` 都按它定位，`.app-dialog` 用 `min(90vh, var(--vv-height) - 2rem)` 让位。
+  为什么不是「减掉键盘高度」：**iOS 允许把可视视口拖着平移**，只缩高度的话下面会露出空白，
+  表现是「拖到底还能继续拖，页面像变大了」——钉在可视视口上才是真的贴住键盘。
+  公式对 iOS、认 meta 的 Android（变量和 `innerHeight` 一致，不重复缩）、桌面（等于整个
+  视口）都成立，所以**不要**给它加 `layout.isMobile` 判断。
+  另外 `html` / `body` 设了 `overflow: hidden` + `overscroll-behavior: none`，`.thin-scroll`
+  设了 `overscroll-behavior: contain`：滚到头不把滚动链交给外层，整页就不会被拖着弹。
+- 改 `.el-overlay` 的尺寸要**连 `height` 一起写**：Element Plus 自己给了
+  `top:0; bottom:0; height:100%`，三者同时存在时 CSS 会忽略 `bottom`，只改 `bottom`
+  等于没改（适配键盘时踩过）。
+- `#app` 是 `position: fixed` 的（钉可视视口），**别再给它加 `transform`**：transform 会
+  给里面的 `position: fixed` 元素换一个包含块，弹层会全歪。弹窗是 teleport 到 body 的，
+  不受影响。
+- 触屏上没有「把鼠标移开」这个动作：工具栏按钮的 `el-tooltip` 点一下就**一直挂在屏幕上**
+  挡着内容。文件管理器工具栏的提示都给了 `:hide-after`（`TOOLTIP_HIDE`），**移动端干脆
+  整个禁用**（`:disabled="layout.isMobile"`）；新加提示按钮记得跟上。同理
+  `opacity-0 group-hover:opacity-100` 这种「悬停才出现」的按钮在触屏上等于不存在
+  （项目标签的关闭按钮就踩过），移动端要常显。
+- **移动端输入框字号是 16px**（`style.css`）：iOS Safari 聚焦小于 16px 的输入框会把整个
+  页面放大且不缩回去，`user-scalable=no` 从 iOS 10 起被忽略，只能靠字号挡。别把窄屏下
+  的输入框字号改回 12–14px。
+- **跟「移动布局」的样式要跟布局开关，别用宽度媒体查询**：布局可以在设置里手动钉死，
+  而媒体查询只看真实视口宽度，表现是「明明在移动布局里，样式还是桌面的」——CodeMirror
+  的 16px 就这么写过一次。要么用 `layout.isMobile` 挂个类（`.cm-mobile`），要么把规则
+  放进 `@media (max-width: 767px)` 时想清楚它到底该跟谁。**例外**：iOS 输入框放大那条
+  必须用宽度媒体查询，因为它取决于真实视口。
+- 解压工具默认按 `/usr/bin/...` 找（`fsx.binPath`），找不到才回落到 PATH：服务进程的
+  PATH 不保证有 /usr/bin，而这些工具在飞牛上就在那儿。不给它们加环境变量。
+  tar 的命令**不带 `-z` / `-j` / `-J` / `--zstd`**：GNU tar 读归档时按魔数自己认压缩格式，
+  一个命令覆盖全部 tar 变体。**zip 用标准库 `archive/zip`**（`unzip` 不是每个系统都有）。
+- **归档后缀有两份判据，改一处必须改两处**：后端 `fsx.archiveKinds`（长的排前面，
+  `.tar.gz` 必须在 `.gz` 之前）和前端 `utils/format.ts` 的 `isArchive`。少一边的表现是
+  「菜单里没有解压」或者「点了报不支持的格式」；`check:format` 盯着前端那一半。
+- 编辑器的「解析失败」如果只是降级成空模型（`utils/wizard.ts` 的 `parseWizard` 就是
+  这样：解析不了返回 `{steps: [], error}`），那 `getContent()` 交出去的就是一份空配置，
+  点保存等于把用户的文件覆盖掉。这种编辑器必须实现 `EditorApi.saveBlocked()`，
+  EditorHost 会在取内容之前先问它。**源码视图是另一条路**，它不走表单组件，校验在
+  `utils/validate.ts` 的 `checkFormat`（SourceEditor 的 `saveBlocked` 调它）——
+  改格式判据要两边都看：`checkFormat` 决定源码视图拦不拦，`saveBlocked` 决定表单视图。
+  判据放在 `utils/` 是为了能进 `check:format` 单独验。
 
 ## 交付前自检
 

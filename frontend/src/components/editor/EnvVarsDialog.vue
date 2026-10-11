@@ -2,8 +2,12 @@
   <el-dialog
     v-model="visible"
     :title="t('envVars.title')"
-    width="46rem"
-    top="7vh"
+    class="app-dialog"
+    modal-class="app-modal"
+    :width="layout.isMobile ? '95%' : '46rem'"
+    align-center
+    lock-scroll
+    append-to-body
     :close-on-click-modal="false"
   >
     <p class="mb-2 rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
@@ -15,7 +19,7 @@
       {{ t('common.loading') }}
     </div>
 
-    <div v-else class="thin-scroll h-[60vh] space-y-3 overflow-y-auto pr-1">
+    <div v-else class="space-y-3 pr-1">
       <section
         v-for="section in sections"
         :key="section.key"
@@ -47,10 +51,6 @@
         </ul>
       </section>
     </div>
-
-    <template #footer>
-      <el-button size="small" @click="visible = false">{{ t('common.close') }}</el-button>
-    </template>
   </el-dialog>
 </template>
 
@@ -59,6 +59,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { readFile } from '@/api/endpoints'
+import { useLayoutStore } from '@/stores/layout'
 import { Manifest } from '@/utils/manifest'
 
 const props = defineProps<{ project: string }>()
@@ -66,6 +67,7 @@ const props = defineProps<{ project: string }>()
 const visible = defineModel<boolean>({ required: true })
 
 const { t } = useI18n()
+const layout = useLayoutStore()
 
 interface Row {
   name: string

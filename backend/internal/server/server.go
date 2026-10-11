@@ -86,6 +86,7 @@ func (s *Server) routes() {
 	s.api("/api/fs/rename", s.handleFsRename)
 	s.api("/api/fs/copy", s.handleFsCopy)
 	s.api("/api/fs/upload", s.handleFsUpload)
+	s.api("/api/fs/extract", s.handleFsExtract)
 	s.api("/api/fs/download", s.handleFsDownload)
 
 	s.api("/api/logs", s.handleLogs)
@@ -188,15 +189,13 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
+// banner 只留一行「已启动」。
+//
+// 路径、socket、base url 这些运行参数不再往日志里灌：它们是**每次启动都一样的
+// 噪声**，而日志弹窗是给用户看「刚才发生了什么」的地方。要看这些值有两个现成的
+// 出口——界面的设置弹窗，以及 `./fpkstudio -paths`。
 func (s *Server) banner() {
-	addr := s.cfg.SocketPath
 	s.log.Infof("fpkstudio %s 已启动", s.cfg.Version)
-	s.log.Infof("socket   : unix:%s", addr)
-	s.log.Infof("base url : %s", s.cfg.BaseURL)
-	s.log.Infof("数据目录 : %s", s.cfg.DataDir)
-	s.log.Infof("项目目录 : %s", s.prj.ProjectRoot())
-	s.log.Infof("输出目录 : %s", s.prj.OutputDir())
-	s.log.Infof("示例     : curl --unix-socket %s %s/api/system/info", addr, s.cfg.BaseURL)
 }
 
 func (s *Server) writePID() error {

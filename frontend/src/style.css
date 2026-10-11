@@ -28,9 +28,32 @@
 
 @layer base {
   html,
-  body,
-  #app {
+  body {
     height: 100%;
+    /* 页面本身不滚：滚动都在应用内部的容器里，这样拖拽不会把整页带着走 */
+    overflow: hidden;
+    /* 拖到头也不要把整页链式带着弹（键盘弹起时尤其明显） */
+    overscroll-behavior: none;
+  }
+
+  /*
+   * 根容器钉在**可视视口**上，而不是布局视口（--vv-height / --vv-top 由
+   * utils/viewport.ts 写进来，没键盘时就是整个视口，等于没写）。
+   *
+   * 只把高度写成 100% 的话，手机上键盘顶上来时页面底部会停在键盘下面；更糟的是
+   * iOS 允许把可视视口拖着平移，下面那块空白就露出来了——表现是「拖到底还能继续
+   * 拖，页面像变大了」。钉在可视视口上以后，可视的那一块永远被应用盖满。
+   *
+   * 用 position: fixed 而不是 transform：transform 会给 #app 里的 fixed 元素换一个
+   * 包含块，里面的弹层会全歪。fixed 定位不改变包含块，teleport 到 body 的弹窗也不受
+   * 影响（它们相对视口定位）。
+   */
+  #app {
+    position: fixed;
+    top: var(--vv-top, 0px);
+    left: 0;
+    right: 0;
+    height: var(--vv-height, 100%);
   }
 
   body {
@@ -43,6 +66,8 @@
   .thin-scroll {
     scrollbar-width: thin;
     scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+    /* 滚到头就停住：不把滚动链交给外层，也就不会把整页带着弹（移动端尤其明显） */
+    overscroll-behavior: contain;
   }
 
   .thin-scroll::-webkit-scrollbar {
@@ -78,6 +103,17 @@
 }
 
 @layer components {
+  /*
+   * 弹窗遮罩是 position: fixed 的，不跟着 #app 走，所以单独把它钉到可视视口上。
+   *
+   * 高度必须一起写：Element Plus 自己给了 `.el-overlay { top:0; bottom:0; height:100% }`，
+   * top / bottom / height 三者同时存在时 CSS 会忽略 bottom，只改 bottom 等于没改（踩过）。
+   */
+  .el-overlay {
+    top: var(--vv-top, 0px);
+    height: var(--vv-height, 100%);
+  }
+
   /* 主标签：底部用一条内嵌阴影表示选中，比整块变色更安静 */
   .tab-chip {
     @apply relative flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-sm transition-colors;
@@ -150,30 +186,97 @@
   }
 
   /*
-    设置弹窗：撑到视口 90% 高、垂直居中（el-dialog 的 align-center 用 flex 居中），
-    标题固定、正文自己滚。内容比视口高时如果让整个弹窗滚，标题和底部的「关于」
-    会一起滚出去，正文一滚就找不着自己在哪儿了。
+    应用里所有弹窗的统一形态：撑到视口 90% 高、垂直居中（el-dialog 的 align-center
+    用 flex 居中），标题固定、正文自己滚，遮罩后面加一层背景模糊。
+
+    内容比视口高时如果让整个弹窗滚，标题和底部的操作区会一起滚出去，正文一滚就
+    找不着自己在哪儿了。所有 el-dialog 都挂这两个类（见各处的 class="app-dialog"
+    / modal-class="app-modal"），别再各写一套尺寸。
   */
-  .settings-dialog {
+  .app-dialog {
     display: flex;
     flex-direction: column;
-    height: 90vh;
+    /*
+     * 90vh，但键盘顶上来时要让位：可视的那一块只剩可视视口那么高，弹窗再撑 90vh 就会
+     * 被挤出屏幕（居中之后上下都露不出去）。没键盘时后者更大，等于还是 90vh。
+     */
+    height: min(90vh, calc(var(--vv-height, 100vh) - 2rem));
     overflow: hidden;
   }
 
-  .settings-dialog .el-dialog__header {
+  .app-dialog .el-dialog__header {
     flex: 0 0 auto;
   }
 
-  .settings-dialog .el-dialog__body {
+  .app-dialog .el-dialog__body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
   }
 
-  /* 遮罩加一点背景模糊，让底下的项目列表退到后面去（弹窗本身在遮罩之上，不受影响） */
-  .settings-modal {
+  /* 遮罩加一点背景模糊，让底下的内容退到后面去（弹窗本身在遮罩之上，不受影响） */
+  .app-modal {
     backdrop-filter: blur(3px);
+  }
+}
+
+/*
+ * 移动端的表单行：标题一行、控件一行，标题左对齐。
+ *
+ * 桌面那套「固定宽度的右对齐标题 + 控件」在窄屏上会把控件挤得没地方；窄屏时由
+ * useLayoutStore 给表单根节点挂 .form-stack（见各编辑器的 :class），这里把行改成
+ * 竖排，省得每个组件里写一堆三元。
+ *
+ * **必须放在 utilities 层**：级联层比选择器权重更硬，components 层的规则永远压不过
+ * 元素上直接写的 Tailwind 工具类（.grid / .text-right 都在 utilities 层），放错层
+ * 就是「写了但完全没生效」。同一层里再靠后代选择器的权重取胜。
+ *
+ * 开关这类小控件（.form-row-inline）分成两行只会白占一行高度，仍然并排、整体左对齐。
+ */
+@layer utilities {
+  .form-stack .form-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+  }
+
+  .form-stack .form-row-inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .form-stack .form-label {
+    justify-content: flex-start;
+    padding-top: 0;
+    text-align: left;
+  }
+
+  /* 标题里的 span 自己带了 text-right（桌面那套），窄屏下要压回去 */
+  .form-stack .form-label > * {
+    text-align: left;
+  }
+
+  /* 窄屏下控件占满一行，别留着桌面那点固定宽度 */
+  .form-stack .form-row:not(.form-row-inline) > * {
+    width: 100%;
+  }
+
+  /*
+    窄屏下输入类控件的字号提到 16px。
+
+    iOS Safari 在聚焦 font-size < 16px 的输入框时会**自动把整个页面放大**，而且不会
+    自己缩回去——表单里用的是 12–14px，正好踩在这条线上。挡住它只能靠字号：
+    `user-scalable=no` / `maximum-scale=1` 从 iOS 10 起就被 Safari 忽略。
+    桌面不受影响（这条只在窄屏生效），代价是手机上输入框的字大一号。
+  */
+  @media (max-width: 767px) {
+    input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
   }
 }
 
@@ -191,6 +294,18 @@
   font-family: var(--font-mono) !important;
   font-size: 12.5px;
   line-height: 1.6;
+}
+
+/*
+  移动布局下源码 / 生命周期脚本的编辑器放大到 16px：同一个理由（iOS 聚焦会放大整个
+  页面），而且手机上 12.5px 等宽字确实看不清。
+
+  这里跟的是**布局开关**（SourceEditor 给根节点挂 .cm-mobile）而不是视口宽度：布局可以
+  在设置里手动钉死，拿宽度媒体查询去判就会「明明在移动布局里，字号还是 12.5」。
+  放在上面那条规则之后，同权重后来者胜。
+*/
+.cm-mobile .cm-scroller {
+  font-size: 16px;
 }
 
 .term-host .xterm {

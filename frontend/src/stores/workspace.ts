@@ -5,6 +5,7 @@ import {
   createEntry,
   deleteEntry,
   downloadEntry,
+  extractEntry,
   getArtifacts,
   getPlatforms,
   getSettings,
@@ -18,7 +19,9 @@ import {
   writeFile,
 } from '@/api/endpoints'
 import { ApiError } from '@/api/client'
-import type { Artifact, FsEntry, PackResult, PackSettings } from '@/api/types'
+import type { Artifact, ExtractResult, FsEntry, PackResult, PackSettings } from '@/api/types'
+import { i18n } from '@/i18n'
+import { uniqueName } from '@/utils/format'
 import { useLogsStore } from './logs'
 
 /** 项目标签内固定的「总览」子标签 id（原来的「打包」页）。 */
@@ -27,6 +30,44 @@ export const OVERVIEW_TAB = '__overview__'
 export const SHORTCUTS_TAB = '__shortcuts__'
 /** 固定子标签：图标统一处理。 */
 export const ICON_TAB = '__icon__'
+/**
+ * 固定子标签：文件管理器。
+ *
+ * 只有标签页模式（`viewMode === 'tabs'`）才有这个标签——左栏文件树模式下文件树
+ * 就长在侧边栏里，再给一个同名标签是重复的。
+ */
+export const FILES_TAB = '__files__'
+
+/**
+ * 进入项目时默认停在哪。
+ *
+ * 「快捷设置」是打开项目之后最常去的一页（改 manifest / 权限 / 脚本），总览更多是
+ * 打包时才看，所以默认落在快捷设置上。
+ */
+export const DEFAULT_TAB = SHORTCUTS_TAB
+
+/** 文件管理器的两种形态。 */
+export type ViewMode = 'tree' | 'tabs'
+
+/** 标签页模式里文件列表的两种排布。 */
+export type BrowserView = 'list' | 'grid'
+
+/**
+ * 粘贴的结果。
+ *
+ * 只回状态、不回文案：给用户看的那句话要按当前语言渲染，那是组件的事。store 里
+ * 只用 i18n 取「副本」这个后缀——那是个取值，不是一句话。
+ */
+export type PasteOutcome = 'ok' | 'exists' | 'unreadable' | 'invalid'
+
+/** 固定子标签的 id 一律是 `__xxx__` 这种形状；文件子标签用的是文件路径。 */
+const isFixedTab = (id: string) => id.startsWith('__') && id.endsWith('__')
+
+const viewModeKey = (name: string) => `fpkstudio.viewMode.${name}`
+
+function readViewMode(name: string): ViewMode {
+  return window.localStorage.getItem(viewModeKey(name)) === 'tabs' ? 'tabs' : 'tree'
+}
 
 export interface FileTab {
   /** 相对于项目目录的路径，例如 `config/privilege`。 */
@@ -41,6 +82,13 @@ export interface FileTab {
   sizeRaw: string
   /** 打开时的原始内容，用于判断改动与「还原」。 */
   origin: string
+  /**
+   * 编辑器手里正在编、还没落到 `origin` 的内容。
+   *
+   * 只在编辑器被卸载时写进来（切换桌面 / 移动布局会重建编辑器宿主），让重新挂载的
+   * 编辑器接着编。保存 / 还原后清空——它是「临时接力棒」，不是第二份真相。
+   */
+  draft: string
   /**
    * 磁盘上还不存在这个文件（读取返回 404）。
    *
@@ -62,6 +110,34 @@ export interface ProjectState {
 
   files: FileTab[]
   activeTab: string
+  /**
+   * 打开文件之前停在哪（固定标签）。
+   *
+   * 关掉文件标签时退回这里，而不是无脑退回总览：移动端的「后退」就是靠它回到打开
+   * 编辑前的位置（从「文件」标签点进去的，就该退回「文件」标签）。
+   */
+  fileReturnTab: string
+
+  /** 文件管理器用哪种形态：左栏文件树 / 固定「文件」标签页。记在 localStorage。 */
+  viewMode: ViewMode
+  /**
+   * 标签页模式当前所在的目录（含项目名的完整路径，和 `dirs` 的键同一套写法）。
+   *
+   * 和 `expanded` 不同，这里只是一个游标：进入子目录时压栈，后退 / 前进在栈之间
+   * 来回搬，这样「后退」才真的是浏览器那种后退，而不是回到项目根。
+   */
+  browserDir: string
+  browserBack: string[]
+  browserForward: string[]
+  /** 标签页模式的列表 / 网格排布（不进 localStorage，跟着会话走）。 */
+  browserView: BrowserView
+  /**
+   * 复制 / 剪切剪贴板：只记路径，不搬内容。
+   *
+   * 放在 store 而不是组件里，是因为文件树和「文件」标签页是同一批文件的两个视图：
+   * 在标签页里复制、切回文件树粘贴必须能连上。
+   */
+  clipboard: { path: string; cut: boolean } | null
 
   /** 是否 docker 应用 / 是否带桌面入口，决定快捷设置与图标页的可选项。 */
   docker: boolean
@@ -86,7 +162,14 @@ function emptyState(name: string): ProjectState {
     dirs: {},
     expanded: {},
     files: [],
-    activeTab: OVERVIEW_TAB,
+    activeTab: DEFAULT_TAB,
+    fileReturnTab: DEFAULT_TAB,
+    viewMode: readViewMode(name),
+    browserDir: name,
+    browserBack: [],
+    browserForward: [],
+    browserView: 'list',
+    clipboard: null,
     docker: false,
     ui: false,
     assetRev: 0,
@@ -282,6 +365,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return existing
     }
 
+    // 从固定标签（文件 / 总览 / …）打开文件时记住它，关掉文件时退回这里。
+    // 从另一个文件打开（桌面上连着开好几个）不覆盖：那种情况按相邻标签退更自然。
+    if (!s.files.some((f) => f.path === s.activeTab)) s.fileReturnTab = s.activeTab
+
     s.files.push({
       path: rel,
       name: rel.split('/').pop() ?? rel,
@@ -291,6 +378,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       text: true,
       sizeRaw: '',
       origin: '',
+      draft: '',
       missing: false,
     })
     s.activeTab = rel
@@ -324,10 +412,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const index = s.files.findIndex((f) => f.path === rel)
     if (index < 0) return
     s.files.splice(index, 1)
-    if (s.activeTab === rel) {
-      const next = s.files[index] ?? s.files[index - 1]
-      s.activeTab = next ? next.path : OVERVIEW_TAB
-    }
+    if (s.activeTab !== rel) return
+
+    // 退回「打开这个文件之前停在哪」。那个位置要是已经没了（原来停在另一个文件上、
+    // 而它已经被关掉），再退回相邻的文件标签 / 总览。
+    const back = s.fileReturnTab
+    const alive = back !== '' && back !== rel && (isFixedTab(back) || s.files.some((f) => f.path === back))
+    const next = s.files[index] ?? s.files[index - 1]
+    s.activeTab = alive ? back : (next ? next.path : DEFAULT_TAB)
   }
 
   function setActive(name: string, tab: string) {
@@ -337,6 +429,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function setDirty(name: string, rel: string, dirty: boolean) {
     const tab = state(name).files.find((f) => f.path === rel)
     if (tab && tab.dirty !== dirty) tab.dirty = dirty
+  }
+
+  /** 记下编辑器里还没保存的内容（编辑器被卸载时用，见 FileTab.draft）。 */
+  function setDraft(name: string, rel: string, draft: string) {
+    const tab = state(name).files.find((f) => f.path === rel)
+    if (tab) tab.draft = draft
   }
 
   /** 从磁盘重新读取某个已打开文件，丢弃未保存的改动。 */
@@ -355,6 +453,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tab.error = errText(e)
     } finally {
       tab.loading = false
+      tab.draft = ''
       tab.dirty = false
     }
   }
@@ -372,12 +471,145 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         await refreshDir(name, parent).catch(() => undefined)
       }
       tab.origin = content
+      tab.draft = ''
       tab.dirty = false
     }
     if (IMAGE_PATH_RE.test(rel)) bumpAssets(name)
   }
 
   const dirtyCount = (name: string) => state(name).files.filter((f) => f.dirty).length
+
+  // ---- 文件管理器的形态与位置 ----
+
+  /**
+   * 切换文件管理器的形态。
+   *
+   * 「文件」标签只在标签页模式里存在，所以切回左栏模式时必须把停在上面的面板挪走，
+   * 否则面板区会变成一片空白（标签没了，但 activeTab 还指着它）。
+   */
+  function setViewMode(name: string, mode: ViewMode) {
+    const s = state(name)
+    s.viewMode = mode
+    window.localStorage.setItem(viewModeKey(name), mode)
+    if (mode === 'tree') {
+      if (s.activeTab === FILES_TAB) s.activeTab = DEFAULT_TAB
+      return
+    }
+    // 切过去就直接停在「文件」标签上：按钮说的是「切到标签页模式」，人还留在总览
+    // 的话，看起来就像什么都没发生（只是左边少了一栏）。
+    s.activeTab = FILES_TAB
+    void loadDir(name, s.browserDir).catch(() => undefined)
+  }
+
+  function setBrowserView(name: string, view: BrowserView) {
+    state(name).browserView = view
+  }
+
+  /** 进入某个目录（压一次后退栈，清掉前进栈——和浏览器一致）。 */
+  function browseTo(name: string, dir: string) {
+    const s = state(name)
+    if (dir === s.browserDir) return
+    s.browserBack.push(s.browserDir)
+    s.browserForward = []
+    s.browserDir = dir
+  }
+
+  function browseBack(name: string) {
+    const s = state(name)
+    const prev = s.browserBack.pop()
+    if (prev === undefined) return
+    s.browserForward.push(s.browserDir)
+    s.browserDir = prev
+  }
+
+  function browseForward(name: string) {
+    const s = state(name)
+    const next = s.browserForward.pop()
+    if (next === undefined) return
+    s.browserBack.push(s.browserDir)
+    s.browserDir = next
+  }
+
+  /**
+   * 拉标签页模式当前目录的内容。
+   *
+   * `force` 给「刷新」按钮用：不吃缓存。失败记在 `state.error` 上，面板里就地显示
+   * 一句原因和重试——和文件树展开失败的处理保持一致，不要静默画成空目录。
+   */
+  async function loadBrowserDir(name: string, force = false) {
+    const s = state(name)
+    s.error = ''
+    try {
+      await loadDir(name, s.browserDir, force)
+    } catch (e) {
+      s.error = errText(e)
+      return
+    }
+    if (force) await reloadPackageInfo(name)
+  }
+
+  // ---- 剪贴板 ----
+
+  function copyToClipboard(name: string, path: string, cut: boolean) {
+    state(name).clipboard = { path, cut }
+  }
+
+  function clearClipboard(name: string, path?: string) {
+    const s = state(name)
+    if (!path || s.clipboard?.path === path) s.clipboard = null
+  }
+
+  /**
+   * 能不能把剪贴板里的东西粘到 destDir。
+   *
+   * 除了「剪贴板里有东西」，还要挡住「把目录粘进它自己或者它的子孙里」——
+   * 复制会无限递归，剪切会被后端拒绝（`fsx.Rename` 明确挡了这一条）。
+   */
+  function canPasteTo(name: string, destDir: string): boolean {
+    const clip = state(name).clipboard
+    if (!clip) return false
+    return destDir !== clip.path && !destDir.startsWith(`${clip.path}/`)
+  }
+
+  /**
+   * 粘贴：复制走 copy，剪切走 rename（同一个存储卷，就是一次改名）。
+   *
+   * 目标重名时复制会自动换个名字（`xxx - 副本`），绝不覆盖；剪切则直接拒绝——
+   * 改名到一个已存在的路径上，轻则报错重则覆盖，不如让用户自己决定。
+   *
+   * 粘一次就把剪贴板清掉（复制和剪切都是）：剪贴板在这里只是「搬一次文件」的中转，
+   * 留着它反而容易在切了几层目录之后粘错地方。
+   */
+  async function pasteInto(name: string, destDir: string): Promise<PasteOutcome> {
+    const s = state(name)
+    const clip = s.clipboard
+    if (!clip) return 'invalid'
+    if (!canPasteTo(name, destDir)) return 'invalid'
+    const fileName = clip.path.split('/').pop() ?? ''
+    if (!fileName) return 'invalid'
+
+    // 目标目录的内容必须现拉一次（force）：缓存里那份可能还是空的
+    // ——「粘贴时刚好同名」的判据全靠它，读旧了就会把别人的文件覆盖掉。
+    // 拉不到就干脆不粘：宁可让用户重试，也不冒覆盖的风险。
+    try {
+      await loadDir(name, destDir, true)
+    } catch {
+      return 'unreadable'
+    }
+
+    const siblings = s.dirs[destDir] ?? []
+    const taken = siblings.some((entry) => entry.name === fileName)
+    if (taken && clip.cut) return 'exists'
+
+    const to = `${destDir}/${uniqueName(siblings, fileName, i18n.global.t('tree.copySuffix'))}`
+    if (clip.cut) await renameEntryAt(name, clip.path, to)
+    else await copyEntryAt(name, clip.path, to)
+    s.clipboard = null
+    // 树里 / 列表里当下就能看到粘贴结果；复制和剪切都只刷了源目录，目标目录补一次。
+    s.expanded[destDir] = true
+    await refreshDir(name, destDir)
+    return 'ok'
+  }
 
   // ---- 文件操作 ----
 
@@ -392,8 +624,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     await deleteEntry(path, dir)
     const parent = path.split('/').slice(0, -1).join('/') || name
     await refreshDir(name, parent)
-    // 关掉被删掉的文件标签
     const s = state(name)
+    // 删掉的正好是标签页模式当前所在的目录（或它的祖先）时，游标要退回上一层，
+    // 否则那个面板会一直停在一个已经不存在的目录上。
+    if (s.browserDir === path || s.browserDir.startsWith(`${path}/`)) {
+      s.browserBack = []
+      s.browserForward = []
+      s.browserDir = parent
+    }
+    // 关掉被删掉的文件标签
     const rel = fileTabPath(name, path)
     for (const f of [...s.files]) {
       if (f.path === rel || (dir && f.path.startsWith(`${rel}/`))) closeFile(name, f.path)
@@ -405,6 +644,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const parent = path.split('/').slice(0, -1).join('/') || name
     await refreshDir(name, parent)
     const s = state(name)
+    // 改名的是一个目录、而标签页模式正待在里面时，游标跟着改过的前缀走。
+    if (s.browserDir === path || s.browserDir.startsWith(`${path}/`)) {
+      s.browserDir = to + s.browserDir.slice(path.length)
+    }
     const rel = fileTabPath(name, path)
     const tab = s.files.find((f) => f.path === rel)
     if (tab) {
@@ -423,8 +666,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     await refreshDir(name, parent)
   }
 
-  async function uploadTo(name: string, dir: string, files: File[], overwrite: boolean) {
-    const res = await uploadFiles(dir, files, overwrite)
+  /**
+   * 解压到压缩包所在的目录（后端调系统 tar / gzip）。
+   *
+   * 同名文件一律跳过，所以返回值里的 `skipped` 要交给调用方告诉用户——不声不响地
+   * 少解几个文件，比报错更让人摸不着头脑。
+   */
+  async function extractAt(name: string, path: string): Promise<ExtractResult> {
+    const res = await extractEntry(path)
+    // res.dir 是相对**项目根目录**（后端沙箱的根）的，和 `dirs` 的键同一套写法，
+    // 直接拿来用；只有解压在项目根上时它才是 "."。
+    await refreshDir(name, res.dir === '.' ? name : res.dir)
+    bumpAssets(name)
+    return res
+  }
+
+  /** 上传一批文件到 dir。`onProgress` 收的是 0–100 的百分比，给进度提示用。 */
+  async function uploadTo(
+    name: string,
+    dir: string,
+    files: File[],
+    overwrite: boolean,
+    onProgress?: (percent: number) => void,
+  ) {
+    const res = await uploadFiles(dir, files, overwrite, onProgress)
     await refreshDir(name, dir)
     bumpAssets(name)
     return res
@@ -474,13 +739,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     closeFile,
     setActive,
     setDirty,
+    setDraft,
     saveFile,
     reloadFile,
     dirtyCount,
+    setViewMode,
+    setBrowserView,
+    browseTo,
+    browseBack,
+    browseForward,
+    loadBrowserDir,
+    copyToClipboard,
+    clearClipboard,
+    canPasteTo,
+    pasteInto,
     createEntryAt,
     removeEntryAt,
     renameEntryAt,
     copyEntryAt,
+    extractAt,
     uploadTo,
     downloadAt,
     updateSettings,

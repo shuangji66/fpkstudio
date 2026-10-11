@@ -403,5 +403,15 @@ function setSwitch(item: WizardItem, value: boolean | string | number) {
   item.initValue = value ? 'true' : 'false'
 }
 
-defineExpose(api)
+defineExpose({
+  ...api,
+  /**
+   * 解析失败时拦住保存。
+   *
+   * 解析失败 = 表单里那份模型是空的，`getContent()` 交出去的是 `[]`。直接保存就会把
+   * 用户的向导文件清空——那是不可逆的，所以宁可不让存：源码视图里改回来再存。
+   */
+  saveBlocked: () =>
+    model.value.error ? t('editor.formatWizard', { detail: model.value.error }) : '',
+})
 </script>

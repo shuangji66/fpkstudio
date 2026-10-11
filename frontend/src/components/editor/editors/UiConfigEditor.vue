@@ -1,43 +1,43 @@
 <template>
-  <div class="flex h-full min-h-0">
-    <aside class="flex w-56 shrink-0 flex-col border-r border-slate-200 dark:border-slate-700">
-      <header class="flex items-center gap-1 border-b border-slate-200 dark:border-slate-700 px-2 py-1.5">
-        <span class="text-xs font-medium text-slate-600 dark:text-slate-300">{{ t('uiConfig.entries') }}</span>
-        <span class="flex-1" />
-        <el-button text size="small" :icon="Plus" @click="startAdd" />
-      </header>
-      <div class="min-h-0 flex-1 overflow-auto thin-scroll py-1">
-        <div
+  <div class="flex h-full min-h-0 flex-col">
+    <!--
+      入口用一层标签切换，而不是左侧竖排列表：窄屏上竖排列表会把表单挤到没地方，
+      而入口本来就少、名字也短，横着排一眼看全。最左边是「添加入口」。
+    -->
+    <div class="flex shrink-0 items-stretch border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+      <div class="hscroll thin-scroll flex min-w-0 flex-1 items-stretch gap-0.5 px-1">
+        <button type="button" class="subtab subtab-idle shrink-0" @click="startAdd">
+          <el-icon class="text-[13px]"><Plus /></el-icon>
+          <span>{{ t('uiConfig.addEntry') }}</span>
+        </button>
+        <input
           v-if="adding"
-          class="px-2 py-1"
-        >
-          <input
-            ref="addInput"
-            v-model="newId"
-            class="mono w-full rounded border border-sky-400 px-1 text-[12px] outline-none"
-            placeholder="myapp.main"
-            @keydown.enter="commitAdd"
-            @keydown.esc="adding = false"
-            @blur="commitAdd"
-          />
-        </div>
+          ref="addInput"
+          v-model="newId"
+          class="mono my-1 w-40 shrink-0 rounded border border-sky-400 px-1 text-[12px] outline-none"
+          placeholder="myapp.main"
+          @keydown.enter="commitAdd"
+          @keydown.esc="adding = false"
+          @blur="commitAdd"
+        />
         <button
           v-for="entry in entries"
           :key="entry.id"
           type="button"
-          class="block w-full truncate px-2 py-1 text-left text-[12px] hover:bg-slate-100 dark:hover:bg-slate-700"
-          :class="entry.id === selected ? 'bg-sky-50 dark:bg-sky-950/40 font-medium text-sky-700 dark:text-sky-300' : 'text-slate-600 dark:text-slate-300'"
+          class="subtab max-w-[14rem] shrink-0"
+          :class="entry.id === selected ? 'subtab-active' : 'subtab-idle'"
+          :title="entry.id"
           @click="selected = entry.id"
         >
-          {{ entry.id }}
+          <span class="truncate">{{ entry.id }}</span>
         </button>
-        <p v-if="!entries.length" class="px-2 py-2 text-[11px] text-slate-400 dark:text-slate-500">
-          {{ t('common.empty') }}
-        </p>
       </div>
-    </aside>
+    </div>
 
-    <div class="min-w-0 flex-1 overflow-y-auto thin-scroll px-4 py-3">
+    <div
+      class="min-w-0 flex-1 overflow-y-auto thin-scroll px-4 py-3"
+      :class="{ 'form-stack': layout.isMobile }"
+    >
       <div v-if="model.error" class="mb-3 rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
         {{ t('editor.readFailed') }}: {{ model.error }}
       </div>
@@ -51,12 +51,8 @@
           </el-button>
         </div>
 
-        <p class="mb-3 rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-          {{ t('uiConfig.hint') }}
-        </p>
-
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.entryId') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.entryId') }}</span>
           <el-input
             v-model="idDraft"
             size="small"
@@ -67,47 +63,47 @@
           />
         </div>
 
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.title') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.title') }}</span>
           <el-input v-model="current.value.title" size="small" class="w-64" />
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.icon') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.icon') }}</span>
           <el-input v-model="current.value.icon" size="small" class="w-64" placeholder="images/icon_{0}.png" />
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.type') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.type') }}</span>
           <el-select v-model="current.value.type" size="small" class="w-64">
             <el-option :label="t('uiConfig.typeIframe')" value="iframe" />
             <el-option :label="t('uiConfig.typeUrl')" value="url" />
           </el-select>
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.protocol') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.protocol') }}</span>
           <el-select v-model="current.value.protocol" size="small" class="w-64">
             <el-option label="（自适应）" value="" />
             <el-option label="http" value="http" />
             <el-option label="https" value="https" />
           </el-select>
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.port') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.port') }}</span>
           <el-input v-model="current.value.port" size="small" class="w-64" placeholder="${wizard_port}" />
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.url') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.url') }}</span>
           <el-input v-model="current.value.url" size="small" class="w-64" />
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewayPrefix') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewayPrefix') }}</span>
           <el-input v-model="current.value.gatewayPrefix" size="small" class="w-64" placeholder="/app/myapp" />
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewaySocket') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewaySocket') }}</span>
           <el-input v-model="current.value.gatewaySocket" size="small" class="w-64" placeholder="app.sock" />
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.fileTypes') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.fileTypes') }}</span>
           <el-select
             v-model="current.value.fileTypes"
             size="small"
@@ -120,8 +116,8 @@
             <el-option v-for="item in current.value.fileTypes" :key="item" :label="item" :value="item" />
           </el-select>
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.accessPerm') }}</span>
+        <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.accessPerm') }}</span>
           <!-- 所有用户可见时，逐个用户的权限设置没有意义，直接禁用 -->
           <el-select
             v-model="current.value.control.accessPerm"
@@ -134,12 +130,14 @@
             <el-option :label="t('uiConfig.permHidden')" value="hidden" />
           </el-select>
         </div>
-        <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span />
-          <div class="flex items-center gap-4">
-            <el-checkbox v-model="current.value.allUsers">{{ t('uiConfig.allUsers') }}</el-checkbox>
-            <el-checkbox v-model="current.value.noDisplay">{{ t('uiConfig.noDisplay') }}</el-checkbox>
-          </div>
+        <!-- 开关是小控件，窄屏下也不用分行（form-row-inline） -->
+        <div class="form-row form-row-inline grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.allUsers') }}</span>
+          <el-switch v-model="current.value.allUsers" />
+        </div>
+        <div class="form-row form-row-inline grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
+          <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.noDisplay') }}</span>
+          <el-switch v-model="current.value.noDisplay" />
         </div>
       </template>
 
@@ -153,6 +151,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Delete, Plus } from '@element-plus/icons-vue'
+import { useLayoutStore } from '@/stores/layout'
 import { parseJSON, stringifyOrdered, useEditor, type EditorProps } from '../useEditor'
 
 interface UiEntry {
@@ -181,6 +180,7 @@ interface Model {
 const props = defineProps<EditorProps>()
 const emit = defineEmits<{ dirty: [value: boolean] }>()
 const { t } = useI18n()
+const layout = useLayoutStore()
 
 function normalizeEntry(raw: Record<string, unknown>): UiEntry {
   const control = (raw.control ?? {}) as Record<string, unknown>
@@ -299,5 +299,16 @@ function removeEntry(id: string) {
   selected.value = Object.keys(model.value.urls)[0] ?? ''
 }
 
-defineExpose(api)
+defineExpose({
+  ...api,
+  /**
+   * 解析失败时拦住保存。
+   *
+   * 解析失败 = 表单里那份模型是空的，`getContent()` 交出去的是一份空配置。直接保存
+   * 就会把用户那份（也许只是少了个括号、还能救的）文件覆盖掉——不可逆，所以宁可
+   * 不让存：在源码视图里改回来再存。
+   */
+  saveBlocked: () =>
+    model.value.error ? t('editor.formatJson', { detail: model.value.error }) : '',
+})
 </script>
