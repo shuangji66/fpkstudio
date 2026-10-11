@@ -261,10 +261,7 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 	// 在此处 chmod 反而会把项目目录的 ACL 换成模式位，动到用户的文件权限。
 	// 建工作目录：building/platform 下预置 arm / x86，多架构发布勾一下就能用
 	// （架构目录名就是 fpk 的 platform 值，内容会被复制到 app/server 再打包）。
-	dirs := []string{rel + "/building", rel + "/building/platform"}
-	for _, arch := range defaultPlatforms {
-		dirs = append(dirs, rel+"/building/platform/"+arch)
-	}
+	dirs := append([]string{rel + "/building", rel + "/building/platform"}, platformDirs(rel)...)
 	for _, d := range dirs {
 		if err := m.prj.Mkdir(d, true); err != nil {
 			return err
@@ -647,10 +644,26 @@ func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (Pro
 	if err := os.Rename(m.home.Abs(stage), m.prj.Abs(rel)); err != nil {
 		return ProjectInfo{}, fmt.Errorf("移动到项目目录失败: %w", err)
 	}
-	_ = m.prj.Mkdir(rel+"/building/platform", true)
+	// 导入的 fpk 里没有多架构工作目录（包内只有打包后的 app/），这里补上 arm / x86：
+	// 与 Create 保持一致，多架构发布勾一下就能用。失败只记日志——项目已经落地了，
+	// 而且前端的「打开多架构发布」还会再补一次。
+	for _, dir := range platformDirs(rel) {
+		if err := m.prj.Mkdir(dir, true); err != nil {
+			m.log.Warnf("创建架构目录 %s 失败: %v", dir, err)
+		}
+	}
 
 	m.log.Infof("导入项目 %s 完成", name)
 	return m.Info(name)
+}
+
+// platformDirs 是某个项目下预置的架构工作目录（相对项目根）。
+func platformDirs(rel string) []string {
+	dirs := make([]string, 0, len(defaultPlatforms))
+	for _, arch := range defaultPlatforms {
+		dirs = append(dirs, rel+"/building/platform/"+arch)
+	}
+	return dirs
 }
 
 // ---- 内部工具 ----

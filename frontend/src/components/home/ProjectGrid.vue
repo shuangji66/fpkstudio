@@ -11,94 +11,45 @@
     {{ t('home.noMatch') }}
   </div>
 
-  <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-3">
-    <article
+  <!-- 平铺：卡片自适应列宽 -->
+  <div
+    v-else-if="view === 'grid'"
+    class="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3"
+  >
+    <ProjectCard
       v-for="item in projects.filtered"
       :key="item.name"
-      class="panel group flex flex-col p-3 transition-shadow hover:shadow-md"
-    >
-      <div class="flex items-start gap-2">
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2">
-            <h3 class="mono truncate text-sm font-semibold text-slate-800" :title="item.name">
-              {{ projectLabel(item) }}
-            </h3>
-            <!-- 只在需要提醒时打标签：docker、以及没有桌面入口的原生项目 -->
-            <el-tag v-if="kindLabel(item)" size="small" :type="kindType(item)" effect="plain">
-              {{ kindLabel(item) }}
-            </el-tag>
-          </div>
-          <p
-            v-if="item.name !== projectLabel(item)"
-            class="mono mt-0.5 truncate text-[11px] text-slate-500"
-            :title="item.name"
-          >
-            {{ item.name }}
-          </p>
-        </div>
-      </div>
+      layout="grid"
+      :item="item"
+      @open="emit('open', $event)"
+    />
+  </div>
 
-      <dl class="mt-2 grid grid-cols-[4rem_1fr] gap-x-2 gap-y-0.5 text-[11px]">
-        <dt class="text-slate-400">{{ t('home.modifiedAt') }}</dt>
-        <dd class="truncate text-slate-600">{{ item.modTime }}</dd>
-      </dl>
-
-      <div class="mt-3 flex items-center gap-2">
-        <el-button size="small" type="primary" @click="emit('open', item)">
-          {{ t('home.open') }}
-        </el-button>
-        <el-button size="small" @click="remove(item)">{{ t('common.delete') }}</el-button>
-      </div>
-    </article>
+  <!--
+    列表：一行一个项目。宽度足够时按固定列宽分列（先填满一列的高度、再横向铺开，
+    横向滚动）；窄屏只剩一列，纵向滚动。列数规则在 style.css 的 .list-columns 里。
+  -->
+  <div v-else class="list-columns gap-3">
+    <ProjectCard
+      v-for="item in projects.filtered"
+      :key="item.name"
+      layout="list"
+      :item="item"
+      @open="emit('open', $event)"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import ProjectCard from './ProjectCard.vue'
 import { useProjectsStore } from '@/stores/projects'
-import { projectLabel } from '@/utils/format'
 import type { ProjectInfo } from '@/api/types'
 
-const emit = defineEmits<{
-  open: [project: ProjectInfo]
-  deleted: [name: string]
-}>()
+defineProps<{ view: 'grid' | 'list' }>()
+
+const emit = defineEmits<{ open: [project: ProjectInfo] }>()
 
 const { t } = useI18n()
 const projects = useProjectsStore()
-
-/**
- * 卡片上的类型标签。
- *
- * 只在「需要知道」时才显示：docker 项目、以及没有桌面入口的原生项目。
- * 原生 + 入口是最常见的情况，再挂个「原生」标签只是噪声。
- */
-function kindLabel(item: ProjectInfo): string {
-  if (item.docker) return t('project.kindDocker')
-  if (!item.ui) return t('project.kindNoEntry')
-  return ''
-}
-
-function kindType(item: ProjectInfo): 'warning' | 'info' {
-  return item.docker ? 'warning' : 'info'
-}
-
-async function remove(item: ProjectInfo) {
-  try {
-    await ElMessageBox.confirm(
-      t('home.confirmDelete', { name: item.displayName || item.name }),
-      t('common.tip'),
-      { type: 'warning', confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel') },
-    )
-  } catch {
-    return
-  }
-  try {
-    await projects.remove(item.name)
-    emit('deleted', item.name)
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
-  }
-}
 </script>

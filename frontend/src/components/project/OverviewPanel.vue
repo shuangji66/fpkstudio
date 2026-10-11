@@ -287,6 +287,9 @@ watch(manifestBaseline, () => {
   void loadManifest()
 })
 
+/** 多架构发布至少要有这两个架构目录，勾上开关时缺哪个补哪个。 */
+const DEFAULT_ARCHES = ['arm', 'x86']
+
 /** 产物在项目目录里时用相对路径下载，在输出目录里时后端只能给绝对路径，改用项目内路径。 */
 function getDownloadPath(item: Artifact): string {
   return item.scope === 'output' ? `${props.project}/${item.name}` : item.path
@@ -309,6 +312,31 @@ async function reload() {
   copyOut.value = state.value.settings.copyToOutput
   await loadManifest()
 }
+
+/**
+ * 打开多架构发布时补齐 arm / x86 目录。
+ *
+ * 导入的 fpk 里没有这套工作目录（后端导入时补过一次），但项目也可能是更早导入的、
+ * 或者目录被删过。缺目录时这一页只有一个「还没有架构目录」的空状态，用户会以为是坏的。
+ * 只建目录、不自动勾选：空目录打出来的包内容是空的，得自己把产物放进去。
+ */
+async function ensureArchDirs() {
+  const missing = DEFAULT_ARCHES.filter((arch) => !state.value.platforms.includes(arch))
+  if (!missing.length) return
+  try {
+    for (const arch of missing) {
+      await workspace.createEntryAt(props.project, `${props.project}/building/platform`, arch, true)
+    }
+    await workspace.reloadPackageInfo(props.project)
+    ElMessage.info(t('pack.archAdded', { names: missing.join(', ') }))
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+watch(multi, (on) => {
+  if (on) void ensureArchDirs()
+})
 
 async function run() {
   if (multi.value && !selectedPlatforms.value.length) {

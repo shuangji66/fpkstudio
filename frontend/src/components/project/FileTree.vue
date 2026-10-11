@@ -50,7 +50,10 @@
       <template v-for="row in rows" :key="row.path">
         <div
           class="group flex cursor-pointer items-center gap-1 rounded px-1.5 py-[3px] hover:bg-slate-100"
-          :class="selected === row.path ? 'bg-sky-50 ring-1 ring-inset ring-sky-200' : ''"
+          :class="[
+            selected === row.path ? 'bg-sky-50 ring-1 ring-inset ring-sky-200' : '',
+            cutPath === row.path ? 'opacity-50' : '',
+          ]"
           @click="onClick(row)"
           @contextmenu.prevent="openMenu(row.path, row.dir, $event)"
         >
@@ -142,6 +145,7 @@
 
     <div
       v-if="menu.show"
+      ref="menuEl"
       class="fixed z-50 min-w-[9rem] rounded-md border border-slate-200 bg-white py-1 text-[13px] shadow-lg"
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
     >
@@ -149,8 +153,9 @@
         v-for="item in menuItems"
         :key="item.label"
         type="button"
-        class="block w-full whitespace-nowrap px-3 py-1 text-left hover:bg-slate-100"
+        class="block w-full whitespace-nowrap px-3 py-1 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
         :class="item.danger ? 'text-red-600' : ''"
+        :disabled="item.disabled === true"
         @click="item.run()"
       >
         {{ item.label }}
@@ -178,7 +183,7 @@ import {
   UploadFilled,
 } from '@element-plus/icons-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { humanSize } from '@/utils/format'
+import { humanSize, uniqueName } from '@/utils/format'
 
 const props = defineProps<{ project: string }>()
 
@@ -220,6 +225,15 @@ function firstEl(
 }
 
 const menu = reactive({ show: false, x: 0, y: 0, path: '', dir: false })
+const menuEl = ref<HTMLElement | null>(null)
+
+/**
+ * 剪贴板：复制 / 剪切的目标路径。
+ *
+ * 只记路径，不搬内容——粘贴时才真的落到磁盘上（复制走 copy 接口，剪切走 rename）。
+ * 和常见文件管理器一致：复制可以粘很多次，剪切粘一次就清掉（剪切中的那一行在树里淡一半）。
+ */
+const clipboard = ref<{ path: string; cut: boolean } | null>(null)
 
 const uploadTarget = computed(() => {
   if (selected.value === props.project) return props.project
@@ -331,6 +345,9 @@ async function onFiles(event: Event) {
 
 // ---- 右键菜单 ----
 
+/** 菜单离窗口边缘至少留这么多，免得被切掉 */
+const MENU_MARGIN = 8
+
 function openMenu(path: string, dir: boolean, event: MouseEvent) {
   selected.value = path
   menu.show = true
@@ -338,48 +355,142 @@ function openMenu(path: string, dir: boolean, event: MouseEvent) {
   menu.y = event.clientY
   menu.path = path
   menu.dir = dir
+  // 位置先按指针摆好，渲染出来量到真实尺寸后再夹回窗口内（一帧之内，看不出来）
+  void nextTick(clampMenu)
   window.setTimeout(() => window.addEventListener('click', hideMenu, { once: true }), 0)
+}
+
+/** 贴近右 / 下边缘点击时菜单会有一部分跑到窗口外，这里把它收回来。 */
+function clampMenu() {
+  const el = menuEl.value
+  if (!el) return
+  const { width, height } = el.getBoundingClientRect()
+  menu.x = Math.max(MENU_MARGIN, Math.min(menu.x, window.innerWidth - width - MENU_MARGIN))
+  menu.y = Math.max(MENU_MARGIN, Math.min(menu.y, window.innerHeight - height - MENU_MARGIN))
 }
 
 function hideMenu() {
   menu.show = false
 }
 
+/** 菜单所在的行对应的目录：目录就是它自己，文件取父目录，项目根就是项目根。 */
+const menuDir = computed(() => {
+  const path = menu.path
+  if (path === props.project) return props.project
+  return menu.dir ? path : path.slice(0, path.lastIndexOf('/'))
+})
+
+/** 剪切中的那一项（在树里淡一半，粘完就没了） */
+const cutPath = computed(() => (clipboard.value?.cut ? clipboard.value.path : ''))
+
+/**
+ * 能不能粘到菜单指向的目录里。
+ *
+ * 除了「剪贴板里有东西」，还要挡住「把目录粘进它自己或者它的子孙里」——
+ * 复制会无限递归，剪切会被后端拒绝（`fsx.Rename` 明确挡了这一条）。
+ */
+const canPaste = computed(() => {
+  const clip = clipboard.value
+  if (!clip) return false
+  const dest = menuDir.value
+  return dest !== clip.path && !dest.startsWith(`${clip.path}/`)
+})
+
+/**
+ * 粘贴：复制走 copy，剪切走 rename（同一个存储卷，就是一次改名）。
+ *
+ * 目标重名时复制会自动换个名字（`xxx - 副本`），绝不覆盖；剪切则直接拒绝——
+ * 改名到一个已存在的路径上，轻则报错重则覆盖，不如让用户自己决定。
+ */
+async function paste() {
+  const clip = clipboard.value
+  if (!clip || !canPaste.value) return
+  const destDir = menuDir.value
+  const name = clip.path.split('/').pop() ?? ''
+  if (!name) return
+
+  hideMenu()
+  try {
+    // 目标目录的内容必须现拉一次（force）：缓存里那份可能还是空的
+    // ——「粘贴时刚好同名」的判据全靠它，读旧了就会把别人的文件覆盖掉。
+    // 拉不到就干脆不粘：宁可让用户重试，也不冒覆盖的风险。
+    const fresh = await workspace
+      .loadDir(props.project, destDir, true)
+      .then(() => true)
+      .catch(() => false)
+    if (!fresh) {
+      ElMessage.error(t('tree.pasteListFailed', { name: destDir.split('/').pop() ?? destDir }))
+      return
+    }
+
+    const siblings = state.value.dirs[destDir] ?? []
+    const taken = siblings.some((entry) => entry.name === name)
+    if (taken && clip.cut) {
+      ElMessage.warning(t('tree.pasteExists', { name }))
+      return
+    }
+    const to = `${destDir}/${uniqueName(siblings, name, t('tree.copySuffix'))}`
+
+    if (clip.cut) {
+      await workspace.renameEntryAt(props.project, clip.path, to)
+      clipboard.value = null
+      selected.value = to
+    } else {
+      await workspace.copyEntryAt(props.project, clip.path, to)
+    }
+    // 树里当下就能看到粘贴结果；复制 / 剪切都只刷了源目录，目标目录得自己补一次
+    state.value.expanded[destDir] = true
+    await workspace.refreshDir(props.project, destDir)
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
 const menuItems = computed(() => {
   const path = menu.path
   const isRoot = path === props.project
-  const parent = menu.dir ? path : path.slice(0, path.lastIndexOf('/'))
+  const dir = menuDir.value
   return [
     {
       label: t('tree.newFile'),
       run: () => {
-        editing.value = { parent, name: '', dir: false }
-        state.value.expanded[parent] = true
+        editing.value = { parent: dir, name: '', dir: false }
+        state.value.expanded[dir] = true
         void nextTick(() => firstEl(createInput.value)?.focus())
       },
     },
     {
       label: t('tree.newDir'),
       run: () => {
-        editing.value = { parent, name: '', dir: true }
-        state.value.expanded[parent] = true
+        editing.value = { parent: dir, name: '', dir: true }
+        state.value.expanded[dir] = true
         void nextTick(() => firstEl(createInput.value)?.focus())
       },
     },
+    ...(clipboard.value
+      ? [
+          {
+            label: t('tree.paste'),
+            disabled: !canPaste.value,
+            run: () => void paste(),
+          },
+        ]
+      : []),
     ...(isRoot
       ? []
       : [
           { label: t('common.rename'), run: () => startRename(path) },
           {
-            label: t('common.copy'),
-            run: async () => {
-              const name = path.split('/').pop() ?? ''
-              const to = `${path.slice(0, path.lastIndexOf('/'))}/${name}.copy`
-              try {
-                await workspace.copyEntryAt(props.project, path, to)
-              } catch (e) {
-                ElMessage.error(e instanceof Error ? e.message : String(e))
-              }
+            label: t('tree.copy'),
+            run: () => {
+              clipboard.value = { path, cut: false }
+              ElMessage.success(t('tree.copied', { name: path.split('/').pop() ?? path }))
+            },
+          },
+          {
+            label: t('tree.cut'),
+            run: () => {
+              clipboard.value = { path, cut: true }
             },
           },
           { label: t('common.download'), run: () => workspace.downloadAt(path) },
@@ -403,6 +514,7 @@ const menuItems = computed(() => {
               }
               try {
                 await workspace.removeEntryAt(props.project, path, menu.dir)
+                if (clipboard.value?.path === path) clipboard.value = null
               } catch (e) {
                 ElMessage.error(e instanceof Error ? e.message : String(e))
               }

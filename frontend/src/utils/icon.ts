@@ -14,6 +14,65 @@ export type Raster = HTMLCanvasElement
 
 type Source = HTMLImageElement | Raster
 
+/** 入口图标的落地目录：默认入口是 icon_256 / icon_64，副入口是 <前缀>_256 / <前缀>_64。 */
+export const ENTRY_ICON_DIR = 'app/ui/images'
+
+/** 入口图标前缀的长度上限（它同时是文件名的一部分）。 */
+export const ICON_PREFIX_MAX = 32
+
+/**
+ * 收拾入口图标前缀。
+ *
+ * 前缀直接拼进文件名，所以只留文件名里安全的字符（字母数字和 `. _ -`），
+ * 路径分隔符、空格、中文都被剔掉——不然用它能写到 `app/ui/images/` 外面去。
+ */
+export function normalizeIconPrefix(input: string): string {
+  return input.trim().replace(/[^0-9A-Za-z._-]/g, '').slice(0, ICON_PREFIX_MAX)
+}
+
+/**
+ * 入口图标的落地路径：前缀 + 尺寸，例如 niubi + 256 → app/ui/images/niubi_256.png。
+ *
+ * 前缀为空（或者全是非法字符）时返回空串，调用方据此跳过这一项。
+ */
+export function entryIconPath(prefix: string, side: 256 | 64): string {
+  const safe = normalizeIconPrefix(prefix)
+  return safe ? `${ENTRY_ICON_DIR}/${safe}_${side}.png` : ''
+}
+
+/** 入口图标文件名的形状：`<前缀>_256.png` / `<前缀>_64.png`。 */
+const ENTRY_ICON_RE = /^(.+)_(256|64)\.png$/i
+
+/** 默认入口（app/ui/config 里那个主入口）用的前缀。 */
+export const DEFAULT_ENTRY_PREFIX = 'icon'
+
+/**
+ * 从 `app/ui/images/` 里的文件名取出入口图标前缀；不是入口图标就返回空串。
+ *
+ * 只认 64 / 256 两种分辨率：fnOS 的入口图标就用这两个尺寸，`<前缀>_128.png`
+ * 这类是别的工具留下的，当成入口图标反而会多出一组空壳。
+ */
+export function entryIconPrefix(fileName: string): string {
+  const match = ENTRY_ICON_RE.exec(fileName.trim())
+  return match ? match[1]! : ''
+}
+
+/**
+ * 从一个目录的文件名里认出**副入口**图标的前缀。
+ *
+ * 导入的多入口 fpk 里，每个入口都已经有一套 `<前缀>_256.png` / `<前缀>_64.png`，
+ * 默认入口用 `icon_`，其余就是副入口。只出现其中一个尺寸（另一个还没写过）也算，
+ * 界面上那一条留空、写入时可以补全。结果去重并排序，默认入口不在其中。
+ */
+export function entryIconPrefixes(fileNames: string[]): string[] {
+  const found = new Set<string>()
+  for (const name of fileNames) {
+    const prefix = entryIconPrefix(name)
+    if (prefix && prefix.toLowerCase() !== DEFAULT_ENTRY_PREFIX) found.add(prefix)
+  }
+  return [...found].sort()
+}
+
 /**
  * 读一张本地文件为图片。
  *
@@ -30,6 +89,22 @@ export function imageFromFile(file: File): Promise<{ image: HTMLImageElement; ur
       URL.revokeObjectURL(url)
       reject(new Error('图片解码失败'))
     }
+    image.src = url
+  })
+}
+
+/**
+ * 读一张已经有了地址的图片（站内文件地址，例如项目里现成的 ICON_256.PNG）。
+ *
+ * 和 imageFromFile 的区别只有一处：这里的地址不是 object URL，调用方不需要
+ * （也不该）去 revoke 它。解码失败直接抛错，由调用方决定是静默还是提示——
+ * 「项目里还没有这个图标」是常态，不该弹错误。
+ */
+export function imageFromURL(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('图片解码失败'))
     image.src = url
   })
 }

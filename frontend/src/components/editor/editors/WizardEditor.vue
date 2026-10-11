@@ -11,10 +11,6 @@
         <el-button size="small" :icon="Plus" @click="addStep">{{ t('wizard.addStep') }}</el-button>
       </div>
 
-      <p class="rounded-md bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
-        {{ t('wizard.hint') }}
-      </p>
-
       <p v-if="!model.steps.length" class="py-6 text-center text-xs text-slate-400">
         {{ t('wizard.empty') }}
       </p>
@@ -73,11 +69,31 @@
                 :placeholder="t('wizard.displayText')"
               />
               <span class="flex-1" />
+              <!--
+                调整这一项在本步骤里的位置。表单项的顺序就是向导里的显示顺序，
+                改动直接落在内存模型上（保存时按顺序回写源码）。
+              -->
+              <el-button
+                text
+                size="small"
+                :icon="ArrowUp"
+                :title="t('wizard.moveUp')"
+                :disabled="itemIndex === 0"
+                @click="moveItem(step, itemIndex, -1)"
+              />
+              <el-button
+                text
+                size="small"
+                :icon="ArrowDown"
+                :title="t('wizard.moveDown')"
+                :disabled="itemIndex === step.items.length - 1"
+                @click="moveItem(step, itemIndex, 1)"
+              />
               <el-button text size="small" :icon="Delete" @click="step.items.splice(itemIndex, 1)" />
             </div>
 
-            <!-- 默认值 / 帮助文本 -->
-            <div class="mt-2 flex flex-wrap items-center gap-2">
+            <!-- 默认值 / 校验（提示文字类字段没有默认值，只有下面那段说明） -->
+            <div v-if="item.type !== 'tips'" class="mt-2 flex flex-wrap items-center gap-2">
               <el-input
                 v-if="item.type === 'text' || item.type === 'password'"
                 v-model="item.initValue"
@@ -126,22 +142,22 @@
                 />
               </el-select>
 
-              <el-input
-                v-model="item.helpText"
-                size="small"
-                class="min-w-[16rem] flex-1"
-                :placeholder="t('wizard.helperText')"
-              />
+              <span class="flex-1" />
 
-              <el-button
-                v-if="item.type !== 'tips'"
-                size="small"
-                :icon="CirclePlus"
-                @click="addRule(item)"
-              >
+              <el-button size="small" :icon="CirclePlus" @click="addRule(item)">
                 {{ t('wizard.addRule') }}
               </el-button>
             </div>
+
+            <!-- 辅助文本：单独一行，写长了会自己撑高（说明文字常常是一整段） -->
+            <el-input
+              v-model="item.helpText"
+              class="mt-2"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 6 }"
+              resize="none"
+              :placeholder="t('wizard.helperText')"
+            />
 
             <!-- 选项（单选 / 多选 / 下拉） -->
             <div
@@ -264,7 +280,7 @@
 </template>
 
 <script setup lang="ts">
-import { CirclePlus, Delete, Plus } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, CirclePlus, Delete, Plus } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { useEditor, type EditorProps } from '../useEditor'
 import {
@@ -327,8 +343,35 @@ function addStep() {
   model.value.steps.push(newWizardStep(t('wizard.defaultStep'), emptyItem()))
 }
 
+/**
+ * 向导文件还没创建时先给一个步骤。
+ *
+ * 新建项目 / 刚导入的项目里这几份向导往往一个都不存在，打开是一个纯空白的表单，
+ * 用户得先点一下「添加步骤」才有东西可填——这里直接铺好第一步（带一个示例字段）。
+ *
+ * 判据是磁盘基线为空：文件真的不存在、或者是个空文件。已经有内容的不动，
+ * 哪怕内容是 `[]`——那是用户自己清空的，不该每次进来又塞一个步骤回去。
+ * 只在这里（初次进入）判断，之后用户删光了也不会再自动加。
+ */
+if (!props.original && !model.value.steps.length) {
+  addStep()
+}
+
 function addItem(step: WizardStep) {
   step.items.push(emptyItem())
+}
+
+/**
+ * 把第 index 个表单项往上（delta = -1）或往下（+1）挪一格。
+ *
+ * 顺序就是源码里的顺序（dumpWizard 按数组顺序写），所以这里只动数组：
+ * 越界的调用不会发生（按钮在首 / 末项上是禁用的），真到了边界就原样返回。
+ */
+function moveItem(step: WizardStep, index: number, delta: number) {
+  const next = index + delta
+  if (next < 0 || next >= step.items.length) return
+  const [item] = step.items.splice(index, 1)
+  if (item) step.items.splice(next, 0, item)
 }
 
 function addOption(item: WizardItem) {

@@ -124,9 +124,6 @@
           <p v-if="!apiItems.length" class="px-1 py-1 text-xs text-slate-400">
             {{ t('resource.empty') }}
           </p>
-          <p class="mt-1 px-1 text-[11px] leading-relaxed text-slate-500">
-            {{ t('resource.apiScopeHint') }}
-          </p>
         </div>
       </section>
     </div>

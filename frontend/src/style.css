@@ -106,6 +106,26 @@
     touch-action: pan-x;
     -webkit-overflow-scrolling: touch;
   }
+
+  /*
+    首页「列表」排布：一行一个项目，按屏幕宽度分列。
+
+    窄屏只有一列，容器自然往下长（外层纵向滚动）。宽屏给容器满高 + column-fill: auto，
+    于是内容先填满一列的高度再开下一列，列数不够就往右边溢出，由外层 overflow-auto
+    横向滚动——「适应窗口高度、不垂直滚动」就是这么来的。列宽固定，不会因为项目多
+    而越排越窄。Tailwind 4 没有 column-fill 的工具类，所以整块写在这里。
+  */
+  .list-columns {
+    columns: 1;
+  }
+
+  @media (width >= 64rem) {
+    .list-columns {
+      height: 100%;
+      columns: 26rem;
+      column-fill: auto;
+    }
+  }
 }
 
 /* CodeMirror 与 xterm 的容器需要明确高度，否则折叠成 0 */

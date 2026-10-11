@@ -8,16 +8,21 @@
  *  2. 任何拖动 / 缩放之后都不能在框里露出空白（覆盖不变量）；
  *  3. 缩放以指针为锚，锚点底下的图片坐标不跑；
  *  4. 取景框对应的原图矩形始终落在图片范围内；
- *  5. canvas 侧：按源矩形裁剪、圆角半径夹到一半、导出尺寸与文件名正确。
+ *  5. canvas 侧：按源矩形裁剪、圆角半径夹到一半、导出尺寸与文件名正确；
+ *  6. 副入口图标的前缀要真的收进 app/ui/images/ 里（它直接拼进文件名）。
  *
  * canvas 用最小替身，只记录调用参数——这里验的是几何，不是渲染结果。
  */
 import {
   clampView,
   cropRegion,
+  entryIconPath,
+  entryIconPrefixes,
   fitView,
   fitZoom,
+  ICON_PREFIX_MAX,
   maxZoomOf,
+  normalizeIconPrefix,
   roundCorners,
   viewToSource,
   zoomView,
@@ -178,6 +183,36 @@ const file = await rasterToPngFile(rounded, 64, 'ICON.PNG')
 check('导出：文件名', file.name, 'ICON.PNG')
 check('导出：类型', file.type, 'image/png')
 check('导出：按目标尺寸渲染', await file.text(), 'png 64x64')
+
+// ---- 副入口图标：前缀要真的只影响文件名，带不出 app/ui/images/ ----
+check('副入口路径：大图', entryIconPath('niubi', 256), 'app/ui/images/niubi_256.png')
+check('副入口路径：小图', entryIconPath('niubi', 64), 'app/ui/images/niubi_64.png')
+check('副入口路径：前缀为空时不生成', entryIconPath('  ', 256), '')
+check('副入口路径：全是非法字符时不生成', entryIconPath('中文/名', 256), '')
+
+{
+  // 前缀就是文件名的一部分，任何形式的目录跳转都不该留在结果里。
+  // 判据是「结果严格等于 app/ui/images/ 加一段文件名」——带 `/` 的跳转到这里就散了。
+  const escaped = entryIconPath('../../etc/passwd', 256)
+  const dir = escaped.slice(0, escaped.lastIndexOf('/'))
+  const rel = escaped.slice(dir.length + 1)
+  check('副入口路径：目录仍是 app/ui/images', dir, 'app/ui/images')
+  check('副入口路径：文件名不是 . 或 ..', rel !== '.' && rel !== '..', true)
+  check('副入口路径：空格被剔除', normalizeIconPrefix(' my app '), 'myapp')
+  check('副入口路径：超长前缀被截断', normalizeIconPrefix('a'.repeat(100)).length, ICON_PREFIX_MAX)
+}
+
+// ---- 副入口的发现：导入的多入口项目里已有的图标要能被认出来 ----
+check(
+  '副入口发现：只认 64 / 256，其它分辨率与无关文件不算',
+  entryIconPrefixes(['icon_256.png', 'niubi_256.png', 'niubi_64.png', 'foo_128.png', 'bar_512.png', 'readme.txt']),
+  ['niubi'],
+)
+check('副入口发现：只有一个尺寸也算（另一个留空、写入时补全）', entryIconPrefixes(['second_64.png']), ['second'])
+check('副入口发现：去重 + 排序', entryIconPrefixes(['b_64.png', 'a_256.png', 'a_64.png', 'b_256.png']), ['a', 'b'])
+check('副入口发现：排掉默认入口 icon（含大小写）', entryIconPrefixes(['icon_64.png', 'icon_256.png', 'ICON_256.PNG']), [])
+check('副入口发现：不是入口图标的文件名不算', entryIconPrefixes(['niubi.png', '_64.png', 'niubi_256.jpg', 'niubi_256.png.bak']), [])
+check('副入口发现：前缀里带下划线也认得', entryIconPrefixes(['my_app_256.png', 'my_app_64.png']), ['my_app'])
 
 console.log(failed ? `\n${failed} 项不通过` : '\n取景框与图标处理检查全部通过')
 process.exit(failed ? 1 : 0)

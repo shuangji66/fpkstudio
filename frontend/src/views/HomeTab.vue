@@ -1,12 +1,14 @@
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex-1 overflow-y-auto thin-scroll p-4">
-      <div class="mb-3 flex flex-wrap items-center gap-3">
+    <!--
+      工具条（搜索 + 按钮 + 视图切换）和新建 / 导入面板固定在顶部，不参与下面的滚动：
+      列表排布时下方是横向滚动的多列列表，工具条跟着滚出去的话就没法用了。
+    -->
+    <div class="shrink-0 border-b border-slate-200 px-4 py-3">
+      <div class="flex flex-wrap items-center gap-3">
         <p class="text-xs text-slate-500">
           {{ t('home.subtitle', { count: projects.count }) }}
         </p>
-
-        <span class="flex-1" />
 
         <el-input
           v-model="projects.keyword"
@@ -35,26 +37,45 @@
         >
           {{ t('home.importFpk') }}
         </el-button>
+
+        <span class="flex-1" />
+
+        <!-- 显示切换：平铺（卡片）/ 列表（一行一个），记住上一次的选择 -->
+        <el-radio-group v-model="view" size="small">
+          <el-radio-button value="grid" :title="t('home.viewGrid')">
+            <el-icon class="mr-1 align-[-2px]"><Grid /></el-icon>{{ t('home.viewGrid') }}
+          </el-radio-button>
+          <el-radio-button value="list" :title="t('home.viewList')">
+            <el-icon class="mr-1 align-[-2px]"><Menu /></el-icon>{{ t('home.viewList') }}
+          </el-radio-button>
+        </el-radio-group>
       </div>
 
       <CreateProjectForm
         v-if="panel === 'create'"
-        class="mb-3"
+        class="mt-3"
         @done="onCreated"
         @cancel="panel = ''"
       />
-      <ImportFpkForm v-else-if="panel === 'import'" class="mb-3" @done="onImported" @cancel="panel = ''" />
+      <ImportFpkForm
+        v-else-if="panel === 'import'"
+        class="mt-3"
+        @done="onImported"
+        @cancel="panel = ''"
+      />
+    </div>
 
-      <ProjectGrid @open="openProject" @deleted="onDeleted" />
+    <div class="min-h-0 flex-1 overflow-auto thin-scroll p-4">
+      <ProjectGrid :view="view" @open="openProject" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
+import { Grid, Menu, Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import CreateProjectForm from '@/components/home/CreateProjectForm.vue'
 import ImportFpkForm from '@/components/home/ImportFpkForm.vue'
 import ProjectGrid from '@/components/home/ProjectGrid.vue'
@@ -70,6 +91,13 @@ const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
 
 const panel = ref<'create' | 'import' | ''>('')
+
+/** 显示方式：平铺（卡片）/ 列表（一行一个）。和侧栏宽度一样记在本地。 */
+type ViewMode = 'grid' | 'list'
+const storedView = window.localStorage.getItem('fpkstudio.homeView')
+const view = ref<ViewMode>(storedView === 'list' ? 'list' : 'grid')
+
+watch(view, (next) => window.localStorage.setItem('fpkstudio.homeView', next))
 
 function toggle(next: 'create' | 'import') {
   panel.value = panel.value === next ? '' : next
@@ -91,10 +119,5 @@ function onImported(info: ProjectInfo | undefined) {
     ElMessage.success(t('home.imported', { name: info.name }))
     openProject(info)
   }
-}
-
-function onDeleted(name: string) {
-  tabs.closeProject(name)
-  ElMessage.success(t('home.deleted', { name }))
 }
 </script>

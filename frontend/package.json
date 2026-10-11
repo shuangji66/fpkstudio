@@ -11,7 +11,8 @@
     "check:i18n": "node scripts/check-i18n.mjs",
     "check:wizard": "node --import ./scripts/ts-hook.mjs scripts/check-wizard.mjs",
     "check:icon": "node --import ./scripts/ts-hook.mjs scripts/check-icon.mjs",
-    "check": "npm run check:i18n && npm run check:wizard && npm run check:icon"
+    "check:format": "node --import ./scripts/ts-hook.mjs scripts/check-format.mjs",
+    "check": "npm run check:i18n && npm run check:wizard && npm run check:icon && npm run check:format"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "6.2.5",

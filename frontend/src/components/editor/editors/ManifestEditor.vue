@@ -35,7 +35,7 @@
             v-else-if="field.type === 'textarea'"
             v-model="model.form[field.key]"
             type="textarea"
-            :autosize="{ minRows: 2, maxRows: 8 }"
+            :autosize="{ minRows: field.minRows ?? 2, maxRows: 8 }"
             resize="none"
           />
           <el-switch v-else-if="field.type === 'switch'" v-model="model.bools[field.key]" />
@@ -74,16 +74,6 @@
           </el-select>
         </div>
       </div>
-
-      <details class="mt-4 rounded-md border border-slate-200 px-3 py-2">
-        <summary class="cursor-pointer select-none text-xs text-slate-500">
-          其他键（{{ otherKeys.length }}）
-        </summary>
-        <ul class="mono mt-1 space-y-0.5 text-[11px] text-slate-500">
-          <li v-for="key in otherKeys" :key="key">{{ key }} = {{ model.manifest.get(key) }}</li>
-          <li v-if="!otherKeys.length">无</li>
-        </ul>
-      </details>
     </div>
   </div>
 </template>
@@ -105,6 +95,8 @@ interface FieldDef {
   options?: { label: string; value: string }[]
   /** switch 关闭时删掉这个键，而不是写 false（例如 micro_app）。 */
   removeWhenOff?: boolean
+  /** textarea 的起始行数（默认 2）；链接这类一行就够的字段给 1。 */
+  minRows?: number
 }
 
 const props = defineProps<EditorProps>()
@@ -151,18 +143,21 @@ const fields: FieldDef[] = [
   },
   { key: 'source', type: 'select', options: [{ label: 'thirdparty', value: 'thirdparty' }] },
   { key: 'maintainer', type: 'input' },
-  { key: 'maintainer_url', type: 'input' },
+  // 链接和更新说明都可能很长，单行输入框会把它藏起来——和 desc 一样用会自己长高的多行框。
+  { key: 'maintainer_url', type: 'textarea', minRows: 1 },
   { key: 'distributor', type: 'input' },
-  { key: 'distributor_url', type: 'input' },
+  { key: 'distributor_url', type: 'textarea', minRows: 1 },
   { key: 'os_min_version', type: 'input', placeholder: '1.1.3100' },
   { key: 'os_max_version', type: 'input' },
   { key: 'ctl_stop', type: 'switch' },
   {
     key: 'install_type',
     type: 'select',
+    // 存储位置就是「留空」：清空的值会被 compact 从 manifest 里删掉，等于不声明这个键；
+    // 系统分区写入 install_type=root。
     options: [
-      { label: '（用户选择）', value: '' },
-      { label: 'root（系统分区）', value: 'root' },
+      { label: t('fields.installTypeStorage'), value: '' },
+      { label: t('fields.installTypeRoot'), value: 'root' },
     ],
   },
   { key: 'install_dep_apps', type: 'list' },
@@ -172,7 +167,7 @@ const fields: FieldDef[] = [
   { key: 'checkport', type: 'switch' },
   { key: 'disable_authorization_path', type: 'switch' },
   { key: 'micro_app', type: 'switch', removeWhenOff: true },
-  { key: 'changelog', type: 'input' },
+  { key: 'changelog', type: 'textarea' },
 ]
 
 interface Model {
@@ -237,10 +232,6 @@ const platformWarning = computed(() => {
   const platforms = workspace.state(project)?.platforms ?? []
   return platforms.length ? t('fieldsHelp.platform') : ''
 })
-
-const otherKeys = computed(() =>
-  model.value.manifest.keys().filter((key) => !fields.some((f) => f.key === key) && key !== 'arch'),
-)
 
 defineExpose(api)
 </script>
