@@ -4,6 +4,7 @@ import {
   createProject,
   deleteProject,
   importProject,
+  importProjectByPath,
   listProjects,
 } from '@/api/endpoints'
 import type { ProjectInfo } from '@/api/types'
@@ -56,6 +57,18 @@ export const useProjectsStore = defineStore('projects', () => {
     return res.project
   }
 
+  /**
+   * 导入服务器本机路径上的 fpk（飞牛文件选择器选的）。
+   *
+   * 文件内容由后端直接读——浏览器拿不到 /vol1/... 这种路径，选择器只负责把
+   * 路径授权给应用。
+   */
+  async function importFpkPath(path: string) {
+    const res = await importProjectByPath(path)
+    await refresh()
+    return res.project
+  }
+
   function find(name: string): ProjectInfo | undefined {
     return list.value.find((p) => p.name === name)
   }
@@ -71,6 +84,7 @@ export const useProjectsStore = defineStore('projects', () => {
     create,
     remove,
     importFpk,
+    importFpkPath,
     find,
   }
 })

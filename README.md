@@ -26,12 +26,30 @@
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `FPKSTUDIO_DATA_DIR` | `$XDG_DATA_HOME/fpkstudio` 或 `~/.local/share/fpkstudio` | 数据根目录 |
+| `FPKSTUDIO_PROJECTS_DIR` | `$FPKSTUDIO_DATA_DIR/projects` | 项目根目录（项目列表与文件树的沙箱根），可以在数据目录之外 |
 | `FPKSTUDIO_OUTPUT_DIR` | `$FPKSTUDIO_DATA_DIR/output` | 打包产物目录，可以在数据目录之外 |
 | `FPKSTUDIO_SOCKET` | `$FPKSTUDIO_DATA_DIR/run/fpkstudio.sock` | unix socket 路径（上限 100 字节，超了会明确报错） |
 | `FPKSTUDIO_BASE_URL` | `/` | 访问前缀，例如 `/app/fpkstudio` |
 | `FPKSTUDIO_FNPACK` | `fnpack`（走 PATH） | fnpack 可执行文件 |
 | `FPKSTUDIO_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `FPKSTUDIO_LOG_RING` | `5000` | 内存里保留的日志条数 |
+| `FPKSTUDIO_TRIM_SOCKET` | `/var/run/trim_open_gateway_apiscope.socket` | 飞牛开放 API 的 socket（由系统提供，覆盖它只是为了在没有 fnOS 的环境里调链路） |
+| `FPKSTUDIO_TRIM_APP` | `fpkstudio` | 开放 API 请求体里的 `appName`，要和 fpk 的 `manifest.appname` 一致 |
+
+`FPKSTUDIO_PROJECTS_DIR` 与 `FPKSTUDIO_OUTPUT_DIR` 都只是**默认值**：两者都能在界面的
+设置弹窗里改成用户授权的目录（见 [飞牛开放 API 接入](#飞牛开放-api-接入)），改过之后就
+记在数据目录的 `state.json` 里，环境变量只在没设置时生效——也就是说优先级是
+**界面设置的授权目录 > 环境变量 > 数据目录下的默认值**。
+
+两个环境变量指到**同一个路径**时保项目目录：`FPKSTUDIO_OUTPUT_DIR` 按「没设置」处理、
+输出目录退回 `$FPKSTUDIO_DATA_DIR/output`，设置弹窗里会标注它被忽略了。两个目录混在
+一起的话，产物既算项目产物又算输出产物（列表里同一个文件出现两次）、复制还等于复制到
+自己身上，谁都说不清它到底在哪。
+
+界面上不允许把两个槽设成同一个目录（直接报错）。默认值这一侧还有一层兜底：项目目录可以
+被指到数据目录下的任何位置，包括 `output/`——那正是输出目录的默认值，退回之后还是同一个。
+这时**不拒绝启动**，按「没有单独的输出目录」处理（不重复复制、产物只按项目目录列一次），
+因为把部署配置判成错误只会让服务起不来，而实际后果只是多余的复制。
 
 ### 数据目录布局
 
@@ -45,10 +63,15 @@ $FPKSTUDIO_DATA_DIR/
 │           └── platform/<架构>/      各架构的产物，打包时复制到 app/server
 ├── output/              打包产物（FPKSTUDIO_OUTPUT_DIR）
 ├── logs/fpkstudio.log   运行日志（滚动 8MB × 3）
+├── state.json           用户在设置里改过的目录（项目根目录 / fpk 输出目录）
 ├── run/fpkstudio.sock
 ├── run/fpkstudio.pid
 └── tmp/                 暂存与 fnpack 的 TMPDIR
 ```
+
+`projects/` 与 `output/` 只在没人改过目录设置时才是项目 / 产物的实际位置。
+项目根目录可以被指到数据目录之外（用户从飞牛文件选择器授权进来的目录），那时
+`projects/` 就只是个空壳。
 
 ## 快速开始
 
@@ -149,6 +172,91 @@ socat TCP-LISTEN:18080,fork,reuseaddr UNIX-CONNECT:/tmp/fpkstudio-data/run/fpkst
 **给 AI / 自动化助手的操作手册在 [AGENTS.md](AGENTS.md)**：命令、目录、约定、
 「已经踩过的坑」都收在那里，改代码前先读一遍。
 
+## 飞牛开放 API 接入
+
+应用跑在飞牛里时可以用系统的文件授权能力：让用户在应用自己的页面里选一个目录或文件，
+系统把它的 ACL 授权给应用用户（应用服务以独立的应用用户运行，没有这条授权就读不到
+用户的存储空间）。用到三个能力：
+
+| Scope | 用来做什么 | 谁调 |
+|---|---|---|
+| `trim.file.userAccess` | 选目录 / 选文件并完成授权（`pickUserFile`）、查询与删除已授权目录 | 前端 JS SDK + 后端 |
+| `trim.file.userAcl` | 导入前按当前用户检查目标文件是否可读 | 后端 |
+| `trim.file.path` | 把 `/vol1/...` 转成用户看得懂的语义路径 | 后端 |
+
+分工是硬性的，不是取舍：
+
+- **前端**用 `@trimjs/web-app` 的 JS SDK 拉起选择器（这类能力必须有用户操作，且只能在
+  宿主页面里调）。
+- **后端**用开放 API（`POST /api/v1/trimapp`，只挂 unix socket）查授权、查权限、转路径。
+  官方文档明确要求后端接口只能由服务端调、token 不能下发到浏览器，所以前端一律走
+  `/api/trim/*` 转一手。
+
+token 每次调用时从环境变量 `TRIM_API_TOKEN` 现读——系统在重新注册 / 重装 / 运行环境
+变化后都会换新值，持久化下来只会拿到过期的那一个。当前用户取统一网关转发的
+`X-Trim-Userid`（网关只在校验过登录态之后才转发这组 Header）；没经过网关时退化成后端
+进程自己的 uid，单用户场景够用，也让这套接口在没有 fnOS 的环境里能跑通链路。
+
+**这些能力要在 fpk 包的清单里声明才生效。** 这个仓库的交付形态是单文件二进制、没有应用包，
+所以打包成 fpk 时要自己带上：
+
+```
+# manifest
+micro_app=true
+```
+
+```json
+// config/resource
+{ "api-scope": ["trim.file.userAccess", "trim.file.userAcl", "trim.file.path"] }
+```
+
+`micro_app=true` 决定页面是否按微应用加载（不声明时 JS SDK 根本起不来）；声明
+`api-scope` 只是接入前提，具体能访问哪个目录仍由用户授权、管理员设置和 token 决定。
+`config/resource` 的编辑器里已经内置了这几个授权项，勾上即可。
+
+### 界面上用到的地方
+
+- **首页右上角「设置」**：占视口 90% 高、垂直居中的弹窗，正文自己滚（标题与「关于」
+  不跟着滚走），遮罩带一层背景模糊，弹窗打开时锁住页面滚动。内容是主题切换 +
+  两个目录槽（项目根目录、fpk 输出目录）+ 关于。
+  两个槽各只能设一个目录，且只能来自文件选择器的授权；每槽显示 `trim.file.path` 转出来的
+  展示路径（**转换失败才回落显示 `/vol1/...` 原始路径**，并另给一句失败原因），界面上不展示
+  ACL 标签；每槽右侧有「选择 / 更换目录」和文件夹按钮（在文件管理器里打开该目录）。
+  「取消设置」会删掉该目录的授权，并把这一槽还给环境变量给的默认目录。
+- **换目录的顺序是有讲究的**：先完成新目录的授权与切换（配置落盘、后端切过去），
+  **再**删旧目录的授权。反过来的话，用户一取消选择、或者选择器直接报错，旧授权已经没了
+  而配置里还写着它，应用会突然读不到自己的项目目录。删旧授权失败只记一条警告——
+  它留在系统里只是不干净，不该挡住换目录这件事。
+- **语义路径失败要说出来**。`trim.file.convertPath` 的返回结构**与文档不一致**：文档写
+  `{"status":0,"result":[…]}`，实测的系统直接回 `[{path,semanticPath}…]`。所以
+  `internal/trimapi` 三种形态都认（还有「只回一串展示路径」的兜底），`data.status` 非 0
+  也算失败；`language` 是必填项且走请求体（查询串会被反代丢掉）。失败时弹窗给一句原因，
+  而不是默默退回显示 `/vol1/...`——「什么都没显示」是最难查的表现。
+- **产物可以直接在文件管理器里打开**：产物行右侧的文件夹按钮调 SDK 的
+  `openFileManager`（官方「页面路由」，无 scope 要求），目录由产物自己的绝对路径算出，
+  不依赖 `/api/system/info` 里的 `outputDir`（换过目录之后它是旧的）。
+- **用户取消选择不算错误**：宿主机在用户直接关掉选择器时返回 `code: 1` +
+  `msg: "Operation failed"`，没有业务码也没有可读原因。`trim/sdk.ts` 把它与「成功但
+  没返回路径」一起归一成空数组，界面给一句「已取消目录授权 / 已取消导入」，而不是弹
+  一句「调用飞牛接口失败（1）」。
+- **项目根目录真的会生效**：换成授权目录之后，项目列表、文件树、创建 / 导入 / 打包都读写
+  那个目录，数据目录里只留日志、暂存和配置（见「实现上值得说明的几处」里的跨沙箱复制）。
+- **导入 fpk**：在「选择文件」旁边多了「选择飞牛文件」，走 `pickUserFile` 让用户在飞牛的
+  存储空间里挑 `.fpk`，选完由后端按路径读文件导入。浏览器拿不到 `/vol1/...` 这种路径，
+  选择器只负责把路径授权给应用。
+- **独立浏览器页面**（没有宿主桥，例如 `socat` 桥出来自己点）里这些入口一律置灰并说明
+  原因。官方推荐的另一条路是 `openAppAuth` + `redirectUri` 回调页，它要求应用挂在统一
+  网关下、回调页与原页面同源，本项目没有这条链路，所以选择「明确告诉用户去飞牛里打开」，
+  而不是给一个点了就报错的按钮。
+
+### 深色模式
+
+`html.dark` 是唯一的开关：Tailwind 的 `dark:` 变体（在 `style.css` 里用
+`@custom-variant dark` 改成认这个类）与 Element Plus 的暗色变量挂在同一个类上，由
+`stores/theme.ts` 统一切换。「跟随系统」在宿主里跟的是飞牛主题（`$on('os/theme')`），
+在独立浏览器里跟的是 `prefers-color-scheme`，两条都会实时响应。主题记在 localStorage，
+不进 `state.json`（它是界面偏好，不是部署配置）。
+
 ## 前端
 
 Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Element Plus 2，
@@ -200,12 +308,20 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
   粘完即清空；目标重名时复制自动加「副本」、**绝不覆盖**，剪切则直接拒绝（改名到一个
   已存在的路径上，轻则报错重则覆盖，不如让用户自己决定）。菜单贴近窗口右 / 下边缘时会
   自己收回来，不会被切掉。
+- **主题与目录设置**：首页右上角的「设置」按钮打开弹窗，主题（浅色 / 深色 / 跟随系统）
+  与两个授权目录槽都在这里，见 [飞牛开放 API 接入](#飞牛开放-api-接入)。
 - **首页（项目管理器）**：顶部工具条——项目数、搜索、刷新 / 新建 / 导入，按钮和搜索框
   左对齐，右上角是显示方式切换（平铺 / 列表，记在 localStorage）。工具条固定在顶部，
   下面的项目区才是滚动容器：列表排布在宽屏上是横向滚动的多列（见 `style.css` 的
   `.list-columns`），跟着工具条一起滚就没法用了。
-  - `平铺`：卡片自适应列宽，卡片右上角「···」菜单里是重命名 / 导出 / 删除。
-  - `列表`：一行一个项目（整行可点即打开），宽度足够时按固定列宽分列，列内先填满
+  - 两种排布**都是点卡片即打开项目**（原来平铺卡片上那个占满一行的「打开」按钮去掉了：
+    卡片就这么点地方，一个大按钮只是把可点区域缩小）。卡片右上角是操作区：文件夹按钮
+    （在文件管理器的项目目录里打开，走 JS SDK 的 `openFileManager`，独立浏览器页面里
+    置灰）+「···」菜单（重命名 / 导出 / 删除）。操作区自己挡住点击，不会连带打开项目。
+    卡片可键盘操作（Enter / 空格），项目目录的绝对路径由 `/api/projects` 的 `absPath`
+    给出——换过项目根目录之后，`projectsDir + name` 是拼不出来的。
+  - `平铺`：卡片自适应列宽。
+  - `列表`：一行一个项目，宽度足够时按固定列宽分列，列内先填满
     窗口高度再开下一列、横向滚动；窄屏只剩一列时纵向滚动。
   - 删除一定要过一遍确认弹窗（目录直接删，没有回收站）；重命名改的是**项目目录名**
     （`manifest.appname` 不动），如果这个项目开着标签，会关掉旧标签、按新名字重开一个
@@ -239,7 +355,7 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
   多行框——它们本来就可能很长，单行输入框只会把内容藏起来。
 - **同一份产物挂任意 baseURL**：构建时 `base: './'`，服务端返回 index.html 时
   注入 `<base href>` 和 `window.__FPKSTUDIO__`。换挂载点不需要重新构建。
-- **四个检查脚本**（`npm run check`，需要 Node ≥ 23.6，用到默认开启的类型剥离）：
+- **五个检查脚本**（`npm run check`，需要 Node ≥ 23.6，用到默认开启的类型剥离）：
   - `check:i18n`：两份语言包的每条消息都能被 vue-i18n 编译、键完全一致。消息里的 `{`
     是插值语法，一句带 `${...}` 的提示会让这条消息在 `t()` 时抛错——而且是在渲染到
     那个组件时才抛，表现是「弹窗整体画不出来」，所以让它在这一步就被挡住。
@@ -252,6 +368,9 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
     排掉默认入口 `icon`、只有一个尺寸也算）。
   - `check:format`：`utils/format.ts` 的 `uniqueName`（粘贴时挑不重名的那个名字）。
     它算错的表现是「粘贴把已有文件覆盖掉」，所以值得单独盯住。
+  - `check:semantic`：`utils/semantic.ts` 把「请求了哪几条路径」和 `trim.file.convertPath`
+    返回的条目对上号（尾斜杠归一、顺序一致时按位置兜底）。它错了的表现是设置弹窗里
+    「语义路径不显示、退回 /vol1/...」，而且不报错，所以值得单独盯住。
 
 ## HTTP API
 
@@ -277,6 +396,16 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
 | GET | `/api/fs/download?path=` | 下载文件，目录会打成 zip |
 | GET | `/api/logs?after=&limit=&source=` | 增量拉日志 |
 | GET | `/api/logs/stream?after=` | SSE 实时日志 |
+| GET/PUT | `/api/settings` | 目录设置（`{projectRoot, outputDir}`，空字符串 = 回默认）；GET 还会带上当前用户与飞牛接口可用状态 |
+| GET | `/api/trim/status` | 飞牛开放 API 的可用状态 + 当前用户 |
+| GET | `/api/trim/folders` | 当前用户授权给本应用的目录 |
+| POST | `/api/trim/folders/delete` | `{path}` → 删除一条目录授权 |
+| POST | `/api/trim/acl` | `{paths[]}` → 当前用户对若干路径的读 / 写 / 删权限 |
+| POST | `/api/trim/semantic` | `{paths[]}` + `?language=` → 语义化路径（`/vol1/...` → 存储空间1/…） |
+| POST | `/api/projects/import-path` | `{path}` → 导入本机某个绝对路径上的 fpk（飞牛文件选择器选的） |
+
+`/api/trim/*` 与 `/api/projects/import-path` 都按**飞牛统一网关转发的用户**判权限
+（`X-Trim-Userid`，见下节），没经过网关时退化成后端进程自己的 uid。
 
 ## 目录结构
 
@@ -292,10 +421,13 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
 │       ├── logging/            文件日志 + 内存环形缓冲 + 订阅（SSE 的数据源）
 │       ├── fsx/                os.Root 之上的沙箱文件操作
 │       ├── fnpack/             fnpack 调用与输出转发
-│       ├── projects/           项目列表、创建、导入、多架构打包、产物
-│       └── server/             HTTP 路由、静态资源、各项 API
+│       ├── projects/           项目列表、创建、导入、多架构打包、产物、可切换的项目根
+│       ├── state/              数据目录下 state.json 的读写（项目根 / 输出目录）
+│       ├── trimapi/            飞牛开放 API 客户端（只走 unix socket 的服务端接口）
+│       └── server/             HTTP 路由、静态资源、各项 API（含 /api/trim/* 的转发）
 └── frontend/                   Vue 前端（Vite 产物到 frontend/dist）
     ├── src/
+    │   └── trim/               飞牛 JS SDK 的封装（环境判断、选择器、宿主主题）
     └── dist/                   构建产物，被复制进 backend/embed
 ```
 
@@ -324,6 +456,12 @@ Makefile 用的本地缓存目录都在 `.gitignore` 里，仓库里只留源码
   阶段 `EACCES` 失败）。所以写文件、复制、上传后都会显式 `chmod`。
 - **`TMPDIR` 固定到数据目录**。fnpack 会先把整个包复制到临时目录再打包，
   `TMPDIR` 跨挂载点或落在受限的 `/tmp` 时会直接失败。
+- **项目根目录可以被换成授权目录**。默认值来自环境变量，改过之后记在数据目录的
+  `state.json`，启动时应用一次（打不开就沿用默认目录并记一条日志，不让一个过期的路径
+  把服务拖住起不来）。项目根落在数据目录之外时，打包前的暂存复制跨了两个沙箱：单靠
+  任一个 `fsx.Root` 的相对路径都表达不了，改走 `fsx.CopyTree` 的绝对路径复制；导入时
+  从暂存区搬进项目根也同理，先试 `rename`（同文件系统瞬时完成），跨设备 `EXDEV` 时
+  退回复制 + 删源。
 - **`os.Root` 做沙箱**。所有文件操作都在 `os.Root` 内进行，逃逸（`../`、指向外部的
   符号链接）在 `openat` 层面被拒绝，不依赖字符串前缀检查。
 - **单实例保护**。启动时先试着连一下 socket：连得上说明已有实例在跑，直接拒绝启动；
@@ -342,7 +480,15 @@ Makefile 用的本地缓存目录都在 `.gitignore` 里，仓库里只留源码
   但它们会原样保留、保存时写回；界面上只列一下键名，避免误以为被删掉了。
 - 向导的取值校验（范围 / 长度 / 正则）只是编辑器侧的字段约束，最终仍以 fnOS
   安装器的行为为准。
-- UI 只做了中英双语，语言按浏览器 `navigator.language` 选择，没有做切换入口。
+- UI 只做了中英双语，语言按浏览器 `navigator.language` 选择，没有做切换入口（主题倒是
+  可以在设置里切）。
+- 文件选择与授权类能力只在飞牛宿主页面里可用。用 `socat` / 反代直接打开时没有这些入口，
+  相关按钮置灰并提示原因。
+- 用户身份取网关转发的 `X-Trim-Userid`；直接调 socket（没有网关）时用的是后端进程自己的
+  uid，多用户场景下查出来的授权与 ACL 不一定对。要做多用户，得按官方建议把应用挂到统一
+  网关下。
+- 目录设置改到授权目录之后，已有项目**不会自动迁移**：改回默认目录就是换一个地方找项目，
+  文件还留在原来的位置。
 
 ## 构建环境说明
 

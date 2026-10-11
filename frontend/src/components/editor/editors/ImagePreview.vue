@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full min-h-0 items-center justify-center overflow-auto thin-scroll bg-slate-100 p-4">
+  <div class="flex h-full min-h-0 items-center justify-center overflow-auto thin-scroll bg-slate-100 dark:bg-slate-900 p-4">
     <img
       v-if="!failed"
       :src="url"
@@ -7,9 +7,9 @@
       class="max-h-full max-w-full rounded-md shadow-sm"
       @error="failed = true"
     />
-    <p v-else class="text-center text-xs leading-relaxed text-slate-500">
+    <p v-else class="text-center text-xs leading-relaxed text-slate-500 dark:text-slate-400">
       {{ t('editor.imageFailed') }}<br />
-      <span class="mono text-[11px] text-slate-400">{{ url }}</span>
+      <span class="mono text-[11px] text-slate-400 dark:text-slate-500">{{ url }}</span>
     </p>
   </div>
 </template>

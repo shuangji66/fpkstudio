@@ -1,27 +1,27 @@
 <template>
   <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3">
     <div class="mx-auto max-w-4xl space-y-3">
-      <div v-if="model.error" class="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+      <div v-if="model.error" class="rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
         {{ t('editor.readFailed') }}: {{ model.error }}
       </div>
 
       <div class="flex items-center gap-2">
-        <span class="text-xs text-slate-500">{{ t('wizard.file', { name: props.path }) }}</span>
+        <span class="text-xs text-slate-500 dark:text-slate-400">{{ t('wizard.file', { name: props.path }) }}</span>
         <span class="flex-1" />
         <el-button size="small" :icon="Plus" @click="addStep">{{ t('wizard.addStep') }}</el-button>
       </div>
 
-      <p v-if="!model.steps.length" class="py-6 text-center text-xs text-slate-400">
+      <p v-if="!model.steps.length" class="py-6 text-center text-xs text-slate-400 dark:text-slate-500">
         {{ t('wizard.empty') }}
       </p>
 
       <section
         v-for="(step, stepIndex) in model.steps"
         :key="stepIndex"
-        class="rounded-lg border border-slate-200"
+        class="rounded-lg border border-slate-200 dark:border-slate-700"
       >
-        <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-1.5">
-          <span class="text-xs font-medium text-slate-700">#{{ stepIndex + 1 }}</span>
+        <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
+          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">#{{ stepIndex + 1 }}</span>
           <el-input
             v-model="step.stepTitle"
             size="small"
@@ -43,7 +43,7 @@
           <div
             v-for="(item, itemIndex) in step.items"
             :key="itemIndex"
-            class="rounded-md bg-slate-50 p-2"
+            class="rounded-md bg-slate-50 dark:bg-slate-900 p-2"
           >
             <!-- 字段类型 / 字段名 / 显示文本 -->
             <div class="flex flex-wrap items-center gap-2">
@@ -162,12 +162,12 @@
             <!-- 选项（单选 / 多选 / 下拉） -->
             <div
               v-if="item.type === 'radio' || item.type === 'checkbox' || item.type === 'select'"
-              class="mt-2 space-y-1 border-t border-slate-200 pt-2"
+              class="mt-2 space-y-1 border-t border-slate-200 dark:border-slate-700 pt-2"
             >
               <div class="flex items-center gap-2">
-                <span class="text-[11px] text-slate-500">{{ t('wizard.options') }}</span>
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">{{ t('wizard.options') }}</span>
                 <el-button text size="small" :icon="Plus" @click="addOption(item)" />
-                <span class="text-[11px] text-slate-400">{{ t('wizard.optionsHint') }}</span>
+                <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ t('wizard.optionsHint') }}</span>
               </div>
               <div
                 v-for="(option, optionIndex) in item.options"
@@ -196,7 +196,7 @@
             </div>
 
             <!-- 校验规则：必填 / 范围 / 长度 / 正则，可以叠加多条 -->
-            <div v-if="item.rules.length" class="mt-2 space-y-1 border-t border-slate-200 pt-2">
+            <div v-if="item.rules.length" class="mt-2 space-y-1 border-t border-slate-200 dark:border-slate-700 pt-2">
               <div
                 v-for="(rule, ruleIndex) in item.rules"
                 :key="ruleIndex"
@@ -228,7 +228,7 @@
                     controls-position="right"
                     class="w-24"
                   />
-                  <span class="text-xs text-slate-400">-</span>
+                  <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
                   <el-input-number
                     v-model="rule.max"
                     size="small"
@@ -269,7 +269,7 @@
             </div>
 
             <!-- 这里还不认识的键（fnOS 以后加的字段）原样保留，不在表单里呈现 -->
-            <p v-if="Object.keys(item.extra).length" class="mt-2 text-[11px] text-slate-400">
+            <p v-if="Object.keys(item.extra).length" class="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
               {{ t('wizard.keptKeys', { keys: Object.keys(item.extra).join(', ') }) }}
             </p>
           </div>

@@ -1,6 +1,6 @@
 <template>
   <div class="panel p-3">
-    <div class="mb-2 text-sm font-medium text-slate-700">{{ t('home.create.title') }}</div>
+    <div class="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('home.create.title') }}</div>
 
     <div class="flex flex-wrap items-end gap-4">
       <div>
@@ -38,7 +38,7 @@
       </el-button>
     </div>
 
-    <p class="mt-2 text-xs text-slate-500">{{ t('home.create.hint') }}</p>
+    <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{{ t('home.create.hint') }}</p>
   </div>
 </template>
 

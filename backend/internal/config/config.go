@@ -10,17 +10,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"fpkstudio/internal/trimapi"
 )
 
 // 环境变量名。所有变量都以 FPKSTUDIO_ 为前缀。
 const (
-	EnvDataDir   = "FPKSTUDIO_DATA_DIR"
-	EnvOutputDir = "FPKSTUDIO_OUTPUT_DIR"
-	EnvSocket    = "FPKSTUDIO_SOCKET"
-	EnvBaseURL   = "FPKSTUDIO_BASE_URL"
-	EnvFnpack    = "FPKSTUDIO_FNPACK"
-	EnvLogLevel  = "FPKSTUDIO_LOG_LEVEL"
-	EnvRingSize  = "FPKSTUDIO_LOG_RING"
+	EnvDataDir     = "FPKSTUDIO_DATA_DIR"
+	EnvProjectsDir = "FPKSTUDIO_PROJECTS_DIR"
+	EnvOutputDir   = "FPKSTUDIO_OUTPUT_DIR"
+	EnvSocket      = "FPKSTUDIO_SOCKET"
+	EnvBaseURL     = "FPKSTUDIO_BASE_URL"
+	EnvFnpack      = "FPKSTUDIO_FNPACK"
+	EnvLogLevel    = "FPKSTUDIO_LOG_LEVEL"
+	EnvRingSize    = "FPKSTUDIO_LOG_RING"
+	EnvTrimSocket  = "FPKSTUDIO_TRIM_SOCKET"
+	EnvTrimApp     = "FPKSTUDIO_TRIM_APP"
 )
 
 // unix socket 的 sun_path 上限（Linux）。留一点余量给结尾的 \0。
@@ -35,6 +40,7 @@ type Config struct {
 	// OutputDir 是打包产物目录，允许在 DataDir 之外（例如挂到共享目录）。
 	OutputDir string
 
+	// ProjectsDir 是项目根目录，允许在 DataDir 之外（例如指向用户自己的存储空间）。
 	ProjectsDir string
 	LogDir      string
 	RunDir      string
@@ -51,6 +57,15 @@ type Config struct {
 	FnpackBin string
 	LogLevel  string
 	LogRing   int
+
+	// OutputEnvIgnored 为真表示 FPKSTUDIO_OUTPUT_DIR 被忽略了（它和项目目录指到
+	// 同一个路径），OutputDir 已经回退到数据目录下的默认值。界面据此标注。
+	OutputEnvIgnored bool
+
+	// TrimSocket 是飞牛开放 API 的 unix socket（默认由系统提供）。
+	TrimSocket string
+	// TrimApp 是本应用在飞牛系统里的应用名，开放 API 请求体里的 appName。
+	TrimApp string
 }
 
 func env(key, def string) string {
@@ -92,9 +107,21 @@ func Load(version string) (*Config, error) {
 		FnpackBin: env(EnvFnpack, "fnpack"),
 		LogLevel:  strings.ToLower(env(EnvLogLevel, "info")),
 		LogRing:   atoiDefault(env(EnvRingSize, ""), 5000),
+		// 默认值来自飞牛开发文档：socket 由系统提供，appName 就是 fpk 的
+		// manifest.appname。两者都允许覆盖，方便在没有 fnOS 的环境里调链路。
+		TrimSocket: env(EnvTrimSocket, trimapi.DefaultSocket),
+		TrimApp:    env(EnvTrimApp, "fpkstudio"),
 	}
 
-	c.ProjectsDir = filepath.Join(c.DataDir, "projects")
+	c.ProjectsDir = cleanAbs(env(EnvProjectsDir, filepath.Join(c.DataDir, "projects")))
+	// 项目目录与输出目录指到同一个路径时保项目目录，输出目录按「没设置」处理、
+	// 退回默认值：两个目录混在一起会让产物既算项目产物又算输出产物，列两遍、复制
+	// 到自己身上，谁都说不清它到底在哪。
+	if samePath(c.ProjectsDir, c.OutputDir) {
+		c.OutputEnvIgnored = true
+		c.OutputDir = filepath.Join(c.DataDir, "output")
+	}
+
 	c.LogDir = filepath.Join(c.DataDir, "logs")
 	c.RunDir = filepath.Join(c.DataDir, "run")
 	c.TmpDir = filepath.Join(c.DataDir, "tmp")
@@ -142,6 +169,12 @@ func defaultDataDir() string {
 		return filepath.Join(h, ".local", "share", "fpkstudio")
 	}
 	return "fpkstudio-data"
+}
+
+// samePath 判断两个路径是不是同一个位置（只做清洁后的字面比较，不去解析符号
+// 链接：这里判的是「部署时填重了」，不是「文件系统上是不是同一个 inode」）。
+func samePath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func cleanAbs(p string) string {

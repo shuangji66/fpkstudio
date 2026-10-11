@@ -1,12 +1,12 @@
 <template>
   <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3">
     <div class="mx-auto max-w-2xl">
-      <div v-if="model.error" class="mb-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+      <div v-if="model.error" class="mb-3 rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
         {{ t('editor.readFailed') }}: {{ model.error }}
       </div>
 
       <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="text-right text-xs text-slate-600">{{ t('privilege.runAs') }}</span>
+        <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.runAs') }}</span>
         <el-select v-model="model.root.defaults['run-as']" size="small" class="w-64">
           <el-option :label="t('privilege.package')" value="package" />
           <el-option :label="t('privilege.root')" value="root" />
@@ -14,17 +14,17 @@
       </div>
 
       <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="text-right text-xs text-slate-600">{{ t('privilege.username') }}</span>
+        <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.username') }}</span>
         <el-input v-model="model.root.username" size="small" class="w-64" placeholder="（按 appname 生成）" />
       </div>
 
       <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="text-right text-xs text-slate-600">{{ t('privilege.groupname') }}</span>
+        <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.groupname') }}</span>
         <el-input v-model="model.root.groupname" size="small" class="w-64" placeholder="（按 appname 生成）" />
       </div>
 
       <div class="grid grid-cols-[10rem_1fr] items-start gap-x-3 py-2">
-        <span class="pt-1.5 text-right text-xs text-slate-600">{{ t('privilege.joinGroups') }}</span>
+        <span class="pt-1.5 text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.joinGroups') }}</span>
         <el-select
           v-model="model.root['join-groups']"
           size="small"
@@ -39,12 +39,12 @@
         </el-select>
       </div>
 
-      <p class="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+      <p class="mt-3 rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
         {{ t('privilege.hint') }}
       </p>
       <p
         v-if="model.root.defaults['run-as'] === 'root'"
-        class="mt-2 flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800"
+        class="mt-2 flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200"
       >
         <el-icon class="mt-0.5 shrink-0"><WarningFilled /></el-icon>
         {{ t('privilege.rootWarning') }}

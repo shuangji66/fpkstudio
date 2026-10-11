@@ -1,7 +1,7 @@
 <template>
-  <div class="flex h-full flex-col overflow-hidden bg-slate-100 text-slate-800">
+  <div class="flex h-full flex-col overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100">
     <header
-      class="flex shrink-0 items-end gap-3 border-b border-slate-300 bg-slate-200/70 px-2 pt-1.5"
+      class="flex shrink-0 items-end gap-3 border-b border-slate-300 dark:border-slate-700 bg-slate-200/70 dark:bg-slate-900/70 px-2 pt-1.5"
     >
       <TabBar class="min-w-0 flex-1" />
 

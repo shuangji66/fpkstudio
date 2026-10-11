@@ -1,7 +1,7 @@
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <!-- 工具栏：按钮紧凑排布，窄侧边栏（最小 180px）也放得下；再窄就换行 -->
-    <div class="flex shrink-0 flex-wrap items-center gap-0 border-b border-slate-200 px-1 py-0.5">
+    <div class="flex shrink-0 flex-wrap items-center gap-0 border-b border-slate-200 dark:border-slate-700 px-1 py-0.5">
       <el-tooltip :content="t('tree.newFile')" placement="bottom">
         <el-button text size="small" class="tree-tool" :icon="DocumentAdd" @click="startCreate(false)" />
       </el-tooltip>
@@ -32,26 +32,28 @@
     >
       <div
         v-if="state.loading && !rows.length"
-        class="px-3 py-4 text-center text-xs text-slate-400"
+        class="px-3 py-4 text-center text-xs text-slate-400 dark:text-slate-500"
       >
         {{ t('common.loading') }}
       </div>
 
       <div v-else-if="!rows.length" class="px-3 py-4 text-center text-xs">
         <template v-if="state.error">
-          <p class="text-left leading-relaxed break-all text-red-600">{{ state.error }}</p>
+          <p class="text-left leading-relaxed break-all text-red-600 dark:text-red-400">{{ state.error }}</p>
           <el-button text size="small" class="mt-1" :icon="Refresh" @click="refreshAll">
             {{ t('common.retry') }}
           </el-button>
         </template>
-        <span v-else class="text-slate-400">{{ t('tree.emptyDir') }}</span>
+        <span v-else class="text-slate-400 dark:text-slate-500">{{ t('tree.emptyDir') }}</span>
       </div>
 
       <template v-for="row in rows" :key="row.path">
         <div
-          class="group flex cursor-pointer items-center gap-1 rounded px-1.5 py-[3px] hover:bg-slate-100"
+          class="group flex cursor-pointer items-center gap-1 rounded px-1.5 py-[3px] hover:bg-slate-100 dark:hover:bg-slate-700"
           :class="[
-            selected === row.path ? 'bg-sky-50 ring-1 ring-inset ring-sky-200' : '',
+            selected === row.path
+              ? 'bg-sky-50 dark:bg-sky-950/40 ring-1 ring-inset ring-sky-200 dark:ring-sky-800'
+              : '',
             cutPath === row.path ? 'opacity-50' : '',
           ]"
           @click="onClick(row)"
@@ -59,13 +61,13 @@
         >
           <span :style="{ width: `${row.depth * 12}px` }" class="shrink-0" />
 
-          <el-icon v-if="row.dir" class="shrink-0 text-slate-400">
+          <el-icon v-if="row.dir" class="shrink-0 text-slate-400 dark:text-slate-500">
             <CaretRight v-if="!state.expanded[row.path]" />
             <CaretBottom v-else />
           </el-icon>
           <span v-else class="w-[1em] shrink-0" />
 
-          <el-icon class="shrink-0" :class="row.dir ? 'text-amber-500' : 'text-slate-400'">
+          <el-icon class="shrink-0" :class="row.dir ? 'text-amber-500 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'">
             <FolderOpened v-if="row.dir && state.expanded[row.path]" />
             <Folder v-else-if="row.dir" />
             <Document v-else />
@@ -84,15 +86,15 @@
           </template>
           <template v-else>
             <span class="min-w-0 flex-1 truncate" :title="row.path">{{ row.name }}</span>
-            <span v-if="!row.dir && row.size >= 0" class="shrink-0 text-[10px] text-slate-400">
+            <span v-if="!row.dir && row.size >= 0" class="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
               {{ humanSize(row.size) }}
             </span>
           </template>
 
           <!-- 和右键菜单同一个入口：常驻但低调，省得靠猜（右键仍然可用） -->
           <el-icon
-            class="shrink-0 rounded p-0.5 transition-colors hover:bg-slate-200 hover:text-slate-700"
-            :class="selected === row.path ? 'text-slate-500' : 'text-slate-300'"
+            class="shrink-0 rounded p-0.5 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200"
+            :class="selected === row.path ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'"
             :title="t('tree.more')"
             @click.stop="openMenu(row.path, row.dir, $event)"
           >
@@ -105,7 +107,7 @@
           class="flex items-center gap-1 py-[3px] pr-1.5"
           :style="{ paddingLeft: `${(row.depth + 1) * 12 + 22}px` }"
         >
-          <el-icon class="shrink-0 text-slate-400">
+          <el-icon class="shrink-0 text-slate-400 dark:text-slate-500">
             <Folder v-if="editing.dir" />
             <Document v-else />
           </el-icon>
@@ -125,7 +127,7 @@
         v-if="editing && editing.parent === project"
         class="flex items-center gap-1 px-1.5 py-[3px]"
       >
-        <el-icon class="shrink-0 text-slate-400">
+        <el-icon class="shrink-0 text-slate-400 dark:text-slate-500">
           <Folder v-if="editing.dir" />
           <Document v-else />
         </el-icon>
@@ -146,15 +148,15 @@
     <div
       v-if="menu.show"
       ref="menuEl"
-      class="fixed z-50 min-w-[9rem] rounded-md border border-slate-200 bg-white py-1 text-[13px] shadow-lg"
+      class="fixed z-50 min-w-[9rem] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 py-1 text-[13px] shadow-lg"
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
     >
       <button
         v-for="item in menuItems"
         :key="item.label"
         type="button"
-        class="block w-full whitespace-nowrap px-3 py-1 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
-        :class="item.danger ? 'text-red-600' : ''"
+        class="block w-full whitespace-nowrap px-3 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:text-slate-300 dark:disabled:text-slate-600 disabled:hover:bg-transparent"
+        :class="item.danger ? 'text-red-600 dark:text-red-400' : ''"
         :disabled="item.disabled === true"
         @click="item.run()"
       >

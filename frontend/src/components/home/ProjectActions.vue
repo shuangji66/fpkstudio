@@ -1,37 +1,52 @@
 <template>
-  <el-dropdown trigger="click" placement="bottom-end" @command="run">
-    <!-- 下拉自身要能收到点击，所以 stop 放在外层：容器替它挡住行 / 卡片的点击 -->
-    <span class="inline-flex" @click.stop>
+  <!--
+    操作区：文件夹 + 下拉。整块自己挡住点击 / 键盘事件，否则会连带触发卡片自己的
+    「打开项目」——卡片整块可点。
+  -->
+  <div class="inline-flex items-center" @click.stop @keydown.stop>
+    <el-button
+      text
+      size="small"
+      :icon="FolderOpened"
+      :disabled="!canOpenFolder"
+      :title="canOpenFolder ? t('home.openFolder') : t('trim.error.hostUnavailable')"
+      @click="openFolder"
+    />
+    <el-dropdown trigger="click" placement="bottom-end" @command="run">
       <el-button text size="small" :icon="MoreFilled" :title="t('home.more')" />
-    </span>
-    <template #dropdown>
-      <el-dropdown-menu>
-        <el-dropdown-item command="rename" :icon="EditPen">
-          {{ t('common.rename') }}
-        </el-dropdown-item>
-        <el-dropdown-item command="export" :icon="Download">
-          {{ t('home.export') }}
-        </el-dropdown-item>
-        <el-dropdown-item command="delete" :icon="Delete" divided>
-          {{ t('common.delete') }}
-        </el-dropdown-item>
-      </el-dropdown-menu>
-    </template>
-  </el-dropdown>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item command="rename" :icon="EditPen">
+            {{ t('common.rename') }}
+          </el-dropdown-item>
+          <el-dropdown-item command="export" :icon="Download">
+            {{ t('home.export') }}
+          </el-dropdown-item>
+          <el-dropdown-item command="delete" :icon="Delete" divided>
+            {{ t('common.delete') }}
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
+  </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Download, EditPen, MoreFilled } from '@element-plus/icons-vue'
+import { Delete, Download, EditPen, FolderOpened, MoreFilled } from '@element-plus/icons-vue'
 import { downloadEntry, renameEntry } from '@/api/endpoints'
 import { useProjectsStore } from '@/stores/projects'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { isHostAvailable, openInFileManager } from '@/trim/sdk'
+import { trimErrorMessage } from '@/trim/errors'
 import type { ProjectInfo } from '@/api/types'
 
 /**
- * 项目卡片右上角的「···」菜单：重命名 / 导出 / 删除。
+ * 项目卡片右上角的操作区：文件夹按钮（在文件管理器里打开项目目录）+「···」菜单
+ * （重命名 / 导出 / 删除）。
  *
  * 三个动作整条流程都在这里走完（改目录 → 处理项目标签 → 播报 → 最后刷列表）。
  * 顺序不能反：`projects.refresh()` 会换掉列表，外层 v-for 的 key 跟着变，
@@ -43,10 +58,24 @@ import type { ProjectInfo } from '@/api/types'
  */
 const props = defineProps<{ item: ProjectInfo }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const projects = useProjectsStore()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
+
+/**
+ * 文件管理器是宿主能力：独立浏览器页面里没有它可开；路径也必须是后端给出来的
+ * 绝对路径（项目根目录可以被换成授权目录，拼 projectsDir + name 会拼错）。
+ */
+const canOpenFolder = computed(() => isHostAvailable() && Boolean(props.item.absPath))
+
+async function openFolder() {
+  try {
+    await openInFileManager(props.item.absPath)
+  } catch (e) {
+    ElMessage.error(trimErrorMessage(t, te, e))
+  }
+}
 
 /** 目录名规则与 fnpack create 保持一致：字母数字开头，可含 . _ -。 */
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/

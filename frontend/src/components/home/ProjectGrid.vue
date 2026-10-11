@@ -1,13 +1,13 @@
 <template>
-  <div v-if="projects.loading && !projects.count" class="panel p-8 text-center text-sm text-slate-500">
+  <div v-if="projects.loading && !projects.count" class="panel p-8 text-center text-sm text-slate-500 dark:text-slate-400">
     {{ t('common.loading') }}
   </div>
 
-  <div v-else-if="!projects.count" class="panel p-8 text-center text-sm text-slate-500">
+  <div v-else-if="!projects.count" class="panel p-8 text-center text-sm text-slate-500 dark:text-slate-400">
     {{ t('home.empty') }}
   </div>
 
-  <div v-else-if="!projects.filtered.length" class="panel p-8 text-center text-sm text-slate-500">
+  <div v-else-if="!projects.filtered.length" class="panel p-8 text-center text-sm text-slate-500 dark:text-slate-400">
     {{ t('home.noMatch') }}
   </div>
 

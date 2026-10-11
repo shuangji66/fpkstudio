@@ -70,10 +70,6 @@ build:
 	@echo "==> Copying frontend dist into embed dir..."
 	rm -rf "$(EMBED)"
 	mkdir -p "$(EMBED)"
-	# 用 tar 管道而不是 cp -r：飞牛的存储卷不兑现 mkdir 请求的模式位，cp 生成的
-	# 目录会落成 0000 且丢掉继承来的 ACL，go:embed 直接报
-	# "pattern all:embed: permission denied"。tar 解包后会显式 chmod 目录，
-	# 结果才是可用的（源本身的模式位反而是 0，不影响）。
 	tar -C "$(FRONTEND)/dist" -cf - . | tar -C "$(EMBED)" -xf -
 	@echo "==> Building Go binary..."
 	# Ensure local Go cache dirs exist。
@@ -81,9 +77,6 @@ build:
 	# Clean the Go build cache so code and embedded-asset changes always compile in.
 	go clean -cache
 	cd "$(BACKEND)" && go build -trimpath -ldflags "$(LDFLAGS)" -o "$(OUT)" .
-	# 显式补一次执行位：部分文件系统（飞牛的存储卷）不兑现创建时请求的模式位，
-	# 新建文件会落成 0000，二进制会因此跑不起来。
-	@chmod 755 "$(OUT)"
 	@echo "==> Cleaning embed dir..."
 	rm -rf "$(EMBED)"
 	@echo "==> Done: $(OUT)"

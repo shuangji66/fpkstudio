@@ -1,19 +1,19 @@
 <template>
   <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3">
     <div class="mx-auto max-w-3xl space-y-3">
-      <div v-if="model.error" class="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+      <div v-if="model.error" class="rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
         {{ t('editor.readFailed') }}: {{ model.error }}
       </div>
 
-      <p class="rounded-md bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+      <p class="rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
         {{ t('resource.hint') }}
       </p>
 
       <!-- Docker 项目：原生项目不显示（文件里已经有内容时才显示，避免藏掉已有数据） -->
-      <section v-if="showDocker" class="rounded-lg border border-slate-200">
-        <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-1.5">
-          <el-icon class="text-slate-400"><Box /></el-icon>
-          <span class="text-xs font-medium text-slate-700">{{ t('resource.docker') }}</span>
+      <section v-if="showDocker" class="rounded-lg border border-slate-200 dark:border-slate-700">
+        <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
+          <el-icon class="text-slate-400 dark:text-slate-500"><Box /></el-icon>
+          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.docker') }}</span>
           <span class="flex-1" />
           <el-button text size="small" :icon="Plus" @click="model.root['docker-project'].projects.push({ name: '', path: '' })" />
         </header>
@@ -27,17 +27,17 @@
             <el-input v-model="item.path" size="small" class="w-40" :placeholder="t('resource.dockerPath')" />
             <el-button text size="small" :icon="Delete" @click="model.root['docker-project'].projects.splice(index, 1)" />
           </div>
-          <p v-if="!model.root['docker-project'].projects.length" class="px-1 py-1 text-xs text-slate-400">
+          <p v-if="!model.root['docker-project'].projects.length" class="px-1 py-1 text-xs text-slate-400 dark:text-slate-500">
             {{ t('resource.empty') }}
           </p>
         </div>
       </section>
 
       <!-- 共享目录 -->
-      <section class="rounded-lg border border-slate-200">
-        <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-1.5">
-          <el-icon class="text-slate-400"><FolderOpened /></el-icon>
-          <span class="text-xs font-medium text-slate-700">{{ t('resource.shares') }}</span>
+      <section class="rounded-lg border border-slate-200 dark:border-slate-700">
+        <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
+          <el-icon class="text-slate-400 dark:text-slate-500"><FolderOpened /></el-icon>
+          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.shares') }}</span>
           <span class="flex-1" />
           <el-button text size="small" :icon="Plus" @click="model.root['data-share'].shares.push(newShare())" />
         </header>
@@ -45,34 +45,34 @@
           <div
             v-for="(share, index) in model.root['data-share'].shares"
             :key="index"
-            class="rounded-md bg-slate-50 p-2"
+            class="rounded-md bg-slate-50 dark:bg-slate-900 p-2"
           >
             <div class="flex items-center gap-2">
               <el-input v-model="share.name" size="small" class="w-56" :placeholder="t('resource.shareName')" />
               <el-button text size="small" :icon="Delete" @click="model.root['data-share'].shares.splice(index, 1)" />
             </div>
             <div class="mt-2 grid grid-cols-[5rem_1fr] items-center gap-2">
-              <span class="text-right text-[11px] text-slate-500">{{ t('resource.rw') }}</span>
+              <span class="text-right text-[11px] text-slate-500 dark:text-slate-400">{{ t('resource.rw') }}</span>
               <el-select v-model="share.permission.rw" size="small" multiple filterable allow-create default-first-option>
                 <el-option v-for="item in share.permission.rw" :key="item" :label="item" :value="item" />
               </el-select>
-              <span class="text-right text-[11px] text-slate-500">{{ t('resource.ro') }}</span>
+              <span class="text-right text-[11px] text-slate-500 dark:text-slate-400">{{ t('resource.ro') }}</span>
               <el-select v-model="share.permission.ro" size="small" multiple filterable allow-create default-first-option>
                 <el-option v-for="item in share.permission.ro" :key="item" :label="item" :value="item" />
               </el-select>
             </div>
           </div>
-          <p v-if="!model.root['data-share'].shares.length" class="px-1 py-1 text-xs text-slate-400">
+          <p v-if="!model.root['data-share'].shares.length" class="px-1 py-1 text-xs text-slate-400 dark:text-slate-500">
             {{ t('resource.empty') }}
           </p>
         </div>
       </section>
 
       <!-- 系统链接 -->
-      <section class="rounded-lg border border-slate-200">
-        <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-1.5">
-          <el-icon class="text-slate-400"><Link /></el-icon>
-          <span class="text-xs font-medium text-slate-700">{{ t('resource.linker') }}</span>
+      <section class="rounded-lg border border-slate-200 dark:border-slate-700">
+        <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
+          <el-icon class="text-slate-400 dark:text-slate-500"><Link /></el-icon>
+          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.linker') }}</span>
         </header>
         <div class="space-y-2 p-2">
           <div
@@ -80,7 +80,7 @@
             :key="group"
             class="grid grid-cols-[10rem_1fr] items-center gap-2"
           >
-            <span class="text-right text-[11px] text-slate-500">{{ t(`resource.linker${group[0]!.toUpperCase()}${group.slice(1)}`) }}</span>
+            <span class="text-right text-[11px] text-slate-500 dark:text-slate-400">{{ t(`resource.linker${group[0]!.toUpperCase()}${group.slice(1)}`) }}</span>
             <el-select
               v-model="model.root['usr-local-linker'][group]"
               size="small"
@@ -102,26 +102,26 @@
       </section>
 
       <!-- 飞牛 API 调用列表（api-scope） -->
-      <section class="rounded-lg border border-slate-200">
-        <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-1.5">
-          <el-icon class="text-slate-400"><Connection /></el-icon>
-          <span class="text-xs font-medium text-slate-700">{{ t('resource.apiScope') }}</span>
+      <section class="rounded-lg border border-slate-200 dark:border-slate-700">
+        <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
+          <el-icon class="text-slate-400 dark:text-slate-500"><Connection /></el-icon>
+          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.apiScope') }}</span>
           <span class="flex-1" />
-          <span class="mono text-[10px] text-slate-400">api-scope</span>
+          <span class="mono text-[10px] text-slate-400 dark:text-slate-500">api-scope</span>
         </header>
         <div class="p-2">
           <el-checkbox-group v-model="model.apiScope">
             <div v-for="item in apiItems" :key="item.id" class="py-1">
               <el-checkbox :value="item.id">
-                <span class="text-xs text-slate-700">{{ item.title }}</span>
-                <span class="mono ml-2 text-[10px] text-slate-400">{{ item.id }}</span>
+                <span class="text-xs text-slate-700 dark:text-slate-200">{{ item.title }}</span>
+                <span class="mono ml-2 text-[10px] text-slate-400 dark:text-slate-500">{{ item.id }}</span>
               </el-checkbox>
-              <div v-if="item.desc" class="ml-6 text-[11px] leading-relaxed text-slate-500">
+              <div v-if="item.desc" class="ml-6 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
                 {{ item.desc }}
               </div>
             </div>
           </el-checkbox-group>
-          <p v-if="!apiItems.length" class="px-1 py-1 text-xs text-slate-400">
+          <p v-if="!apiItems.length" class="px-1 py-1 text-xs text-slate-400 dark:text-slate-500">
             {{ t('resource.empty') }}
           </p>
         </div>

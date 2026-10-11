@@ -22,15 +22,19 @@ import (
 	"fpkstudio/internal/fnpack"
 	"fpkstudio/internal/logging"
 	"fpkstudio/internal/projects"
+	"fpkstudio/internal/state"
+	"fpkstudio/internal/trimapi"
 )
 
 // Server 是全部依赖的持有者。
 type Server struct {
-	cfg     *config.Config
-	log     *logging.Logger
-	fn      *fnpack.Client
-	prj     *projects.Manager
-	web fs.FS // 内嵌的前端产物，已经以资源根为根（main 里做过 fs.Sub）
+	cfg   *config.Config
+	log   *logging.Logger
+	fn    *fnpack.Client
+	prj   *projects.Manager
+	state *state.Store
+	trim  *trimapi.Client
+	web   fs.FS // 内嵌的前端产物，已经以资源根为根（main 里做过 fs.Sub）
 
 	mux        *http.ServeMux
 	startedAt  time.Time
@@ -38,12 +42,14 @@ type Server struct {
 }
 
 // New 构造 Server。
-func New(cfg *config.Config, log *logging.Logger, fn *fnpack.Client, prj *projects.Manager, web fs.FS) *Server {
+func New(cfg *config.Config, log *logging.Logger, fn *fnpack.Client, prj *projects.Manager, web fs.FS, st *state.Store, trim *trimapi.Client) *Server {
 	s := &Server{
 		cfg:       cfg,
 		log:       log,
 		fn:        fn,
 		prj:       prj,
+		state:     st,
+		trim:      trim,
 		mux:       http.NewServeMux(),
 		startedAt: time.Now(),
 	}
@@ -68,6 +74,7 @@ func (s *Server) routes() {
 	s.api("/api/projects/platforms", s.handleProjectPlatforms)
 	s.api("/api/projects/settings", s.handleProjectSettings)
 	s.api("/api/projects/import", s.handleProjectImport)
+	s.api("/api/projects/import-path", s.handleProjectImportPath)
 	s.api("/api/projects/pack", s.handleProjectPack)
 	s.api("/api/projects/artifacts", s.handleProjectArtifacts)
 
@@ -83,6 +90,15 @@ func (s *Server) routes() {
 
 	s.api("/api/logs", s.handleLogs)
 	s.api("/api/logs/stream", s.handleLogStream)
+
+	// 设置（目录 + 飞牛开放 API 的转发）。这些接口一律由服务端代调飞牛接口：
+	// 后端 API 只能服务端走 unix socket，token 也不能下发到浏览器。
+	s.api("/api/settings", s.handleSettings)
+	s.api("/api/trim/status", s.handleTrimStatus)
+	s.api("/api/trim/folders", s.handleTrimFolders)
+	s.api("/api/trim/folders/delete", s.handleTrimFolderDelete)
+	s.api("/api/trim/acl", s.handleTrimACL)
+	s.api("/api/trim/semantic", s.handleTrimSemantic)
 
 	// 静态资源兜底，必须是最后一个。
 	s.mux.Handle(s.staticPattern(), s.staticHandler())
@@ -178,7 +194,8 @@ func (s *Server) banner() {
 	s.log.Infof("socket   : unix:%s", addr)
 	s.log.Infof("base url : %s", s.cfg.BaseURL)
 	s.log.Infof("数据目录 : %s", s.cfg.DataDir)
-	s.log.Infof("输出目录 : %s", s.cfg.OutputDir)
+	s.log.Infof("项目目录 : %s", s.prj.ProjectRoot())
+	s.log.Infof("输出目录 : %s", s.prj.OutputDir())
 	s.log.Infof("示例     : curl --unix-socket %s %s/api/system/info", addr, s.cfg.BaseURL)
 }
 

@@ -7,7 +7,7 @@
           <div
             class="relative mx-auto cursor-grab touch-none overflow-hidden outline-1 outline-dashed transition-colors"
             :class="[
-              image ? 'outline-amber-400' : 'outline-sky-400 hover:bg-sky-50/60',
+              image ? 'outline-amber-400' : 'outline-sky-400 hover:bg-sky-50/60 dark:hover:bg-sky-950/40',
               dragging ? 'cursor-grabbing' : '',
             ]"
             :style="stageStyle"
@@ -33,25 +33,25 @@
             />
             <span
               v-else
-              class="flex h-full items-center justify-center px-4 text-center text-xs leading-relaxed text-slate-400"
+              class="flex h-full items-center justify-center px-4 text-center text-xs leading-relaxed text-slate-400 dark:text-slate-500"
             >
               {{ t('iconTab.pickHint') }}
             </span>
 
             <div
               v-if="draggingFile"
-              class="absolute inset-0 flex items-center justify-center bg-white/80 text-xs text-sky-600"
+              class="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-slate-800/80 text-xs text-sky-600 dark:text-sky-400"
             >
               {{ t('iconTab.drop') }}
             </div>
           </div>
 
-          <p class="mt-2 text-center text-[11px] text-slate-500">
+          <p class="mt-2 text-center text-[11px] text-slate-500 dark:text-slate-400">
             {{ image ? t('iconTab.cropTip') : t('iconTab.pickTip') }}
           </p>
 
           <div
-            class="mx-auto mt-2 grid w-[16rem] grid-cols-[2.5rem_1fr] items-center gap-x-2 gap-y-1.5 text-xs text-slate-600"
+            class="mx-auto mt-2 grid w-[16rem] grid-cols-[2.5rem_1fr] items-center gap-x-2 gap-y-1.5 text-xs text-slate-600 dark:text-slate-300"
           >
             <span>{{ t('iconTab.zoom') }}</span>
             <el-slider
@@ -122,10 +122,10 @@
           <div
             v-for="entry in entryGroups"
             :key="entry.group.id"
-            class="space-y-2 rounded-md border border-dashed border-slate-300 p-2"
+            class="space-y-2 rounded-md border border-dashed border-slate-300 dark:border-slate-600 p-2"
           >
             <div class="flex items-center gap-2">
-              <span class="shrink-0 text-xs text-slate-600">{{ t('iconTab.entryPrefix') }}</span>
+              <span class="shrink-0 text-xs text-slate-600 dark:text-slate-300">{{ t('iconTab.entryPrefix') }}</span>
               <el-input
                 v-model="entry.group.prefix"
                 size="small"
@@ -154,7 +154,7 @@
                 :src="iconURL(target)"
               />
             </template>
-            <p v-else class="text-[11px] leading-relaxed text-slate-400">
+            <p v-else class="text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
               {{ t('iconTab.entryPrefixHint') }}
             </p>
           </div>
@@ -164,7 +164,7 @@
           </el-button>
 
           <div class="grid grid-cols-[auto_1fr] items-center gap-x-3 pt-1">
-            <span class="text-xs text-slate-600">{{ t('iconTab.smallScale') }}</span>
+            <span class="text-xs text-slate-600 dark:text-slate-300">{{ t('iconTab.smallScale') }}</span>
             <el-radio-group v-model="smallScale" size="small" :disabled="!hasSmall">
               <el-radio-button :value="1">{{ t('iconTab.scaleSame') }}</el-radio-button>
               <el-radio-button :value="0.5">1/2</el-radio-button>
@@ -177,12 +177,12 @@
             <el-button type="primary" size="small" :icon="Upload" :loading="saving" @click="save">
               {{ saving ? t('iconTab.saving') : t('iconTab.save') }}
             </el-button>
-            <span v-if="progress.total" class="mono text-[11px] text-slate-500">
+            <span v-if="progress.total" class="mono text-[11px] text-slate-500 dark:text-slate-400">
               {{ progress.done }}/{{ progress.total }}
             </span>
           </div>
 
-          <p class="text-[11px] leading-relaxed text-slate-400">{{ t('iconTab.targetHint') }}</p>
+          <p class="text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">{{ t('iconTab.targetHint') }}</p>
         </div>
       </div>
     </div>

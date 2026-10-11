@@ -25,7 +25,7 @@
           :placeholder="t('log.filterText')"
         />
 
-        <span class="flex items-center gap-1 text-[11px] text-slate-400">
+        <span class="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
           <span
             class="inline-block h-1.5 w-1.5 rounded-full"
             :class="logs.connected ? 'bg-emerald-400' : 'bg-slate-500'"
@@ -33,11 +33,11 @@
           {{ logs.connected ? t('log.connected') : t('log.disconnected') }}
         </span>
 
-        <span class="text-[11px] text-slate-500">{{ logs.visible.length }} 条</span>
+        <span class="text-[11px] text-slate-500 dark:text-slate-400">{{ logs.visible.length }} 条</span>
 
         <span class="flex-1" />
 
-        <button type="button" class="rounded px-1.5 py-0.5 text-slate-500 hover:bg-slate-100" @click="clear">
+        <button type="button" class="rounded px-1.5 py-0.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700" @click="clear">
           {{ t('log.clear') }}
         </button>
       </div>

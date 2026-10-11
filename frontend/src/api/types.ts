@@ -26,6 +26,8 @@ export interface SystemInfo {
 
 export interface ProjectInfo {
   name: string
+  /** 项目目录的绝对路径（换过项目根目录之后 projectsDir + name 是拼不出来的）。 */
+  absPath: string
   appname: string
   version: string
   displayName: string
@@ -96,4 +98,47 @@ export interface LogEntry {
   level: 'debug' | 'info' | 'warn' | 'error'
   source: string
   msg: string
+}
+
+/** 飞牛统一网关转发的当前用户（见官方「统一网关」）。 */
+export interface GatewayUser {
+  uid: number
+  name: string
+  isAdmin: boolean
+  /** 为假表示请求没经过网关，uid 是后端进程自己的。 */
+  fromGateway: boolean
+}
+
+/** 飞牛开放 API 的可用状态。 */
+export interface TrimStatus {
+  available: boolean
+  socket: string
+  app: string
+  message: string
+}
+
+export interface DirSettings {
+  /** 当前生效的绝对路径（可能来自用户设置，也可能是默认值）。 */
+  projectRoot: string
+  outputDir: string
+  /** 该路径是不是用户设置过的（为假时界面上标「默认」）。 */
+  projectRootFromUser: boolean
+  outputDirFromUser: boolean
+  defaultProjectRoot: string
+  defaultOutputDir: string
+  /** 为真表示 FPKSTUDIO_OUTPUT_DIR 与项目目录撞了、已被忽略，生效的是默认输出目录。 */
+  outputEnvIgnored: boolean
+}
+
+export interface SettingsInfo {
+  dirs: DirSettings
+  user: GatewayUser
+  trim: TrimStatus
+  dataDir: string
+}
+
+/** 路径转换结果（内部路径 → 给用户看的语义路径）。 */
+export interface SemanticPath {
+  path: string
+  semanticPath: string
 }

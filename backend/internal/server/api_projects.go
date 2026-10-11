@@ -105,7 +105,7 @@ func (s *Server) handleProjectArtifacts(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return badRequest("%v", err)
 	}
-	return writeJSON(w, map[string]any{"list": list, "outputDir": s.cfg.OutputDir})
+	return writeJSON(w, map[string]any{"list": list, "outputDir": s.prj.OutputDir()})
 }
 
 // handleProjectImport 接收上传的 fpk，解包成项目。

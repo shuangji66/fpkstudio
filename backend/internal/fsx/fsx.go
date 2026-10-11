@@ -578,6 +578,72 @@ func WriteFileTo(absPath string, data []byte, perm os.FileMode) error {
 	return os.WriteFile(absPath, data, perm)
 }
 
+// CopyTree 按绝对路径递归复制文件或目录。
+//
+// 为什么不能只用 Root.Copy：项目根目录可以是用户授权的目录（见
+// projects.Manager.SetRoots），它落在数据目录沙箱之外，而打包前的暂存复制是
+// 「项目目录 → 数据目录的 tmp/」，跨了两个沙箱，没法用任何一个 Root 的相对路径
+// 表达。复制语义与 Root.copy 保持一致（模式位显式 chmod、源模式为 0 时给安全
+// 默认值），否则飞牛卷上复制出来的是 0000 文件，fnpack 直接 EACCES。
+func CopyTree(srcAbs, dstAbs string) error {
+	fi, err := os.Lstat(srcAbs)
+	if err != nil {
+		return err
+	}
+	return copyTree(srcAbs, dstAbs, fi)
+}
+
+func copyTree(src, dst string, fi os.FileInfo) error {
+	mode := inheritMode(fi)
+
+	if !fi.IsDir() {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		in, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			out.Close()
+			return err
+		}
+		if err := out.Close(); err != nil {
+			return err
+		}
+		return os.Chmod(dst, mode)
+	}
+
+	if err := os.MkdirAll(dst, mode); err != nil {
+		return err
+	}
+	// 先定好目录模式再往里放东西：这个文件系统上新建项会继承父目录模式，
+	// 父目录模式没定死的话会把子项的权限一起带偏。
+	if err := os.Chmod(dst, mode); err != nil {
+		return err
+	}
+	children, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, c := range children {
+		child := filepath.Join(src, c.Name())
+		info, err := os.Lstat(child)
+		if err != nil {
+			return err
+		}
+		if err := copyTree(child, filepath.Join(dst, c.Name()), info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func toEntry(fi os.FileInfo) Entry {
 	e := Entry{
 		Name:    fi.Name(),

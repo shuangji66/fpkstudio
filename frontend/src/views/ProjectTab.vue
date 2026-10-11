@@ -1,16 +1,16 @@
 <template>
-  <div class="flex h-full min-h-0 bg-slate-100">
-    <aside class="flex shrink-0 flex-col border-r border-slate-200 bg-white" :style="{ width: `${treeWidth}px` }">
+  <div class="flex h-full min-h-0 bg-slate-100 dark:bg-slate-900">
+    <aside class="flex shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" :style="{ width: `${treeWidth}px` }">
       <FileTree :project="name" />
     </aside>
 
     <div
-      class="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-sky-300"
+      class="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-sky-300 dark:hover:bg-sky-700"
       :title="t('editor.resizeHint')"
       @pointerdown="startResize"
     />
 
-    <section class="flex min-w-0 flex-1 flex-col bg-white">
+    <section class="flex min-w-0 flex-1 flex-col bg-white dark:bg-slate-800">
       <FileTabs :project="name" />
 
       <div class="relative min-h-0 flex-1">

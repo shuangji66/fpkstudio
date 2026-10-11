@@ -1,5 +1,5 @@
 <template>
-  <div class="flex items-center gap-2 rounded-md border border-slate-200 px-2 py-1.5">
+  <div class="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1.5">
     <el-checkbox
       :model-value="checked"
       size="small"
@@ -12,19 +12,19 @@
     -->
     <span
       class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded border"
-      :class="src ? 'border-slate-200 bg-white' : 'border-dashed border-slate-300 bg-slate-50'"
+      :class="src ? 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800' : 'border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900'"
     >
       <img v-if="src" :src="src" alt="" class="h-full w-full object-contain" />
     </span>
 
-    <span class="shrink-0 text-xs text-slate-700">{{ t(labelKey) }}</span>
+    <span class="shrink-0 text-xs text-slate-700 dark:text-slate-200">{{ t(labelKey) }}</span>
     <span
-      class="mono min-w-0 flex-1 truncate text-right text-[11px] text-slate-400"
+      class="mono min-w-0 flex-1 truncate text-right text-[11px] text-slate-400 dark:text-slate-500"
       :title="path"
     >
       {{ path }}
     </span>
-    <span class="mono shrink-0 text-[11px] text-slate-500">{{ size }}px</span>
+    <span class="mono shrink-0 text-[11px] text-slate-500 dark:text-slate-400">{{ size }}px</span>
   </div>
 </template>
 

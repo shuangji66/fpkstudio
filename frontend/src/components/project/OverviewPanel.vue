@@ -2,7 +2,7 @@
   <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3">
     <div
       v-if="state.error"
-      class="mx-auto mb-3 max-w-6xl rounded-md bg-red-50 px-3 py-2 text-xs text-red-700"
+      class="mx-auto mb-3 max-w-6xl rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300"
     >
       {{ state.error }}
     </div>
@@ -13,11 +13,11 @@
       <!-- 左列：发布设置 / 结果 / 产物 -->
       <div class="space-y-3">
         <!-- 架构选择 -->
-        <section class="rounded-lg border border-slate-200">
-          <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
-            <span class="text-xs font-medium text-slate-700">{{ t('pack.title') }}</span>
-            <span class="mx-1 h-3 w-px bg-slate-200" />
-            <span class="text-xs text-slate-600">{{ t('pack.multi') }}</span>
+        <section class="rounded-lg border border-slate-200 dark:border-slate-700">
+          <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
+            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('pack.title') }}</span>
+            <span class="mx-1 h-3 w-px bg-slate-200 dark:bg-slate-800" />
+            <span class="text-xs text-slate-600 dark:text-slate-300">{{ t('pack.multi') }}</span>
             <el-switch v-model="multi" size="small" />
             <span class="flex-1" />
             <el-button text size="small" :icon="Refresh" @click="reload" />
@@ -25,7 +25,7 @@
 
           <div class="space-y-3 p-3">
             <template v-if="multi">
-              <p class="text-[11px] leading-relaxed text-slate-500">{{ t('pack.multiHint') }}</p>
+              <p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">{{ t('pack.multiHint') }}</p>
 
               <div v-if="state.platforms.length" class="space-y-1">
                 <div class="label-text">{{ t('pack.platforms') }}</div>
@@ -41,28 +41,28 @@
 
               <div
                 v-else
-                class="rounded-md bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800"
+                class="rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200"
               >
                 <div>{{ t('pack.noPlatforms') }}</div>
                 <div class="mt-1">{{ t('pack.noPlatformsHint') }}</div>
               </div>
 
               <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3">
-                <span class="text-right text-xs text-slate-600">{{ t('pack.serverDir') }}</span>
+                <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('pack.serverDir') }}</span>
                 <div>
                   <el-input v-model="serverDir" size="small" class="w-64" />
-                  <p class="mt-1 text-[11px] text-slate-500">{{ t('pack.serverDirHint') }}</p>
+                  <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{{ t('pack.serverDirHint') }}</p>
                 </div>
               </div>
             </template>
 
-            <p v-else class="text-[11px] leading-relaxed text-slate-500">
+            <p v-else class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
               {{ t('pack.singleHint') }}
             </p>
 
             <div class="flex items-center gap-4">
               <el-checkbox v-model="copyOut">{{ t('pack.copyOut') }}</el-checkbox>
-              <span class="mono truncate text-[11px] text-slate-400" :title="outputDir">
+              <span class="mono truncate text-[11px] text-slate-400 dark:text-slate-500" :title="outputDir">
                 {{ t('pack.outputDir') }}: {{ outputDir }}
               </span>
             </div>
@@ -82,11 +82,11 @@
         </section>
 
         <!-- 结果 -->
-        <section v-if="state.results.length" class="rounded-lg border border-slate-200">
-          <header class="border-b border-slate-200 px-3 py-2 text-xs font-medium text-slate-700">
+        <section v-if="state.results.length" class="rounded-lg border border-slate-200 dark:border-slate-700">
+          <header class="border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200">
             {{ t('pack.resultTitle') }}
           </header>
-          <ul class="divide-y divide-slate-100">
+          <ul class="divide-y divide-slate-100 dark:divide-slate-700">
             <li
               v-for="item in state.results"
               :key="item.platform"
@@ -95,26 +95,26 @@
               <el-tag size="small" :type="item.ok ? 'success' : 'danger'" effect="plain">
                 {{ item.ok ? t('pack.success') : t('pack.failed') }}
               </el-tag>
-              <span class="mono text-xs text-slate-700">{{ item.platform || '—' }}</span>
+              <span class="mono text-xs text-slate-700 dark:text-slate-200">{{ item.platform || '—' }}</span>
               <span
-                class="mono min-w-0 flex-1 truncate text-[11px] text-slate-500"
+                class="mono min-w-0 flex-1 truncate text-[11px] text-slate-500 dark:text-slate-400"
                 :title="item.path"
               >
                 {{ item.file || item.log || t('pack.failedTip') }}
               </span>
-              <span class="shrink-0 text-[11px] text-slate-400">{{ humanSize(item.size) }}</span>
+              <span class="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">{{ humanSize(item.size) }}</span>
             </li>
           </ul>
         </section>
 
         <!-- 产物 -->
-        <section class="rounded-lg border border-slate-200">
-          <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
-            <span class="text-xs font-medium text-slate-700">{{ t('pack.artifacts') }}</span>
+        <section class="rounded-lg border border-slate-200 dark:border-slate-700">
+          <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
+            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('pack.artifacts') }}</span>
             <span class="flex-1" />
             <el-button text size="small" :icon="Refresh" @click="reload" />
           </header>
-          <ul v-if="state.artifacts.length" class="divide-y divide-slate-100">
+          <ul v-if="state.artifacts.length" class="divide-y divide-slate-100 dark:divide-slate-700">
             <li
               v-for="item in state.artifacts"
               :key="item.path"
@@ -123,11 +123,19 @@
               <el-tag size="small" effect="plain" type="info">
                 {{ item.scope === 'output' ? t('pack.scopeOutput') : t('pack.scopeProject') }}
               </el-tag>
-              <span class="mono min-w-0 flex-1 truncate text-xs text-slate-700" :title="item.path">
+              <span class="mono min-w-0 flex-1 truncate text-xs text-slate-700 dark:text-slate-200" :title="item.path">
                 {{ item.name }}
               </span>
-              <span class="shrink-0 text-[11px] text-slate-400">{{ item.sizeRaw }}</span>
-              <span class="shrink-0 text-[11px] text-slate-400">{{ item.modTime }}</span>
+              <span class="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">{{ item.sizeRaw }}</span>
+              <span class="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">{{ item.modTime }}</span>
+              <el-button
+                text
+                size="small"
+                :icon="FolderOpened"
+                :disabled="!hostAvailable"
+                :title="hostAvailable ? t('pack.openFolder') : t('trim.error.hostUnavailable')"
+                @click="openFolder(item)"
+              />
               <el-button
                 text
                 size="small"
@@ -136,15 +144,15 @@
               />
             </li>
           </ul>
-          <p v-else class="px-3 py-3 text-xs text-slate-400">{{ t('pack.noArtifacts') }}</p>
+          <p v-else class="px-3 py-3 text-xs text-slate-400 dark:text-slate-500">{{ t('pack.noArtifacts') }}</p>
         </section>
       </div>
 
       <!-- 右列：manifest 预览 -->
       <aside class="lg:sticky lg:top-0">
-        <section class="rounded-lg border border-slate-200">
-          <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
-            <span class="text-xs font-medium text-slate-700">{{ t('overview.manifest') }}</span>
+        <section class="rounded-lg border border-slate-200 dark:border-slate-700">
+          <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
+            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('overview.manifest') }}</span>
             <span class="flex-1" />
             <el-button
               text
@@ -164,7 +172,7 @@
 
           <p
             v-if="manifestError"
-            class="px-3 py-3 text-[11px] leading-relaxed break-words text-amber-700"
+            class="px-3 py-3 text-[11px] leading-relaxed break-words text-amber-700 dark:text-amber-300"
           >
             {{ manifestError }}
           </p>
@@ -178,9 +186,9 @@
                 :class="clamped(row) ? 'cursor-pointer' : ''"
                 @click="toggle(row)"
               >
-                <span class="shrink-0 whitespace-pre text-slate-400">{{ row.padded }} = </span>
+                <span class="shrink-0 whitespace-pre text-slate-400 dark:text-slate-500">{{ row.padded }} = </span>
                 <span
-                  class="min-w-0 flex-1 break-words whitespace-pre-wrap text-slate-800"
+                  class="min-w-0 flex-1 break-words whitespace-pre-wrap text-slate-800 dark:text-slate-100"
                   :class="clamped(row) ? 'line-clamp-3' : ''"
                   >{{ row.value || '—' }}</span
                 >
@@ -188,7 +196,7 @@
             </div>
           </div>
 
-          <p v-else class="px-3 py-3 text-xs text-slate-400">{{ t('overview.noManifest') }}</p>
+          <p v-else class="px-3 py-3 text-xs text-slate-400 dark:text-slate-500">{{ t('overview.noManifest') }}</p>
         </section>
       </aside>
     </div>
@@ -199,17 +207,20 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Box, Download, EditPen, Refresh } from '@element-plus/icons-vue'
+import { Box, Download, EditPen, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSystemStore } from '@/stores/system'
 import { downloadEntry, readFile } from '@/api/endpoints'
 import type { Artifact } from '@/api/types'
 import { humanSize } from '@/utils/format'
 import { Manifest } from '@/utils/manifest'
+import { isHostAvailable, openInFileManager } from '@/trim/sdk'
+import { trimErrorMessage } from '@/trim/errors'
 
 const props = defineProps<{ project: string }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+const hostAvailable = computed(() => isHostAvailable())
 const workspace = useWorkspaceStore()
 const system = useSystemStore()
 
@@ -293,6 +304,22 @@ const DEFAULT_ARCHES = ['arm', 'x86']
 /** 产物在项目目录里时用相对路径下载，在输出目录里时后端只能给绝对路径，改用项目内路径。 */
 function getDownloadPath(item: Artifact): string {
   return item.scope === 'output' ? `${props.project}/${item.name}` : item.path
+}
+
+/**
+ * 在飞牛的文件管理器里打开产物所在的目录。
+ *
+ * 目录直接从产物自己的绝对路径掐掉文件名算出来，不依赖 /api/system/info 里的
+ * outputDir / projectsDir：那两个值在「设置里换过目录」之后是旧的，产物却是新的。
+ */
+async function openFolder(item: Artifact) {
+  const cut = item.path.lastIndexOf('/')
+  const dir = cut > 0 ? item.path.slice(0, cut) : item.path
+  try {
+    await openInFileManager(dir)
+  } catch (e) {
+    ElMessage.error(trimErrorMessage(t, te, e))
+  }
 }
 
 async function persist() {

@@ -1,8 +1,8 @@
 <template>
   <div class="flex h-full min-h-0">
-    <aside class="flex w-56 shrink-0 flex-col border-r border-slate-200">
-      <header class="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5">
-        <span class="text-xs font-medium text-slate-600">{{ t('uiConfig.entries') }}</span>
+    <aside class="flex w-56 shrink-0 flex-col border-r border-slate-200 dark:border-slate-700">
+      <header class="flex items-center gap-1 border-b border-slate-200 dark:border-slate-700 px-2 py-1.5">
+        <span class="text-xs font-medium text-slate-600 dark:text-slate-300">{{ t('uiConfig.entries') }}</span>
         <span class="flex-1" />
         <el-button text size="small" :icon="Plus" @click="startAdd" />
       </header>
@@ -25,38 +25,38 @@
           v-for="entry in entries"
           :key="entry.id"
           type="button"
-          class="block w-full truncate px-2 py-1 text-left text-[12px] hover:bg-slate-100"
-          :class="entry.id === selected ? 'bg-sky-50 font-medium text-sky-700' : 'text-slate-600'"
+          class="block w-full truncate px-2 py-1 text-left text-[12px] hover:bg-slate-100 dark:hover:bg-slate-700"
+          :class="entry.id === selected ? 'bg-sky-50 dark:bg-sky-950/40 font-medium text-sky-700 dark:text-sky-300' : 'text-slate-600 dark:text-slate-300'"
           @click="selected = entry.id"
         >
           {{ entry.id }}
         </button>
-        <p v-if="!entries.length" class="px-2 py-2 text-[11px] text-slate-400">
+        <p v-if="!entries.length" class="px-2 py-2 text-[11px] text-slate-400 dark:text-slate-500">
           {{ t('common.empty') }}
         </p>
       </div>
     </aside>
 
     <div class="min-w-0 flex-1 overflow-y-auto thin-scroll px-4 py-3">
-      <div v-if="model.error" class="mb-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+      <div v-if="model.error" class="mb-3 rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
         {{ t('editor.readFailed') }}: {{ model.error }}
       </div>
 
       <template v-if="current">
         <div class="mb-3 flex items-center gap-2">
-          <span class="mono text-sm font-medium text-slate-700">{{ current.id }}</span>
+          <span class="mono text-sm font-medium text-slate-700 dark:text-slate-200">{{ current.id }}</span>
           <span class="flex-1" />
           <el-button text size="small" :icon="Delete" @click="removeEntry(current.id)">
             {{ t('uiConfig.removeEntry') }}
           </el-button>
         </div>
 
-        <p class="mb-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+        <p class="mb-3 rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
           {{ t('uiConfig.hint') }}
         </p>
 
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.entryId') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.entryId') }}</span>
           <el-input
             v-model="idDraft"
             size="small"
@@ -68,22 +68,22 @@
         </div>
 
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.title') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.title') }}</span>
           <el-input v-model="current.value.title" size="small" class="w-64" />
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.icon') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.icon') }}</span>
           <el-input v-model="current.value.icon" size="small" class="w-64" placeholder="images/icon_{0}.png" />
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.type') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.type') }}</span>
           <el-select v-model="current.value.type" size="small" class="w-64">
             <el-option :label="t('uiConfig.typeIframe')" value="iframe" />
             <el-option :label="t('uiConfig.typeUrl')" value="url" />
           </el-select>
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.protocol') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.protocol') }}</span>
           <el-select v-model="current.value.protocol" size="small" class="w-64">
             <el-option label="（自适应）" value="" />
             <el-option label="http" value="http" />
@@ -91,23 +91,23 @@
           </el-select>
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.port') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.port') }}</span>
           <el-input v-model="current.value.port" size="small" class="w-64" placeholder="${wizard_port}" />
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.url') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.url') }}</span>
           <el-input v-model="current.value.url" size="small" class="w-64" />
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.gatewayPrefix') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewayPrefix') }}</span>
           <el-input v-model="current.value.gatewayPrefix" size="small" class="w-64" placeholder="/app/myapp" />
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.gatewaySocket') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewaySocket') }}</span>
           <el-input v-model="current.value.gatewaySocket" size="small" class="w-64" placeholder="app.sock" />
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.fileTypes') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.fileTypes') }}</span>
           <el-select
             v-model="current.value.fileTypes"
             size="small"
@@ -121,7 +121,7 @@
           </el-select>
         </div>
         <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-          <span class="text-right text-xs text-slate-600">{{ t('uiConfig.accessPerm') }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.accessPerm') }}</span>
           <!-- 所有用户可见时，逐个用户的权限设置没有意义，直接禁用 -->
           <el-select
             v-model="current.value.control.accessPerm"
@@ -143,7 +143,7 @@
         </div>
       </template>
 
-      <p v-else class="py-8 text-center text-xs text-slate-400">{{ t('common.empty') }}</p>
+      <p v-else class="py-8 text-center text-xs text-slate-400 dark:text-slate-500">{{ t('common.empty') }}</p>
     </div>
   </div>
 </template>

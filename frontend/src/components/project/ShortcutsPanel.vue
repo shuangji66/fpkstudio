@@ -1,7 +1,7 @@
 <template>
   <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-4">
     <div class="mx-auto max-w-5xl">
-      <p class="rounded-md bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+      <p class="rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
         {{ t('shortcuts.hint') }}
       </p>
 
@@ -14,26 +14,26 @@
         <section
           v-for="group in groups"
           :key="group.key"
-          class="mb-3 break-inside-avoid rounded-lg border border-slate-200"
+          class="mb-3 break-inside-avoid rounded-lg border border-slate-200 dark:border-slate-700"
         >
-          <header class="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
-            <span class="text-xs font-medium text-slate-700">{{ t(group.labelKey) }}</span>
+          <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
+            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t(group.labelKey) }}</span>
             <span class="flex-1" />
-            <span class="text-[11px] text-slate-400">{{ t(group.hintKey) }}</span>
+            <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ t(group.hintKey) }}</span>
           </header>
 
-          <ul class="divide-y divide-slate-100">
+          <ul class="divide-y divide-slate-100 dark:divide-slate-700">
             <li v-for="item in group.items" :key="item.path">
               <button
                 type="button"
-                class="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-sky-50/70"
+                class="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-sky-50/70 dark:hover:bg-sky-950/40"
                 :title="`${props.project}/${item.path}`"
                 @click="open(item.path)"
               >
-                <span class="w-36 shrink-0 truncate text-xs text-slate-700">
+                <span class="w-36 shrink-0 truncate text-xs text-slate-700 dark:text-slate-200">
                   {{ t(item.labelKey) }}
                 </span>
-                <span class="mono min-w-0 flex-1 truncate text-[11px] text-slate-400">
+                <span class="mono min-w-0 flex-1 truncate text-[11px] text-slate-400 dark:text-slate-500">
                   {{ item.path }}
                 </span>
                 <el-tag
@@ -44,7 +44,7 @@
                 >
                   {{ dirty(item.path) ? t('editor.unsaved') : t('shortcuts.opened') }}
                 </el-tag>
-                <el-icon class="shrink-0 text-[12px] text-slate-300"><ArrowRight /></el-icon>
+                <el-icon class="shrink-0 text-[12px] text-slate-300 dark:text-slate-600"><ArrowRight /></el-icon>
               </button>
             </li>
           </ul>

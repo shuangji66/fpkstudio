@@ -21,7 +21,7 @@ make clean               # 删二进制与 embed
 
 cd frontend
 npm run typecheck        # vue-tsc，类型检查（改了 .vue / .ts 必跑）
-npm run check            # 四个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名
+npm run check            # 五个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名 + 语义路径
 npm run build            # vite 构建到 frontend/dist
 ```
 
@@ -55,19 +55,24 @@ socat TCP-LISTEN:18080,fork,reuseaddr UNIX-CONNECT:/tmp/fpkstudio-data/run/fpkst
 backend/
   main.go                    入口：embed、配置、日志、依赖装配
   internal/config/           环境变量解析、目录准备、socket 长度校验
+                             （项目目录 / 输出目录撞一起时保项目目录、输出回默认）
   internal/logging/          文件日志 + 内存环 + 订阅（SSE 的数据源）
   internal/fsx/              os.Root 之上的沙箱文件操作（所有文件操作都走它）
   internal/fnpack/           fnpack 调用与输出转发
   internal/projects/         项目列表 / 创建 / 导入 / 多架构打包 / 产物 / manifest 解析
-  internal/server/           HTTP 路由、静态资源、各 API
+                             （项目根目录可以在数据目录之外，详见 SetRoots 的注释）
+  internal/state/            数据目录下 state.json 的读写（项目根目录 / 输出目录）
+  internal/trimapi/          飞牛开放 API 客户端：只能服务端走 unix socket 调
+  internal/server/           HTTP 路由、静态资源、各 API（/api/trim/* 是开放 API 的转发）
 frontend/src/
   api/                       endpoints（接口封装）、client（fetch 封装）、types
-  stores/                    pinia：projects / tabs / workspace / system / logs
+  stores/                    pinia：projects / tabs / workspace / system / logs / theme
   components/project/        项目内的固定页：总览 / 快捷设置 / 图标（+ 文件树、文件标签）
   components/editor/         标签页编辑器宿主 + 按路径注册的表单编辑器
   components/home/           首页：项目卡片 / 新建 / 导入
   utils/                     manifest、wizard、icon、format 等纯逻辑（可单独跑检查）
   i18n/                      zh-CN / en-US 两份语言包
+  trim/                      飞牛 JS SDK 的封装（@trimjs/web-app）
 ```
 
 ## 约定（改代码前先看）
@@ -88,6 +93,16 @@ frontend/src/
   `<script>` → `<template>` → `<style>`。组件超过一个明确职责就拆。
 - **UI 文案全部走 i18n**，不要在组件里硬编码中文（历史遗留：manifest 的
   `platform` / `source` / `install_type` 选项直接写在字段表里，改文案时注意两份语言包都要动）。
+- **主题开关就是 `html.dark`**。Tailwind 的 `dark:` 变体（在 `style.css` 里用
+  `@custom-variant dark` 改成认这个类）和 Element Plus 的暗色变量挂在一起，
+  由 `stores/theme.ts` 统一切。**新写界面时每个浅色都配一个 `dark:` 变体**，
+  漏掉的地方在深色下就是一块白斑，编译期不会报错。
+- **飞牛开放 API 只由后端调**（`internal/trimapi`，token 现读 `TRIM_API_TOKEN`，身份取
+  网关转发的 `X-Trim-Userid`）。前端一律走 `/api/trim/*`：token 和这套 socket 都不能
+  暴露给浏览器。
+- **前端调宿主能力前先判环境**。`trim/sdk.ts` 里 `isHostAvailable()` 为假（独立浏览器
+  页面）时按钮要置灰并说明原因；`pickUserPaths` 还会先等 `ensureHostReady()`，
+  理由见下面「已经踩过的坑」。
 
 ## 已经踩过的坑
 
@@ -108,6 +123,28 @@ frontend/src/
   脚本里点它等于点了别的行。要按「可见的那一个」过滤。
 - 目录列表是按目录缓存的（`state.dirs`）：写完之后如果算的是「目标目录里有没有同名」，
   必须 `loadDir(..., force)` 现拉一次——缓存里那份可能还是空的，拿它判断就会覆盖别人的文件。
+- `@trimjs/web-app` 的初始化 Promise，在页面被塞进一个**不是飞牛宿主**的 iframe 时
+  **永远不 settle**：此时 `isStandaloneWeb` 是 false（它只看 `window.parent !== window`），
+  但对面根本不回应握手。表现是所有宿主能力调用一直挂着——文件选择器点了没反应、界面
+  按钮一直转圈，也不报错。所以 `trim/sdk.ts` 里调用前先 `ensureHostReady()` 等一个上限
+  （10 秒），超时就报「宿主桥没有就绪」。
+- `trim.file.convertPath` 的返回结构**和官方文档不一样**：文档写 `{status,result}`，
+  实测系统直接回数组（`[{path,semanticPath}...]`）。`trimapi.decodeSemanticPaths` 三种
+  形态都认，别照文档钉死结构，否则用户看到的是「响应数据格式不符合预期」+ 界面退回
+  显示 `/vol1/...`。返回的 `path` 也可能与请求的写法不一致（多余的尾斜杠），
+  `utils/semantic.ts` 专门做这层对上号、`check:semantic` 盯着它；`language` 是必填项
+  且从**请求体**读（查询串会被反代丢掉）；`data.status` 非 0 同样是失败。
+- 项目目录与输出目录**撞在一起**时有一套优先级：界面里用户明确指定的值严格校验
+  （报错），环境变量撞了则保项目目录、输出退回默认；连默认值都撞（项目目录 =
+  `$DATA_DIR/output`）时**不能拒绝启动**，按「没有单独的输出目录」处理
+  （`Manager.outputIsProject` 兜住不重复复制、不重复列产物）。把部署配置判成错误
+  只会让服务起不来，而实际后果只是多余的复制。
+- 换授权目录时**先完成新目录的授权与切换（save 落盘），再删旧授权**。反过来的话，
+  用户在选择器里取消、或者选择器直接报错，旧目录的授权已经删了而配置里还写着它——
+  应用会突然读不到自己的项目根目录。
+- 宿主在用户**直接关掉选择器**时返回 `code: 1` + `msg: "Operation failed"`（没有业务码、
+  没有可读原因）。别把它当错误抛出去——用户只是点了取消。`trim/sdk.ts` 把 `code: 1` 和
+  「成功但没返回路径」都归一成空数组，调用方给一句「已取消」。
 
 ## 交付前自检
 

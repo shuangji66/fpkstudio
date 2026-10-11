@@ -40,7 +40,10 @@ const maxModTimeScan = 20000
 
 // ProjectInfo 是项目列表里的一项。
 type ProjectInfo struct {
-	Name        string `json:"name"`
+	Name string `json:"name"`
+	// AbsPath 是项目目录的绝对路径。界面要拿它在文件管理器里打开项目目录，
+	// 而项目根目录可以被换成授权目录，拼 projectsDir + name 会拼错。
+	AbsPath     string `json:"absPath"`
 	AppName     string `json:"appname"`
 	Version     string `json:"version"`
 	DisplayName string `json:"displayName"`
@@ -94,58 +97,173 @@ type Manager struct {
 	log    *logging.Logger
 	fn     *fnpack.Client
 	home   *fsx.Root // 数据根目录，用于暂存
-	prj    *fsx.Root // projects 目录
+	prj    *fsx.Root // 项目根目录沙箱
 	output *fsx.Root // 打包输出目录（可能在数据根之外）
 
-	// prjInHome 是 projects 目录相对于数据根目录的位置，
-	// 用于在同一个 home 沙箱里跨目录复制。
+	// projectRoot / outputDir 是上面两个沙箱的绝对路径。
+	projectRoot string
+	outputDir   string
+
+	// prjInHome 是项目根目录相对于数据根目录的位置，用于在同一个 home 沙箱里
+	// 跨目录复制；项目根目录被设置成数据目录之外的授权目录时为空，改走
+	// fsx.CopyTree 的绝对路径复制。
 	prjInHome string
+
+	// roots 是所有开过的沙箱，Close 时统一释放。SetRoots 换目录时旧的不立刻
+	// 关：打包是并发进行的（同一个进程里另一个 HTTP 请求正在用旧句柄），
+	// 关掉会让那次打包半路 EBADF。换目录是用户手动操作，频率极低。
+	roots []*fsx.Root
 }
 
-// New 创建 Manager。
+// New 创建 Manager，先按环境变量给的默认目录打开沙箱。
+// 用户设置过的目录由 SetRoots 在启动时补一次。
 func New(cfg *config.Config, log *logging.Logger, fn *fnpack.Client) (*Manager, error) {
 	home, err := fsx.Open(cfg.DataDir, true)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据目录失败: %w", err)
 	}
-	prj, err := fsx.Open(cfg.ProjectsDir, true)
-	if err != nil {
-		home.Close()
-		return nil, fmt.Errorf("打开项目目录失败: %w", err)
+	m := &Manager{
+		cfg:   cfg,
+		log:   log,
+		fn:    fn,
+		home:  home,
+		roots: []*fsx.Root{home},
 	}
-	out, err := fsx.Open(cfg.OutputDir, true)
-	if err != nil {
-		prj.Close()
-		home.Close()
-		return nil, fmt.Errorf("打开输出目录失败: %w", err)
+	if err := m.SetRoots("", ""); err != nil {
+		return nil, err
 	}
-
-	rel, err := filepath.Rel(cfg.DataDir, cfg.ProjectsDir)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		prj.Close()
-		home.Close()
-		out.Close()
-		return nil, fmt.Errorf("项目目录必须位于数据目录内：%s", cfg.ProjectsDir)
-	}
-
-	return &Manager{
-		cfg:       cfg,
-		log:       log,
-		fn:        fn,
-		home:      home,
-		prj:       prj,
-		output:    out,
-		prjInHome: filepath.ToSlash(rel),
-	}, nil
+	return m, nil
 }
 
 // Close 释放句柄。
 func (m *Manager) Close() {
-	for _, r := range []*fsx.Root{m.prj, m.home, m.output} {
+	for _, r := range m.roots {
 		if r != nil {
 			_ = r.Close()
 		}
 	}
+	m.roots = nil
+}
+
+// ProjectRoot 返回当前生效的项目根目录。
+func (m *Manager) ProjectRoot() string { return m.projectRoot }
+
+// OutputDir 返回当前生效的打包输出目录。
+func (m *Manager) OutputDir() string { return m.outputDir }
+
+// SetRoots 切换项目根目录与打包输出目录，空字符串表示用环境变量给的默认值。
+//
+// 允许把项目根目录指到数据目录之外（用户授权给应用的目录），这正是这个能力的
+// 意义所在：项目本身待在用户自己的存储空间里，数据目录只放日志、暂存和配置。
+// 校验只做「能不能用」这一层（必须是绝对路径、必须是已存在的目录、不能是根目录
+// 或数据目录本身），不做白名单——授权范围由飞牛系统的文件选择器与 ACL 决定。
+func (m *Manager) SetRoots(projectRoot, outputDir string) error {
+	projectRoot = strings.TrimSpace(projectRoot)
+	outputDir = strings.TrimSpace(outputDir)
+
+	prjDir := m.cfg.ProjectsDir
+	if projectRoot != "" {
+		if !filepath.IsAbs(projectRoot) {
+			return fmt.Errorf("项目根目录必须是绝对路径：%s", projectRoot)
+		}
+		abs, err := filepath.Abs(projectRoot)
+		if err != nil {
+			return fmt.Errorf("项目根目录不是合法路径: %w", err)
+		}
+		abs = filepath.Clean(abs)
+		if abs == string(filepath.Separator) {
+			return errors.New("项目根目录不能是文件系统根目录")
+		}
+		if abs == filepath.Clean(m.cfg.DataDir) {
+			return errors.New("项目根目录不能是数据目录（日志、暂存都在里面）")
+		}
+		st, err := os.Stat(abs)
+		if err != nil {
+			return fmt.Errorf("项目根目录不可用: %w", err)
+		}
+		if !st.IsDir() {
+			return fmt.Errorf("项目根目录不是目录：%s", abs)
+		}
+		prjDir = abs
+	}
+
+	outDir := m.cfg.OutputDir
+	if outputDir != "" {
+		if !filepath.IsAbs(outputDir) {
+			return fmt.Errorf("输出目录必须是绝对路径：%s", outputDir)
+		}
+		abs, err := filepath.Abs(outputDir)
+		if err != nil {
+			return fmt.Errorf("输出目录不是合法路径: %w", err)
+		}
+		abs = filepath.Clean(abs)
+		if abs == string(filepath.Separator) {
+			return errors.New("输出目录不能是文件系统根目录")
+		}
+		if abs == filepath.Clean(m.cfg.DataDir) {
+			return errors.New("输出目录不能是数据目录（日志、暂存都在里面）")
+		}
+		outDir = abs
+	}
+	// 两个参数都为空表示「用环境变量给的默认值」，这时不校验两者是否相同：
+	// 默认值可能本来就撞在一起（项目目录被指到 $DATA_DIR/output，而输出目录的默认
+	// 值正是它），挡下来等于服务直接起不来。这时复制到输出目录本来就等于复制到
+	// 自己身上，交给 outputIsProject 兜住（不重复复制、不重复列产物）。
+	// 用户明确指定的值仍然严格校验——界面上两个槽不允许选同一个目录。
+	sameIsDefault := strings.TrimSpace(projectRoot) == "" && strings.TrimSpace(outputDir) == ""
+	if !sameIsDefault && samePath(outDir, prjDir) {
+		return errors.New("输出目录不能和项目根目录相同")
+	}
+
+	prj, err := fsx.Open(prjDir, true)
+	if err != nil {
+		return fmt.Errorf("打开项目根目录失败: %w", err)
+	}
+	out, err := fsx.Open(outDir, true)
+	if err != nil {
+		_ = prj.Close()
+		return fmt.Errorf("打开输出目录失败: %w", err)
+	}
+
+	// 项目根落在数据目录内时，暂存复制可以在 home 沙箱里用相对路径完成；
+	// 落在外面（授权目录）就只能按绝对路径复制。
+	inHome := ""
+	if rel, err := filepath.Rel(m.cfg.DataDir, prjDir); err == nil && !strings.HasPrefix(rel, "..") {
+		inHome = filepath.ToSlash(rel)
+	} else {
+		m.log.Debugf("项目根目录在数据目录之外（%s），暂存复制改走绝对路径", prjDir)
+	}
+
+	m.roots = append(m.roots, prj, out)
+	m.prj, m.output = prj, out
+	m.projectRoot, m.outputDir = prjDir, outDir
+	m.prjInHome = inHome
+	return nil
+}
+
+// samePath 判断两个路径是不是同一个位置。
+func samePath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// outputIsProject 判断输出目录是不是就是项目根目录。
+//
+// 正常部署下不会相同（配置里会把重了的输出目录退回默认值，界面上也拒绝两个槽选同
+// 一个目录），但默认值仍可能撞上：项目目录可以被指到数据目录下的任何位置，包括
+// $DATA_DIR/output。那时复制到输出目录等于复制到自己身上，列产物也会列两遍。
+func (m *Manager) outputIsProject() bool {
+	return filepath.Clean(m.outputDir) == filepath.Clean(m.projectRoot)
+}
+
+// copyIntoStage 把项目目录复制到 home 沙箱里的暂存位置。
+//
+// 项目根目录在数据目录内时走 home 沙箱的相对路径复制；被设置成数据目录之外的
+// 授权目录时，源和目标分属两个沙箱，只能按绝对路径复制。
+func (m *Manager) copyIntoStage(prjRel, stageRel string) error {
+	if m.prjInHome != "" {
+		return m.home.Copy(m.prjInHome+"/"+prjRel, stageRel)
+	}
+	return fsx.CopyTree(m.prj.Abs(prjRel), m.home.Abs(stageRel))
 }
 
 // Root 暴露项目目录沙箱，供文件管理器复用。
@@ -165,7 +283,7 @@ func (m *Manager) List() ([]ProjectInfo, error) {
 		info, err := m.Info(e.Name)
 		if err != nil {
 			// 单个项目目录损坏不应该让整个列表挂掉。
-			out = append(out, ProjectInfo{Name: e.Name, ModTime: e.ModTime})
+			out = append(out, ProjectInfo{Name: e.Name, ModTime: e.ModTime, AbsPath: m.prj.Abs(e.Name)})
 			continue
 		}
 		out = append(out, info)
@@ -187,7 +305,7 @@ func (m *Manager) Info(name string) (ProjectInfo, error) {
 		return ProjectInfo{}, fmt.Errorf("%s 不是目录", name)
 	}
 
-	info := ProjectInfo{Name: name, ModTime: st.ModTime}
+	info := ProjectInfo{Name: name, ModTime: st.ModTime, AbsPath: m.prj.Abs(rel)}
 	// 列表里显示的是「最后修改时间」：目录自身的 mtime 只在增删条目时变，
 	// 改 manifest、换 building 里的产物都看不出来，所以取整棵树里最新的。
 	// 限制扫描条目数，避免大项目把一个时间扫穿。
@@ -234,7 +352,7 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 		return fmt.Errorf("项目 %s 已存在", name)
 	}
 
-	out, err := m.fn.Create(ctx, m.cfg.ProjectsDir, name, docker, withUI)
+	out, err := m.fn.Create(ctx, m.projectRoot, name, docker, withUI)
 	if err != nil {
 		return fmt.Errorf("fnpack create 失败: %w", err)
 	}
@@ -353,9 +471,13 @@ func (m *Manager) Artifacts(name string) ([]Artifact, error) {
 		}
 	}
 	collect(m.prj, rel, "project", nil)
-	collect(m.output, ".", "output", func(n string) bool {
-		return strings.HasPrefix(n, appname+"-") || n == appname+".fpk"
-	})
+	// 两个目录是同一个位置时只列项目那一份：否则同一份产物会以两种 scope 出现，
+	// 用户看到的是「列表里有一个文件出现两次，路径一模一样」。
+	if !m.outputIsProject() {
+		collect(m.output, ".", "output", func(n string) bool {
+			return strings.HasPrefix(n, appname+"-") || n == appname+".fpk"
+		})
+	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].ModTime > out[j].ModTime })
 	return out, nil
@@ -463,7 +585,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 		}
 	}()
 
-	if err := m.home.Copy(m.prjInHome+"/"+rel, stage+"/project"); err != nil {
+	if err := m.copyIntoStage(rel, stage+"/project"); err != nil {
 		return nil, fmt.Errorf("复制项目到暂存区失败: %w", err)
 	}
 	// 修复不可用的权限（见 fsx.RepairModes 的说明），保证 fnpack 读得到、
@@ -478,7 +600,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 	}
 	stagePrj := m.home.Abs(stage + "/project")
 
-	m.log.Infof("开始打包 %s (%s)，输出目录 %s", req.Name, version, m.cfg.OutputDir)
+	m.log.Infof("开始打包 %s (%s)，输出目录 %s", req.Name, version, m.outputDir)
 
 	rounds := targets
 	if single {
@@ -549,7 +671,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 		res.Path = inProject
 		res.Size = st.Size()
 
-		if req.CopyOut {
+		if req.CopyOut && !m.outputIsProject() {
 			dst := m.output.Abs(fileName)
 			if err := copyFile(src, dst); err != nil {
 				res.OK = false
@@ -572,7 +694,6 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 // 约定与 fnpackup 一致：架构目录里放的是「该架构下 app/<serverDir> 应有的全部内容」。
 func (m *Manager) prepareStage(stage string, prjRel string, serverRel string, platform string) error {
 	srcInPrj := prjRel + "/building/platform/" + platform
-	srcInHome := m.prjInHome + "/" + srcInPrj
 
 	srcStat, err := m.prj.Stat(srcInPrj)
 	if err != nil {
@@ -595,7 +716,7 @@ func (m *Manager) prepareStage(stage string, prjRel string, serverRel string, pl
 	if err := m.home.Mkdir(dstRel, true); err != nil {
 		return err
 	}
-	return m.home.Copy(srcInHome, dstRel)
+	return m.copyIntoStage(srcInPrj, dstRel)
 }
 
 // Import 把上传的 .fpk 解成一个项目目录。
@@ -641,8 +762,8 @@ func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (Pro
 		}
 	}
 
-	if err := os.Rename(m.home.Abs(stage), m.prj.Abs(rel)); err != nil {
-		return ProjectInfo{}, fmt.Errorf("移动到项目目录失败: %w", err)
+	if err := m.moveIntoProjects(stage, rel); err != nil {
+		return ProjectInfo{}, err
 	}
 	// 导入的 fpk 里没有多架构工作目录（包内只有打包后的 app/），这里补上 arm / x86：
 	// 与 Create 保持一致，多架构发布勾一下就能用。失败只记日志——项目已经落地了，
@@ -655,6 +776,65 @@ func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (Pro
 
 	m.log.Infof("导入项目 %s 完成", name)
 	return m.Info(name)
+}
+
+// ImportPath 从本机的一个绝对路径导入 fpk。
+//
+// 路径来自飞牛文件选择器（前端 pickUserFile）：系统已经把这个文件授权给应用
+// 用户，所以应用进程读得到。它不在项目沙箱里，因此这里用 os.Open，而不是
+// fsx.Root——沙箱是给「用户项目目录」用的，不是给任意路径用的。
+//
+// 权限仍然按当前登录用户判一遍（调用方负责，见 server.handleProjectImportPath）：
+// 授权让应用用户拿到了 ACL，不代表当前登录用户也能读这个文件。
+func (m *Manager) ImportPath(ctx context.Context, absPath string) (ProjectInfo, error) {
+	absPath = strings.TrimSpace(absPath)
+	if absPath == "" {
+		return ProjectInfo{}, errors.New("缺少文件路径")
+	}
+	if !filepath.IsAbs(absPath) {
+		return ProjectInfo{}, fmt.Errorf("需要绝对路径：%s", absPath)
+	}
+
+	f, err := os.Open(absPath)
+	if err != nil {
+		return ProjectInfo{}, fmt.Errorf("打开文件失败: %w", err)
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return ProjectInfo{}, fmt.Errorf("读取文件状态失败: %w", err)
+	}
+	if fi.IsDir() {
+		return ProjectInfo{}, fmt.Errorf("这是一个目录，不是 fpk 文件：%s", absPath)
+	}
+
+	info, err := m.Import(ctx, f, filepath.Base(absPath))
+	if err != nil {
+		return ProjectInfo{}, fmt.Errorf("导入 %s 失败: %w", filepath.Base(absPath), err)
+	}
+	return info, nil
+}
+
+// moveIntoProjects 把暂存出来的项目搬到项目根目录。
+//
+// 优先 rename（同文件系统时是瞬时的）；项目根目录可以是另一个挂载点上的授权
+// 目录，跨设备 rename 会 EXDEV，那时退回复制 + 删源。
+func (m *Manager) moveIntoProjects(stage, rel string) error {
+	src := m.home.Abs(stage)
+	dst := m.prj.Abs(rel)
+
+	err := os.Rename(src, dst)
+	if err == nil {
+		return nil
+	}
+	if copyErr := fsx.CopyTree(src, dst); copyErr != nil {
+		return fmt.Errorf("移动到项目目录失败: %v（尝试复制也没成功: %w）", err, copyErr)
+	}
+	if rmErr := m.home.Remove(stage, true); rmErr != nil {
+		m.log.Warnf("清理导入暂存目录失败: %v", rmErr)
+	}
+	return nil
 }
 
 // platformDirs 是某个项目下预置的架构工作目录（相对项目根）。

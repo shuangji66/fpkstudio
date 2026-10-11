@@ -9,12 +9,55 @@ import type {
   PackSettings,
   ProjectExists,
   ProjectInfo,
+  SemanticPath,
+  SettingsInfo,
   SystemInfo,
 } from './types'
 
 // ---- 系统 ----
 
 export const getSystemInfo = () => request<SystemInfo>('/api/system/info')
+
+// ---- 设置（目录 + 飞牛开放 API 的转发） ----
+//
+// checkUserACL 没有前端的调用方：ACL 是后端在导入前判当前用户能不能读那个文件，
+// 界面上不展示权限标签（只展示 trim.file.path 转出来的展示路径）。
+
+export const getAppSettings = () => request<SettingsInfo>('/api/settings')
+
+/**
+ * 保存两个目录设置。只传要改的那个字段，另一个保持不变。
+ * 空字符串表示「恢复默认」（用环境变量给的目录）。
+ */
+export const saveAppSettings = (patch: { projectRoot?: string; outputDir?: string }) =>
+  request<SettingsInfo>('/api/settings', { method: 'PUT', json: patch })
+
+/** 当前用户授权给本应用的目录（不含文件授权）。 */
+export const getAuthorizedFolders = async (): Promise<string[]> => {
+  const res = await request<{ paths: string[] }>('/api/trim/folders')
+  return res.paths ?? []
+}
+
+/** 删除一条目录授权：换目录前必须先删旧的，否则授权会一份份堆在系统里。 */
+export const deleteAuthorizedFolder = (path: string) =>
+  request<{ ok: boolean }>('/api/trim/folders/delete', { json: { path } })
+
+/**
+ * 把 /vol1/... 这类内部路径转成用户能看懂的语义路径。
+ *
+ * language 放 body 而不是查询串（和 path 一样）：反代不保证把查询串送到后端，
+ * 而这是文档要求的必填参数，丢了系统就会按别的语言返回。
+ */
+export const convertPaths = async (paths: string[], language: string): Promise<SemanticPath[]> => {
+  const res = await request<{ list: SemanticPath[] }>('/api/trim/semantic', {
+    json: { paths, language },
+  })
+  return res.list ?? []
+}
+
+/** 导入服务器本机某个路径上的 fpk（飞牛文件选择器选出来的）。 */
+export const importProjectByPath = (path: string) =>
+  request<{ ok: boolean; project: ProjectInfo }>('/api/projects/import-path', { json: { path } })
 
 // ---- 项目 ----
 

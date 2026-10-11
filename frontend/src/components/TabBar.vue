@@ -26,7 +26,7 @@
       />
       <el-icon
         v-if="tab.closable"
-        class="shrink-0 rounded text-[12px] text-slate-400 opacity-0 transition-opacity hover:bg-slate-200 hover:text-slate-700 group-hover:opacity-100"
+        class="shrink-0 rounded text-[12px] text-slate-400 dark:text-slate-500 opacity-0 transition-opacity hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 group-hover:opacity-100"
         @click.stop="close(tab)"
       >
         <Close />
@@ -35,13 +35,13 @@
 
     <div
       v-if="menu.show"
-      class="fixed z-50 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg"
+      class="fixed z-50 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 py-1 text-sm shadow-lg"
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
       @click="menu.show = false"
     >
       <button
         type="button"
-        class="block w-full whitespace-nowrap px-3 py-1 text-left hover:bg-slate-100"
+        class="block w-full whitespace-nowrap px-3 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
         @click="tabs.closeOthers(menu.id)"
       >
         {{ t('tab.closeOthers') }}

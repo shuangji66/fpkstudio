@@ -4,14 +4,23 @@
  * Element Plus 的样式放进 element 层，Tailwind 的 utilities 放在它之后，
  * 这样在 Element Plus 组件上直接写 Tailwind 工具类也能生效；
  * 同时 preflight（base 层）不会去覆盖 Element Plus 自身的重置。
- * 顺序不能改：层声明的先后就是优先级的先后。
+ * 顺序不能改：层声明的先后就是优先级先后。
  */
 @layer theme, base, element, components, utilities;
 
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/preflight.css' layer(base);
 @import 'element-plus/dist/index.css' layer(element);
+/* Element Plus 的暗色变量（挂在 html.dark 上），跟 Tailwind 的 dark 变体同一个开关 */
+@import 'element-plus/theme-chalk/dark/css-vars.css' layer(element);
 @import 'tailwindcss/utilities.css' layer(utilities);
+
+/*
+ * Tailwind 4 默认的 dark 变体跟的是 prefers-color-scheme，而这里要跟
+ * 「浅色 / 深色 / 跟随系统」三态里的实际结果，所以改成认 html.dark 这个类——
+ * 由 stores/theme.ts 统一开关，Element Plus 吃的也是同一个类。
+ */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, Menlo, Consolas, monospace;
@@ -53,6 +62,19 @@
   .thin-scroll::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  /* 深色下滚动条也要跟着压暗，否则深色页面边上挂着一条浅色条 */
+  .dark .thin-scroll {
+    scrollbar-color: rgb(100 116 139 / 0.6) transparent;
+  }
+
+  .dark .thin-scroll::-webkit-scrollbar-thumb {
+    background: rgb(100 116 139 / 0.55);
+  }
+
+  .dark .thin-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgb(148 163 184 / 0.6);
+  }
 }
 
 @layer components {
@@ -62,11 +84,11 @@
   }
 
   .tab-chip-active {
-    @apply border-slate-300 bg-white font-medium text-sky-700;
+    @apply border-slate-300 bg-white font-medium text-sky-700 dark:border-slate-600 dark:bg-slate-800 dark:text-sky-300;
   }
 
   .tab-chip-idle {
-    @apply border-transparent bg-transparent text-slate-500 hover:bg-white/60 hover:text-slate-700;
+    @apply border-transparent bg-transparent text-slate-500 hover:bg-white/60 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50 dark:hover:text-slate-200;
   }
 
   /* 文件子标签同构但更小 */
@@ -75,19 +97,19 @@
   }
 
   .subtab-active {
-    @apply border-sky-500 bg-white text-sky-700;
+    @apply border-sky-500 bg-white text-sky-700 dark:bg-slate-800 dark:text-sky-300;
   }
 
   .subtab-idle {
-    @apply border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-700;
+    @apply border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-200;
   }
 
   .panel {
-    @apply rounded-lg border border-slate-200 bg-white;
+    @apply rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800;
   }
 
   .label-text {
-    @apply text-xs font-medium text-slate-500;
+    @apply text-xs font-medium text-slate-500 dark:text-slate-400;
   }
 
   .mono {
@@ -125,6 +147,33 @@
       columns: 26rem;
       column-fill: auto;
     }
+  }
+
+  /*
+    设置弹窗：撑到视口 90% 高、垂直居中（el-dialog 的 align-center 用 flex 居中），
+    标题固定、正文自己滚。内容比视口高时如果让整个弹窗滚，标题和底部的「关于」
+    会一起滚出去，正文一滚就找不着自己在哪儿了。
+  */
+  .settings-dialog {
+    display: flex;
+    flex-direction: column;
+    height: 90vh;
+    overflow: hidden;
+  }
+
+  .settings-dialog .el-dialog__header {
+    flex: 0 0 auto;
+  }
+
+  .settings-dialog .el-dialog__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* 遮罩加一点背景模糊，让底下的项目列表退到后面去（弹窗本身在遮罩之上，不受影响） */
+  .settings-modal {
+    backdrop-filter: blur(3px);
   }
 }
 

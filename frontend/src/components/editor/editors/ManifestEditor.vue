@@ -3,7 +3,7 @@
     <div class="mx-auto max-w-3xl">
       <div
         v-if="platformWarning"
-        class="mb-3 flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800"
+        class="mb-3 flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200"
       >
         <el-icon class="mt-0.5 shrink-0"><WarningFilled /></el-icon>
         <span>{{ platformWarning }}</span>
@@ -15,12 +15,12 @@
         class="grid grid-cols-[10rem_1fr] items-start gap-x-3 py-1.5"
       >
         <div class="flex items-center justify-end gap-1 pt-1">
-          <span class="text-right text-xs text-slate-600">{{ t(`fields.${field.key}`) }}</span>
+          <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t(`fields.${field.key}`) }}</span>
           <el-tooltip v-if="HAS_HELP.has(field.key)" placement="top" :show-after="300">
             <template #content>
               <div class="max-w-xs text-xs leading-relaxed">{{ t(`fieldsHelp.${field.key}`) }}</div>
             </template>
-            <el-icon class="text-slate-400"><QuestionFilled /></el-icon>
+            <el-icon class="text-slate-400 dark:text-slate-500"><QuestionFilled /></el-icon>
           </el-tooltip>
         </div>
 

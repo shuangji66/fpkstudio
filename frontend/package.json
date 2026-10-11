@@ -12,7 +12,8 @@
     "check:wizard": "node --import ./scripts/ts-hook.mjs scripts/check-wizard.mjs",
     "check:icon": "node --import ./scripts/ts-hook.mjs scripts/check-icon.mjs",
     "check:format": "node --import ./scripts/ts-hook.mjs scripts/check-format.mjs",
-    "check": "npm run check:i18n && npm run check:wizard && npm run check:icon && npm run check:format"
+    "check": "npm run check:i18n && npm run check:wizard && npm run check:icon && npm run check:format && npm run check:semantic",
+    "check:semantic": "node --import ./scripts/ts-hook.mjs scripts/check-semantic.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "6.2.5",
@@ -20,6 +21,7 @@
     "@codemirror/lang-yaml": "6.1.3",
     "@codemirror/theme-one-dark": "6.1.3",
     "@element-plus/icons-vue": "2.3.2",
+    "@trimjs/web-app": "^0.4.2",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "codemirror": "6.0.2",

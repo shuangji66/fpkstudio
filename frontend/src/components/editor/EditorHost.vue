@@ -1,13 +1,13 @@
 <template>
-  <div v-if="tab" class="flex h-full min-h-0 flex-col bg-white">
-    <div class="flex shrink-0 items-center gap-2 border-b border-slate-200 px-2 py-1">
-      <el-icon class="shrink-0 text-slate-400"><Document /></el-icon>
-      <span class="mono min-w-0 flex-1 truncate text-[11px] text-slate-500">{{ tab.path }}</span>
+  <div v-if="tab" class="flex h-full min-h-0 flex-col bg-white dark:bg-slate-800">
+    <div class="flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-2 py-1">
+      <el-icon class="shrink-0 text-slate-400 dark:text-slate-500"><Document /></el-icon>
+      <span class="mono min-w-0 flex-1 truncate text-[11px] text-slate-500 dark:text-slate-400">{{ tab.path }}</span>
       <!-- 磁盘上还没有这个文件：说「未创建」比说「未保存」准确 -->
-      <span v-if="tab.missing" class="shrink-0 text-[11px] text-emerald-700">
+      <span v-if="tab.missing" class="shrink-0 text-[11px] text-emerald-700 dark:text-emerald-400">
         ● {{ t('editor.notCreated') }}
       </span>
-      <span v-else-if="tab.dirty" class="shrink-0 text-[11px] text-amber-600">
+      <span v-else-if="tab.dirty" class="shrink-0 text-[11px] text-amber-600 dark:text-amber-400">
         ● {{ t('editor.unsaved') }}
       </span>
 
@@ -47,17 +47,17 @@
 
     <div
       v-if="tab.error"
-      class="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+      class="shrink-0 border-b border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
     >
       {{ tab.error }}
     </div>
 
-    <div v-if="tab.loading" class="flex flex-1 items-center justify-center text-xs text-slate-400">
+    <div v-if="tab.loading" class="flex flex-1 items-center justify-center text-xs text-slate-400 dark:text-slate-500">
       {{ t('common.loading') }}
     </div>
 
     <div v-else-if="!showEditor" class="flex flex-1 flex-col items-center justify-center gap-3">
-      <p class="text-xs text-slate-500">{{ t('editor.binary') }}</p>
+      <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('editor.binary') }}</p>
       <el-button size="small" @click="workspace.downloadAt(`${project}/${tab.path}`)">
         {{ t('common.download') }}
       </el-button>
