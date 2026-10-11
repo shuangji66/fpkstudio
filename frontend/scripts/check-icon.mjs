@@ -1,0 +1,183 @@
+/**
+ * 校验取景框（拖动 / 缩放裁剪）与图标处理的计算（src/utils/icon.ts）。
+ *
+ *   npm run check:icon
+ *
+ * 这些数字错了不会报错，只会让「框里看到的」和「写进项目的」不一样，所以：
+ *  1. 初始视图必须「铺满 + 居中」；
+ *  2. 任何拖动 / 缩放之后都不能在框里露出空白（覆盖不变量）；
+ *  3. 缩放以指针为锚，锚点底下的图片坐标不跑；
+ *  4. 取景框对应的原图矩形始终落在图片范围内；
+ *  5. canvas 侧：按源矩形裁剪、圆角半径夹到一半、导出尺寸与文件名正确。
+ *
+ * canvas 用最小替身，只记录调用参数——这里验的是几何，不是渲染结果。
+ */
+import {
+  clampView,
+  cropRegion,
+  fitView,
+  fitZoom,
+  maxZoomOf,
+  roundCorners,
+  viewToSource,
+  zoomView,
+} from '../src/utils/icon.ts'
+
+let failed = 0
+const check = (name, got, want) => {
+  const ok = JSON.stringify(got) === JSON.stringify(want)
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : `\n     got  ${JSON.stringify(got)}\n     want ${JSON.stringify(want)}`}`)
+}
+const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps
+
+const STAGE = 256
+const wide = { w: 800, h: 400 }
+const tall = { w: 400, h: 1000 }
+const square = { w: 64, h: 64 }
+
+// ---- 初始视图 ----
+eqView('宽图铺满（缩放 = 框 / 短边）', fitView(wide, STAGE), {
+  zoom: STAGE / 400,
+  x: (STAGE - 800 * (STAGE / 400)) / 2,
+  y: 0,
+})
+eqView('长图铺满', fitView(tall, STAGE), { zoom: STAGE / 400, x: 0, y: (STAGE - 1000 * (STAGE / 400)) / 2 })
+eqView('小图放大到铺满', fitView(square, STAGE), { zoom: STAGE / 64, x: 0, y: 0 })
+
+function eqView(name, view, want) {
+  const ok = ['zoom', 'x', 'y'].every((key) => near(view[key], want[key]))
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : `\n     got  ${JSON.stringify(view)}\n     want ${JSON.stringify(want)}`}`)
+}
+
+// ---- 覆盖不变量：拖动 / 缩放到任何程度都不能露空白 ----
+const covers = (view, size) =>
+  view.x <= 1e-6 &&
+  view.y <= 1e-6 &&
+  view.x + size.w * view.zoom >= STAGE - 1e-6 &&
+  view.y + size.h * view.zoom >= STAGE - 1e-6
+
+for (const size of [wide, tall, square]) {
+  const label = `${size.w}x${size.h}`
+  check(`覆盖：初始 ${label}`, covers(fitView(size, STAGE), size), true)
+  check(`覆盖：拖到右下被夹住 ${label}`, covers(clampView({ ...fitView(size, STAGE), x: 9999, y: 9999 }, size, STAGE), size), true)
+  check(`覆盖：拖到左上被夹住 ${label}`, covers(clampView({ ...fitView(size, STAGE), x: -9999, y: -9999 }, size, STAGE), size), true)
+  const zoomed = zoomView(fitView(size, STAGE), size, STAGE, 999)
+  check(`缩放到上限 ${label}`, near(zoomed.zoom, maxZoomOf(size, STAGE)), true)
+  check(`覆盖：放到最大仍铺满 ${label}`, covers(zoomed, size), true)
+  const shrunk = zoomView(zoomed, size, STAGE, 1e-6)
+  check(`缩小到下限 = 铺满 ${label}`, near(shrunk.zoom, fitZoom(size, STAGE)), true)
+  check(`覆盖：缩到最小仍铺满 ${label}`, covers(shrunk, size), true)
+}
+
+// ---- 以锚点缩放 ----
+{
+  const base = fitView(wide, STAGE)
+  const anchor = { x: 40, y: 200 }
+  const imageAt = (view) => ({ x: (anchor.x - view.x) / view.zoom, y: (anchor.y - view.y) / view.zoom })
+  const before = imageAt(base)
+  const after = imageAt(zoomView(base, wide, STAGE, base.zoom * 2, anchor.x, anchor.y))
+  check('锚点缩放：锚点下的图片坐标不动（x）', near(before.x, after.x), true)
+  check('锚点缩放：锚点下的图片坐标不动（y）', near(before.y, after.y), true)
+}
+
+// ---- 取景框 → 原图矩形 ----
+{
+  let inside = true
+  for (const zoom of [0.32, 0.5, 0.8, 1, 2, 2.56, 4]) {
+    for (const [ax, ay] of [[0, 0], [STAGE, 0], [0, STAGE], [STAGE, STAGE], [17, 233]]) {
+      const view = clampView(zoomView(fitView(wide, STAGE), wide, STAGE, zoom, ax, ay), wide, STAGE)
+      const src = viewToSource(view, STAGE)
+      const ok = near(src.side, STAGE / view.zoom) && src.sx >= -1e-6 && src.sy >= -1e-6 && src.sx + src.side <= wide.w + 1e-6 && src.sy + src.side <= wide.h + 1e-6
+      if (!ok) {
+        inside = false
+        console.log('     越界:', JSON.stringify({ zoom, view, src }))
+      }
+    }
+  }
+  check('源矩形：各种缩放下都在图片范围内', inside, true)
+  const centered = viewToSource(fitView(wide, STAGE), STAGE)
+  check('源矩形：居中时左右留白相等', Math.round(centered.sx), Math.round(wide.w - centered.sx - centered.side))
+}
+
+// ---- canvas 侧 ----
+class FakeCtx {
+  constructor(canvas) {
+    this.canvas = canvas
+    this.calls = []
+    this.ops = []
+  }
+  set imageSmoothingEnabled(_) {}
+  set imageSmoothingQuality(_) {}
+  set globalCompositeOperation(value) {
+    this.ops.push(value)
+  }
+  set fillStyle(_) {}
+  drawImage(...args) {
+    this.calls.push(args.map((a) => (a === this.canvas ? 'self' : a)))
+  }
+  fillRect() {}
+  beginPath() {}
+  moveTo(...args) {
+    this.ops.push(['moveTo', ...args])
+  }
+  lineTo() {}
+  arcTo() {}
+  closePath() {}
+  fill() {}
+}
+class FakeCanvas {
+  constructor() {
+    this.width = 0
+    this.height = 0
+    this.ctx = new FakeCtx(this)
+  }
+  getContext() {
+    return this.ctx
+  }
+  toDataURL() {
+    return `data:image/png;base64,${this.width}x${this.height}`
+  }
+  toBlob(cb) {
+    cb(new Blob([`png ${this.width}x${this.height}`], { type: 'image/png' }))
+  }
+}
+class FakeImage {
+  constructor(w, h) {
+    this.naturalWidth = w
+    this.naturalHeight = h
+  }
+}
+globalThis.HTMLCanvasElement = FakeCanvas
+globalThis.HTMLImageElement = FakeImage
+const created = []
+globalThis.document = {
+  createElement: () => {
+    const canvas = new FakeCanvas()
+    created.push(canvas)
+    return canvas
+  },
+}
+
+const image = new FakeImage(800, 400)
+const cropped = cropRegion(image, 320, 64, 512, 256)
+check('cropRegion：输出边长', [cropped.width, cropped.height], [256, 256])
+check('cropRegion：按源矩形绘制', cropped.ctx.calls[0].slice(1), [320, 64, 512, 512, 0, 0, 256, 256])
+
+created.length = 0
+const rounded = roundCorners(cropped, 500)
+const mask = created[created.length - 1]
+check('圆角：半径夹到边长一半', mask.ctx.ops.find((op) => Array.isArray(op) && op[0] === 'moveTo'), ['moveTo', 128, 0])
+check('圆角：蒙版与画布同尺寸', [mask.width, mask.height], [256, 256])
+check('圆角：输出用 destination-out 擦角', rounded.ctx.ops.includes('destination-out'), true)
+check('圆角：半径 0 时不额外拷贝', roundCorners(cropped, 0) === cropped, true)
+
+const { rasterToPngFile } = await import('../src/utils/icon.ts')
+const file = await rasterToPngFile(rounded, 64, 'ICON.PNG')
+check('导出：文件名', file.name, 'ICON.PNG')
+check('导出：类型', file.type, 'image/png')
+check('导出：按目标尺寸渲染', await file.text(), 'png 64x64')
+
+console.log(failed ? `\n${failed} 项不通过` : '\n取景框与图标处理检查全部通过')
+process.exit(failed ? 1 : 0)

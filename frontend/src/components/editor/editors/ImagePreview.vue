@@ -15,9 +15,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { rawURL } from '@/api/client'
+import { useWorkspaceStore } from '@/stores/workspace'
 import type { EditorApi, EditorContent, EditorProps } from '../useEditor'
 
 /**
@@ -33,12 +34,21 @@ import type { EditorApi, EditorContent, EditorProps } from '../useEditor'
  */
 const props = defineProps<EditorProps>()
 const { t } = useI18n()
+const workspace = useWorkspaceStore()
 
 const failed = ref(false)
 
 const url = computed(() => {
   const full = props.project ? `${props.project}/${props.path}` : props.path
-  return rawURL('/api/fs/download', { path: full })
+  // 带上 assetRev：图标页刚写过的文件（或源码视图保存的 svg）要重新取，
+  // 否则 <img> 会一直显示改动前那张。
+  const rev = props.project ? workspace.state(props.project).assetRev : 0
+  return rawURL('/api/fs/download', { path: full, rev })
+})
+
+// 地址变了（重新写入过）就把失败状态清掉，否则文件补上了也看不到。
+watch(url, () => {
+  failed.value = false
 })
 
 const baseline = () => props.original ?? props.origin

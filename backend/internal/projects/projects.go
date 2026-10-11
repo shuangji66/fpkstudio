@@ -370,7 +370,7 @@ func (m *Manager) GetSettings(name string) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	s := Settings{ServerDir: defaultServerDir, CopyToOutput: true}
+	s := Settings{ServerDir: defaultServerDir, CopyToOutput: true, Platforms: []string{}}
 	data, err := m.prj.ReadFile(rel + "/" + settingsFile)
 	if err != nil {
 		return s, nil
@@ -381,7 +381,18 @@ func (m *Manager) GetSettings(name string) (Settings, error) {
 	if s.ServerDir == "" {
 		s.ServerDir = defaultServerDir
 	}
-	return s, nil
+	return normalizeSettings(s), nil
+}
+
+// normalizeSettings 把 nil 切片补成空切片。
+//
+// Go 的 nil slice 会被编码成 `null`，前端拿到 `null` 再当数组用（展开、遍历）
+// 会直接抛异常——表现是「设置里的架构/落地目录读不到，页面中途断掉」。
+func normalizeSettings(s Settings) Settings {
+	if s.Platforms == nil {
+		s.Platforms = []string{}
+	}
+	return s
 }
 
 // SaveSettings 写入打包偏好。
@@ -393,7 +404,7 @@ func (m *Manager) SaveSettings(name string, s Settings) error {
 	if s.ServerDir == "" {
 		s.ServerDir = defaultServerDir
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
+	data, err := json.MarshalIndent(normalizeSettings(s), "", "  ")
 	if err != nil {
 		return err
 	}

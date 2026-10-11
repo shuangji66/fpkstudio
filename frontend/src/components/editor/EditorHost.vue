@@ -3,7 +3,13 @@
     <div class="flex shrink-0 items-center gap-2 border-b border-slate-200 px-2 py-1">
       <el-icon class="shrink-0 text-slate-400"><Document /></el-icon>
       <span class="mono min-w-0 flex-1 truncate text-[11px] text-slate-500">{{ tab.path }}</span>
-      <span v-if="tab.dirty" class="shrink-0 text-[11px] text-amber-600">● {{ t('editor.unsaved') }}</span>
+      <!-- 磁盘上还没有这个文件：说「未创建」比说「未保存」准确 -->
+      <span v-if="tab.missing" class="shrink-0 text-[11px] text-emerald-700">
+        ● {{ t('editor.notCreated') }}
+      </span>
+      <span v-else-if="tab.dirty" class="shrink-0 text-[11px] text-amber-600">
+        ● {{ t('editor.unsaved') }}
+      </span>
 
       <el-radio-group v-if="def.hasForm && tab.text" v-model="mode" size="small">
         <el-radio-button value="form">{{ t('editor.form') }}</el-radio-button>
@@ -13,6 +19,24 @@
       <el-button v-if="canInsertTemplate" size="small" @click="insertTemplate">
         {{ t('cmdEditor.template') }}
       </el-button>
+      <el-button v-if="isLifecycle" size="small" :icon="MessageBox" @click="envOpen = true">
+        {{ t('envVars.button') }}
+      </el-button>
+
+      <!-- 安装 / 更新 / 配置向导常常是同一套表单，允许互相整体覆盖 -->
+      <el-dropdown v-if="wizardSources.length" trigger="click" @command="copyWizard">
+        <el-button size="small" :icon="CopyDocument">
+          {{ t('wizard.copyFrom') }}<el-icon class="ml-1"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="source in wizardSources" :key="source" :command="source">
+              {{ t(wizardNameKey(source)) }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
       <el-button size="small" :disabled="!tab.dirty" @click="revert">
         {{ t('editor.revert') }}
       </el-button>
@@ -51,17 +75,21 @@
         @dirty="onDirty"
       />
     </div>
+
+    <EnvVarsDialog v-if="isLifecycle" v-model="envOpen" :project="project" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
-import { Document } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown, CopyDocument, Document, MessageBox } from '@element-plus/icons-vue'
 import SourceEditor from './editors/SourceEditor.vue'
+import EnvVarsDialog from './EnvVarsDialog.vue'
 import { resolveEditor } from './registry'
 import type { EditorApi, EditorContent } from './useEditor'
+import { readFile } from '@/api/endpoints'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{ project: string; path: string }>()
@@ -72,6 +100,9 @@ const workspace = useWorkspaceStore()
 const inner = ref<(EditorApi & { getText?: () => string }) | null>(null)
 const mode = ref<'form' | 'source'>('form')
 const saving = ref(false)
+
+/** 环境变量弹窗的显隐（只有生命周期脚本有这个按钮）。 */
+const envOpen = ref(false)
 
 /** 进入源码视图时，用它接住表单视图当前的实时内容。 */
 const handoff = ref('')
@@ -137,6 +168,71 @@ function onDirty(value: boolean) {
  * 没有通用模板可插，所以按钮不出现。
  */
 const canInsertTemplate = computed(() => props.path === 'cmd/uninstall_callback')
+
+/**
+ * 生命周期脚本（cmd/ 下的安装、卸载、升级、配置、启停脚本）。
+ *
+ * 只有这类脚本需要查环境变量——TRIM_* 是安装器在跑脚本时注入的，向导里收集的
+ * 值也在同一批变量里；manifest / 向导自己的编辑页不需要这个按钮。
+ */
+const isLifecycle = computed(() => props.path.startsWith('cmd/'))
+
+/**
+ * 可以整体复制过来的其他向导。
+ *
+ * 安装 / 更新 / 配置三份向导往往就是同一套表单（fnpackup 里只能开着源码手动复制
+ * 粘贴），所以给这三份之间做一个「整份覆盖」的入口；卸载向导的表单通常不一样，
+ * 不参与互拷。
+ */
+const WIZARD_COPYABLE = ['install', 'upgrade', 'config']
+
+const currentWizard = computed(() => {
+  const match = /^wizard\/([^/]+)$/.exec(props.path)
+  return match && WIZARD_COPYABLE.includes(match[1]!) ? match[1]! : ''
+})
+
+const wizardSources = computed(() =>
+  currentWizard.value ? WIZARD_COPYABLE.filter((name) => name !== currentWizard.value) : [],
+)
+
+/** 向导文件的显示名复用快捷设置里的那套文案。 */
+function wizardNameKey(name: string): string {
+  return `shortcuts.wizard${name.charAt(0).toUpperCase()}${name.slice(1)}`
+}
+
+/** 把另一份向导的内容整份覆盖到当前编辑器（只改内存，保存后才落盘）。 */
+async function copyWizard(source: string) {
+  const label = t(wizardNameKey(source))
+  try {
+    await ElMessageBox.confirm(t('wizard.copyConfirm', { name: label }), t('common.tip'), {
+      type: 'warning',
+      confirmButtonText: t('wizard.copyConfirmOk'),
+      cancelButtonText: t('common.cancel'),
+    })
+  } catch {
+    return
+  }
+
+  const editor = inner.value
+  if (!editor?.setContent) {
+    ElMessage.error(t('editor.notReady'))
+    return
+  }
+
+  try {
+    const res = await readFile(`${props.project}/wizard/${source}`)
+    if (!res.text) {
+      ElMessage.error(t('wizard.copyNotText', { name: label }))
+      return
+    }
+    editor.setContent(res.content)
+    await nextTick()
+    onDirty(editor.isDirty?.() ?? false)
+    ElMessage.success(t('wizard.copied', { name: label }))
+  } catch (e) {
+    ElMessage.error(t('wizard.copyFailed', { name: label, error: e instanceof Error ? e.message : String(e) }))
+  }
+}
 
 const UNINSTALL_TEMPLATE = `#!/bin/bash
 

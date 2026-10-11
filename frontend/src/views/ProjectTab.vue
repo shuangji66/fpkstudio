@@ -14,7 +14,17 @@
       <FileTabs :project="name" />
 
       <div class="relative min-h-0 flex-1">
-        <PackPanel v-show="activeTab === PACK_TAB" :project="name" class="absolute inset-0" />
+        <OverviewPanel
+          v-show="activeTab === OVERVIEW_TAB"
+          :project="name"
+          class="absolute inset-0"
+        />
+        <ShortcutsPanel
+          v-show="activeTab === SHORTCUTS_TAB"
+          :project="name"
+          class="absolute inset-0"
+        />
+        <IconPanel v-show="activeTab === ICON_TAB" :project="name" class="absolute inset-0" />
 
         <EditorHost
           v-for="file in files"
@@ -34,9 +44,11 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import FileTree from '@/components/project/FileTree.vue'
 import FileTabs from '@/components/project/FileTabs.vue'
-import PackPanel from '@/components/project/PackPanel.vue'
+import OverviewPanel from '@/components/project/OverviewPanel.vue'
+import ShortcutsPanel from '@/components/project/ShortcutsPanel.vue'
+import IconPanel from '@/components/project/IconPanel.vue'
 import EditorHost from '@/components/editor/EditorHost.vue'
-import { PACK_TAB, useWorkspaceStore } from '@/stores/workspace'
+import { ICON_TAB, OVERVIEW_TAB, SHORTCUTS_TAB, useWorkspaceStore } from '@/stores/workspace'
 import { useProjectsStore } from '@/stores/projects'
 
 const props = defineProps<{ name: string }>()

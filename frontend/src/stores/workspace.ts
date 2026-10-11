@@ -10,17 +10,23 @@ import {
   getSettings,
   listDir,
   packProject,
+  projectExists,
   readFile,
   renameEntry,
   saveSettings,
   uploadFiles,
   writeFile,
 } from '@/api/endpoints'
+import { ApiError } from '@/api/client'
 import type { Artifact, FsEntry, PackResult, PackSettings } from '@/api/types'
 import { useLogsStore } from './logs'
 
-/** 项目标签内固定的「打包」子标签 id。 */
-export const PACK_TAB = '__pack__'
+/** 项目标签内固定的「总览」子标签 id（原来的「打包」页）。 */
+export const OVERVIEW_TAB = '__overview__'
+/** 固定子标签：表单快捷跳转。 */
+export const SHORTCUTS_TAB = '__shortcuts__'
+/** 固定子标签：图标统一处理。 */
+export const ICON_TAB = '__icon__'
 
 export interface FileTab {
   /** 相对于项目目录的路径，例如 `config/privilege`。 */
@@ -35,6 +41,13 @@ export interface FileTab {
   sizeRaw: string
   /** 打开时的原始内容，用于判断改动与「还原」。 */
   origin: string
+  /**
+   * 磁盘上还不存在这个文件（读取返回 404）。
+   *
+   * 快捷设置里的向导 / 生命周期脚本经常是空的。这时按空内容打开、先在内存里编，
+   * 保存时才真正落盘（`saveFile` 会把父目录一起建出来）。
+   */
+  missing: boolean
 }
 
 export interface ProjectState {
@@ -49,6 +62,13 @@ export interface ProjectState {
 
   files: FileTab[]
   activeTab: string
+
+  /** 是否 docker 应用 / 是否带桌面入口，决定快捷设置与图标页的可选项。 */
+  docker: boolean
+  ui: boolean
+
+  /** 项目内文件被写入（保存图标等）后自增，让图片预览重新取图而不是吃缓存。 */
+  assetRev: number
 
   platforms: string[]
   settings: PackSettings
@@ -66,7 +86,10 @@ function emptyState(name: string): ProjectState {
     dirs: {},
     expanded: {},
     files: [],
-    activeTab: PACK_TAB,
+    activeTab: OVERVIEW_TAB,
+    docker: false,
+    ui: false,
+    assetRev: 0,
     platforms: [],
     settings: {
       multiPlatform: false,
@@ -81,6 +104,9 @@ function emptyState(name: string): ProjectState {
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** 会被 <img> 直接渲染的路径：写完这些文件要让图片预览重新取图，别吃缓存。 */
+const IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|bmp|avif|ico|svg)$/i
 
 /**
  * 每个项目标签的编辑区状态：文件树、打开的文件、打包配置与产物。
@@ -127,7 +153,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         await loadDir(name, child).catch(() => undefined)
         s.expanded[child] = true
       }
-      await reloadPackageInfo(name)
+      await Promise.all([reloadPackageInfo(name), reloadShape(name)])
       s.loaded = true
     } catch (e) {
       s.error = errText(e)
@@ -210,7 +236,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         if (p === name) rootErr = e
       }
     }
-    await reloadPackageInfo(name)
+    await Promise.all([reloadPackageInfo(name), reloadShape(name)])
     if (rootErr) s.error = errText(rootErr)
     else s.loaded = true
   }
@@ -225,6 +251,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     s.platforms = platforms
     s.settings = settings
     s.artifacts = artifacts.list
+  }
+
+  /** 读一次项目形态（是否 docker、是否带桌面入口）：快捷设置与图标页按它决定可选项。 */
+  async function reloadShape(name: string) {
+    const s = state(name)
+    const shape = await projectExists(name).catch(() => null)
+    if (!shape) return
+    s.docker = shape.docker
+    s.ui = shape.ui
+  }
+
+  /** 项目内文件被写入后调用：让图片预览之类的缓存失效。 */
+  function bumpAssets(name: string) {
+    state(name).assetRev += 1
   }
 
   // ---- 文件子标签 ----
@@ -251,6 +291,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       text: true,
       sizeRaw: '',
       origin: '',
+      missing: false,
     })
     s.activeTab = rel
 
@@ -265,7 +306,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       // 二进制不写 error：是不是「不可编辑」由 EditorHost 按注册表判断
       // （图片有自己的预览器），error 只留真正的失败。
     } catch (e) {
-      tab.error = errText(e)
+      // 404 = 磁盘上还没有这个文件（向导、生命周期脚本常常是空的）。这不是失败：
+      // 按空内容打开，先在内存里编辑，保存时才落盘。
+      if (e instanceof ApiError && e.status === 404) {
+        tab.missing = true
+      } else {
+        tab.error = errText(e)
+      }
     } finally {
       tab.loading = false
     }
@@ -279,7 +326,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     s.files.splice(index, 1)
     if (s.activeTab === rel) {
       const next = s.files[index] ?? s.files[index - 1]
-      s.activeTab = next ? next.path : PACK_TAB
+      s.activeTab = next ? next.path : OVERVIEW_TAB
     }
   }
 
@@ -317,9 +364,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const tab = s.files.find((f) => f.path === rel)
     await writeFile(`${name}/${rel}`, content)
     if (tab) {
+      // 原来是「磁盘上还不存在」的文件（向导等）：这次保存才真正落盘，
+      // 父目录是后端一起建出来的，所以要刷一次树，让新文件出现在左侧。
+      if (tab.missing) {
+        tab.missing = false
+        const parent = rel.includes('/') ? `${name}/${rel.slice(0, rel.lastIndexOf('/'))}` : name
+        await refreshDir(name, parent).catch(() => undefined)
+      }
       tab.origin = content
       tab.dirty = false
     }
+    if (IMAGE_PATH_RE.test(rel)) bumpAssets(name)
   }
 
   const dirtyCount = (name: string) => state(name).files.filter((f) => f.dirty).length
@@ -371,6 +426,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function uploadTo(name: string, dir: string, files: File[], overwrite: boolean) {
     const res = await uploadFiles(dir, files, overwrite)
     await refreshDir(name, dir)
+    bumpAssets(name)
     return res
   }
 

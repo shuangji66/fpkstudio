@@ -39,8 +39,17 @@ export const getPlatforms = async (name: string): Promise<string[]> => {
   return res.platforms ?? []
 }
 
-export const getSettings = (name: string) =>
-  request<PackSettings>('/api/projects/settings', { query: { name } })
+/**
+ * 打包偏好。
+ *
+ * `platforms` 在这里兜一次底：后端（以及早期写下的 settings.json）在架构为空时
+ * 会给 `null`，而调用方会直接展开 / 遍历它。老接口的返回不保证是数组，所以
+ * 在边界上统一成数组，别让 `[...null]` 把整个页面中途打断。
+ */
+export const getSettings = async (name: string): Promise<PackSettings> => {
+  const res = await request<PackSettings>('/api/projects/settings', { query: { name } })
+  return { ...res, platforms: res.platforms ?? [] }
+}
 
 export const saveSettings = (name: string, settings: PackSettings) =>
   request<{ ok: boolean }>('/api/projects/settings', { json: { name, settings } })

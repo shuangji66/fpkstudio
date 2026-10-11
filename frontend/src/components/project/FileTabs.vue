@@ -5,18 +5,23 @@
     @wheel="wheelToHorizontal"
   >
     <button
+      v-for="tab in fixedTabs"
+      :key="tab.id"
       type="button"
       class="subtab"
-      :class="state.activeTab === PACK_TAB ? 'subtab-active' : 'subtab-idle'"
-      @click="workspace.setActive(project, PACK_TAB)"
+      :class="state.activeTab === tab.id ? 'subtab-active' : 'subtab-idle'"
+      @click="workspace.setActive(project, tab.id)"
     >
-      <el-icon class="text-[13px]"><Box /></el-icon>
-      <span>{{ t('pack.title') }}</span>
+      <el-icon class="text-[13px]"><component :is="tab.icon" /></el-icon>
+      <span>{{ tab.label }}</span>
       <span
-        v-if="state.packing"
+        v-if="tab.id === OVERVIEW_TAB && state.packing"
         class="ml-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500"
       />
     </button>
+
+    <!-- 固定标签与文件标签之间留一条分隔线，避免把两者看成一类 -->
+    <span v-if="state.files.length" class="mx-1 w-px shrink-0 self-stretch bg-slate-200" />
 
     <button
       v-for="file in state.files"
@@ -28,6 +33,9 @@
       @click="workspace.setActive(project, file.path)"
       @click.middle="close(file.path)"
     >
+      <el-icon v-if="file.missing" class="shrink-0 text-[12px] text-emerald-600" :title="t('editor.missing')">
+        <DocumentAdd />
+      </el-icon>
       <span class="truncate">{{ file.name }}</span>
       <span v-if="file.dirty" class="shrink-0 text-amber-500" :title="t('editor.unsaved')">●</span>
       <el-icon
@@ -44,7 +52,13 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
-import { useWorkspaceStore, PACK_TAB } from '@/stores/workspace'
+import { DocumentAdd, Operation, Picture, Odometer } from '@element-plus/icons-vue'
+import {
+  ICON_TAB,
+  OVERVIEW_TAB,
+  SHORTCUTS_TAB,
+  useWorkspaceStore,
+} from '@/stores/workspace'
 import { revealActive, wheelToHorizontal } from '@/utils/scroll'
 
 const props = defineProps<{ project: string }>()
@@ -54,6 +68,18 @@ const workspace = useWorkspaceStore()
 
 const state = computed(() => workspace.state(props.project))
 const scroller = ref<HTMLElement | null>(null)
+
+/**
+ * 固定的三个子标签：总览（原打包页）、快捷设置、图标。
+ *
+ * 顺序固定、不可关闭，文件子标签永远排在它们后面。i18n 是响应式的，所以这里
+ * 用 computed 而不是常量数组。
+ */
+const fixedTabs = computed(() => [
+  { id: OVERVIEW_TAB, label: t('overview.title'), icon: Odometer },
+  { id: SHORTCUTS_TAB, label: t('shortcuts.title'), icon: Operation },
+  { id: ICON_TAB, label: t('iconTab.title'), icon: Picture },
+])
 
 // 打开/切换文件时把它滚进可视区，省得手动找
 watch(

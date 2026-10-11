@@ -69,34 +69,16 @@ export function useEditor<M>(
     reset: () => {
       model.value = load(props.origin)
     },
+    // 「从别的向导复制」这类整体替换。解析失败由各自的 load 兜住（返回空模型 + error），
+    // 所以这里不需要再判断。
+    setContent: (text: string) => {
+      model.value = load(text)
+    },
   }
 
   return { model, serialize, api }
 }
 
-/** 安全解析 JSON，失败时返回兜底值并把错误交给调用方展示。 */
-export function parseJSON<T>(text: string, fallback: T): { value: T; error: string } {
-  const trimmed = text.trim()
-  if (!trimmed) return { value: fallback, error: '' }
-  try {
-    return { value: JSON.parse(trimmed) as T, error: '' }
-  } catch (e) {
-    return { value: fallback, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-/** 按固定键顺序序列化对象，避免每次保存都产生无意义的键序变化。 */
-export function stringifyOrdered(value: unknown): string {
-  return `${JSON.stringify(sortKeys(value), null, 2)}\n`
-}
-
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys)
-  if (value && typeof value === 'object') {
-    const source = value as Record<string, unknown>
-    const out: Record<string, unknown> = {}
-    for (const key of Object.keys(source).sort()) out[key] = sortKeys(source[key])
-    return out
-  }
-  return value
-}
+// 这两个是「JSON 配置怎么写回磁盘」的约定，放在 utils 里，表单编辑器和
+// utils/wizard.ts 共用一份实现（这里转出去，是为了让编辑器只 import 一个模块）。
+export { parseJSON, stringifyOrdered } from '@/utils/json'
