@@ -10,6 +10,7 @@
  * 不让存。都不适合只靠手点。
  */
 import { formatTime, isArchive, uniqueName } from '../src/utils/format.ts'
+import { Manifest } from '../src/utils/manifest.ts'
 import { checkFormat } from '../src/utils/validate.ts'
 
 let failed = 0
@@ -96,6 +97,43 @@ check('向导的空数组不报', checkFormat('wizard/install', '[]'), null)
 check('向导的空文件不报', checkFormat('wizard/install', ''), null)
 check('生命周期脚本不校验', checkFormat('cmd/main', 'if [ -z "$x" ]; then'), null)
 check('普通文本不校验', checkFormat('notes.txt', '随便写点什么 {'), null)
+
+// manifest 的回写：**没编辑过的内容必须原样回写**（对齐、缩进、注释、多行值），
+// 只有被改过的值才允许变。这是 manifest.ts 存在的理由（「打开一次保存后整个文件
+// 被重排」是它要避免的事），所以拿一份写得很别扭的模板钉住它。
+{
+  const src = [
+    '# 打包说明',
+    'appname               = demo',
+    'version               = 1.0.0',
+    'desc                  = """第一行',
+    '第二行"""',
+    '  platform = x86',
+    '',
+  ].join('\n')
+
+  const untouched = Manifest.parse(src)
+  check('未编辑时原样回写', untouched.toText(), src)
+
+  const edited = Manifest.parse(src)
+  edited.set('version', '2.0.0')
+  check('只改动被编辑的那个键', edited.toText(), src.replace('= 1.0.0', '= 2.0.0'))
+
+  const added = Manifest.parse(src)
+  added.set('maintainer', 'me')
+  check('新键插在末尾空行之前', added.toText(), src + 'maintainer = me\n')
+
+  const removed = Manifest.parse(src)
+  removed.remove('desc')
+  check('删键只删那一行', removed.toText().includes('desc'), false)
+
+  // 已知取舍：值的写法会被规范化（引号 / 行尾空格不留），值本身不变。
+  check(
+    '值的引号会被规范化',
+    Manifest.parse('version = "1.0.0"   \n').toText(),
+    'version = 1.0.0\n',
+  )
+}
 
 console.log(failed ? `\n${failed} 项不通过` : '\n路径 / 命名 / 文本格式检查全部通过')
 process.exit(failed ? 1 : 0)

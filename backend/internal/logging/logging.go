@@ -57,9 +57,12 @@ type Logger struct {
 	seq      int64
 	file     *os.File
 	fileSize int64
-	minRank  int
-	subs     map[int]chan Entry
-	nextSub  int
+	// path 是配置的日志文件路径（不含轮转后缀）。轮转时用它算名字，而不是
+	// file.Name()——文件可能正落在轮转出来的那一份上（见 rotateLocked）。
+	path    string
+	minRank int
+	subs    map[int]chan Entry
+	nextSub int
 }
 
 // New 创建日志器。logFile 为空时只写内存。
@@ -80,6 +83,7 @@ func New(logFile, level string, ringSize int) (*Logger, error) {
 		if err != nil {
 			return nil, err
 		}
+		l.path = logFile
 		l.file = f
 		if st, err := f.Stat(); err == nil {
 			l.fileSize = st.Size()
@@ -143,18 +147,18 @@ func (l *Logger) write(source, level, msg string) {
 		l.ring = append(l.ring[:0], l.ring[drop:]...)
 	}
 	l.writeFileLocked(now, source, level, msg)
-	subs := make([]chan Entry, 0, len(l.subs))
+	// 分发必须在锁里做：Unsubscribe 会在同一把锁下 close(ch)，而「向已关闭的通道发送」
+	// 即使带 default 也是 panic（不是阻塞，select 救不了）。日志写入发生在任何一个
+	// goroutine 上——SSE 客户端断开的瞬间正好有人在写日志，整进程就会挂在
+	// send on closed channel 上。发送本身是非阻塞的（订阅者堵住就丢弃），持锁的代价
+	// 可以忽略。
 	for _, ch := range l.subs {
-		subs = append(subs, ch)
-	}
-	l.mu.Unlock()
-
-	for _, ch := range subs {
 		select {
 		case ch <- e:
 		default: // 订阅者堵住就丢弃，绝不阻塞业务
 		}
 	}
+	l.mu.Unlock()
 }
 
 func (l *Logger) writeFileLocked(t time.Time, source, level, msg string) {
@@ -172,17 +176,34 @@ func (l *Logger) writeFileLocked(t time.Time, source, level, msg string) {
 	}
 }
 
+// rotateLocked 轮转日志文件。
+//
+// 打开新文件失败时**不能就这么把 file 置空**：日志文件突然不再增长是这套系统里最难查
+// 的一类故障（用户看到的是「什么都没有发生」）。所以先退回往刚轮转出来的那份继续追加，
+// 再不行才放弃，并且把原因写到 stderr——Logger 自己没地方记日志。
 func (l *Logger) rotateLocked() {
-	name := l.file.Name()
+	name := l.path
+	if name == "" {
+		name = l.file.Name()
+	}
 	_ = l.file.Close()
 	l.file = nil
 	for i := maxBackups - 1; i >= 1; i-- {
 		_ = os.Rename(fmt.Sprintf("%s.%d", name, i), fmt.Sprintf("%s.%d", name, i+1))
 	}
 	_ = os.Rename(name, name+".1")
+
 	if f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err == nil {
 		l.file = f
 		l.fileSize = 0
+		return
+	} else if f2, err2 := os.OpenFile(name+".1", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err2 == nil {
+		l.file = f2
+		l.fileSize = 0
+		fmt.Fprintf(os.Stderr, "fpkstudio: 打开日志文件 %s 失败（%v），暂时继续写 %s.1\n", name, err, name)
+		return
+	} else {
+		fmt.Fprintf(os.Stderr, "fpkstudio: 轮转日志文件失败（%v / %v），后续日志只留在内存里\n", err, err2)
 	}
 }
 

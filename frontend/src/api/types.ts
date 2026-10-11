@@ -94,7 +94,7 @@ export interface FileContent {
 
 /** 解压结果（`/api/fs/extract`）。 */
 export interface ExtractResult {
-  /** 识别出来的归档类型：tar / tar.gz / gz。 */
+  /** 识别出来的归档类型：tar / tar.gz / zip / gz…。 */
   kind: string
   /** 解压到的目录（相对项目根目录）。 */
   dir: string
@@ -102,6 +102,8 @@ export interface ExtractResult {
   files: number
   /** 因为同名已存在而跳过的文件数。 */
   skipped: number
+  /** 归档里带、但没有还原的符号链接数（后端不还原链接，见 fsx.dropLinks）。 */
+  links: number
 }
 
 export interface LogEntry {

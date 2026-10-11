@@ -149,6 +149,16 @@ const handoff = ref('')
  */
 const tab = computed(() => workspace.state(props.project)?.files.find((f) => f.path === props.path))
 
+/**
+ * 这个宿主实例对应的文件标签对象（按引用记住，不是按路径查）。
+ *
+ * 卸载时要把编辑器里没保存的内容交回 store，而组件是按 `file.path` 做 key 的：
+ * 重命名会就地改掉标签的 path，卸载旧实例时 `props.path` 还是旧名字，按路径查会
+ * 查不到——那份内容就交不回去，表现是「改个文件名，改到一半的内容没了」。
+ * 标签对象本身在改名时是原地改写的，所以握着引用就一直是同一个。
+ */
+const tabRef = workspace.state(props.project)?.files.find((f) => f.path === props.path) ?? null
+
 const def = computed(() => resolveEditor(props.path))
 
 /**
@@ -184,10 +194,15 @@ watch(
 
 // 卸载前把手里没保存的内容交回 store（见 loadText 的说明）。父组件的
 // beforeUnmount 先于子组件卸载执行，所以这时候 inner 还是活的。
+//
+// 按 tabRef 当前的 path 交（而不是 props.path）：重命名会让这两者不一样，用旧名字
+// 查不到标签，草稿就丢了。
 onBeforeUnmount(() => {
   try {
     const content = inner.value?.getContent?.()?.content
-    if (typeof content === 'string') workspace.setDraft(props.project, props.path, content)
+    if (typeof content === 'string' && tabRef) {
+      workspace.setDraft(props.project, tabRef.path, content)
+    }
   } catch {
     // 编辑器没就绪就算了：宁可丢这一份草稿，也不要让卸载过程抛错
   }

@@ -639,24 +639,66 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  /**
+   * 重命名文件或目录。
+   *
+   * 三件事必须一起做对，否则用户会丢内容（都踩过）：
+   *
+   *  1. **打开着的标签要跟着改路径**。编辑器宿主是按 `file.path` 做 key 的，key 一变
+   *     组件就重建，`loadText` 会回落到 `draft || origin`——所以 `origin` / `dirty` /
+   *     `draft` 一个都不能在这里清掉，清掉的表现是「改个文件名，编辑框空了，随手敲
+   *     一个字保存，文件就只剩那一个字」。内容本身没变，只有名字变了，不需要重读盘。
+   *  2. **目录改名要连子标签一起改**。目录里已经打开的文件标签路径还是旧的，保存会
+   *     照着旧路径写回一个「复活」的文件（后端写文件会顺手把父目录建出来）。
+   *  3. **目标重名要拒绝**。rename(2) 会把同名文件直接覆盖掉，用户只是想改个名，
+   *     不该拿另一个文件陪葬。后端 `fsx.Rename` 也挡了这一条，这里先拦是为了给出
+   *     一句人话（后端只会说「目标已存在：xxx」）。
+   */
   async function renameEntryAt(name: string, path: string, to: string) {
-    await renameEntry(path, to)
-    const parent = path.split('/').slice(0, -1).join('/') || name
-    await refreshDir(name, parent)
     const s = state(name)
+    const fromName = path.split('/').pop() ?? path
+    const toName = to.split('/').pop() ?? to
+    // 重命名不负责搬家：目标必须还在同一个目录里。名字里带 / 的话后端会把它当成
+    // 路径（`fsx.Rel` 会规整成相对路径），文件就被搬进子目录了——用户按「重命名」
+    // 的时候想要的不是这个。
+    const parent = path.split('/').slice(0, -1).join('/') || name
+    const toParent = to.split('/').slice(0, -1).join('/') || name
+    if (toParent !== parent || !toName || toName === '.' || toName === '..' || /[\\/]/.test(toName)) {
+      throw new Error(i18n.global.t('tree.renameInvalid'))
+    }
+    if (toName === fromName) return
+
+    // 目标目录的内容必须现拉一次（force）：缓存里那份可能是旧的，拿它判重名会覆盖
+    // 别人的文件。拉不到就干脆不改：宁可让用户重试，也不冒覆盖的风险。
+    try {
+      await loadDir(name, parent, true)
+    } catch {
+      throw new Error(i18n.global.t('tree.renameListFailed', { name: parent.split('/').pop() ?? parent }))
+    }
+    if ((s.dirs[parent] ?? []).some((entry) => entry.name === toName)) {
+      throw new Error(i18n.global.t('tree.renameExists', { name: toName }))
+    }
+
+    await renameEntry(path, to)
+    await refreshDir(name, parent)
     // 改名的是一个目录、而标签页模式正待在里面时，游标跟着改过的前缀走。
     if (s.browserDir === path || s.browserDir.startsWith(`${path}/`)) {
       s.browserDir = to + s.browserDir.slice(path.length)
     }
+
     const rel = fileTabPath(name, path)
-    const tab = s.files.find((f) => f.path === rel)
-    if (tab) {
-      tab.path = fileTabPath(name, to)
-      tab.name = tab.path.split('/').pop() ?? tab.path
-      tab.origin = ''
-      tab.dirty = false
-      s.activeTab = tab.path
-      await openFile(name, to)
+    const nextRel = fileTabPath(name, to)
+    for (const f of [...s.files]) {
+      // 自己，或者自己所在的目录被改名：路径跟着换，内容 / 脏标记 / 草稿原样留着。
+      if (f.path === rel) {
+        f.path = nextRel
+      } else if (f.path.startsWith(`${rel}/`)) {
+        f.path = nextRel + f.path.slice(rel.length)
+      } else {
+        continue
+      }
+      f.name = f.path.split('/').pop() ?? f.path
+      if (s.activeTab === rel) s.activeTab = nextRel
     }
   }
 

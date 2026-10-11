@@ -381,7 +381,7 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 	// （架构目录名就是 fpk 的 platform 值，内容会被复制到 app/server 再打包）。
 	dirs := append([]string{rel + "/building", rel + "/building/platform"}, platformDirs(rel)...)
 	for _, d := range dirs {
-		if err := m.prj.Mkdir(d, true); err != nil {
+		if err := m.prj.Mkdir(d, 0o755, true); err != nil {
 			return err
 		}
 	}
@@ -576,7 +576,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 
 	stageName := fmt.Sprintf("build-%s-%d", sanitize(req.Name), time.Now().UnixNano())
 	stage := "tmp/" + stageName
-	if err := m.home.Mkdir(stage, true); err != nil {
+	if err := m.home.Mkdir(stage, 0o755, true); err != nil {
 		return nil, fmt.Errorf("创建暂存目录失败: %w", err)
 	}
 	defer func() {
@@ -713,7 +713,7 @@ func (m *Manager) prepareStage(stage string, prjRel string, serverRel string, pl
 	dstRel := stage + "/project/" + serverRel
 	// 目标可能不存在（fnpack 只创建 app/server 与 app/www），不存在的错误直接忽略。
 	_ = m.home.Remove(dstRel, true)
-	if err := m.home.Mkdir(dstRel, true); err != nil {
+	if err := m.home.Mkdir(dstRel, 0o755, true); err != nil {
 		return err
 	}
 	return m.copyIntoStage(srcInPrj, dstRel)
@@ -722,7 +722,7 @@ func (m *Manager) prepareStage(stage string, prjRel string, serverRel string, pl
 // Import 把上传的 .fpk 解成一个项目目录。
 func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (ProjectInfo, error) {
 	stage := fmt.Sprintf("tmp/import-%d", time.Now().UnixNano())
-	if err := m.home.Mkdir(stage, true); err != nil {
+	if err := m.home.Mkdir(stage, 0o755, true); err != nil {
 		return ProjectInfo{}, err
 	}
 	defer func() { _ = m.home.Remove(stage, true) }()
@@ -769,7 +769,7 @@ func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (Pro
 	// 与 Create 保持一致，多架构发布勾一下就能用。失败只记日志——项目已经落地了，
 	// 而且前端的「打开多架构发布」还会再补一次。
 	for _, dir := range platformDirs(rel) {
-		if err := m.prj.Mkdir(dir, true); err != nil {
+		if err := m.prj.Mkdir(dir, 0o755, true); err != nil {
 			m.log.Warnf("创建架构目录 %s 失败: %v", dir, err)
 		}
 	}
@@ -970,6 +970,28 @@ func tail(s string, n int) string {
 	return "…" + s[len(s)-n:]
 }
 
+// writeEntry 把归档里的一个成员**流式**写进暂存目录，并把它计入体积预算。
+//
+// 以前这里是 io.ReadAll：导入一个几 GB 的 fpk 会在内存里堆出同样大的一份，而导入
+// 的来源（上传或本机路径）本身没有大小上限。边读边写之后内存是常数级的，代价是预算
+// 只能在读的过程中判——多读一个字节就报错（多读的那一个字节用来区分「正好用满」和
+// 「超了」）。写了一半的成员不用清：调用方会把整个暂存目录删掉。
+func writeEntry(root *fsx.Root, rel string, r io.Reader, total *int64) error {
+	remaining := maxImportBytes - *total
+	if remaining <= 0 {
+		return errors.New("包体积过大，已中止")
+	}
+	n, err := root.WriteReader(rel, io.LimitReader(r, remaining+1), 0o644)
+	*total += n
+	if err != nil {
+		return fmt.Errorf("写出 %s 失败: %w", rel, err)
+	}
+	if n > remaining {
+		return errors.New("包体积过大，已中止")
+	}
+	return nil
+}
+
 // unpackFPK 解开 fpk。
 //
 // 包结构（用真机 fnpack 1.2.4 验证过）：
@@ -1031,11 +1053,16 @@ func unpackFPK(root *fsx.Root, stage string, r io.Reader) error {
 			if err != nil {
 				return err
 			}
-			n, err := io.Copy(f, tr)
+			// app.tgz 是包内最大的那个成员，同样要计进体积预算——以前这里是裸的
+			// io.Copy，一个超大的 app.tgz 会被整份写出去才轮到后面的检查。
+			n, err := io.Copy(f, io.LimitReader(tr, maxImportBytes-total+1))
 			f.Close()
 			total += n
 			if err != nil {
 				return fmt.Errorf("写出 app.tgz 失败: %w", err)
+			}
+			if total > maxImportBytes {
+				return errors.New("包体积过大，已中止")
 			}
 			continue
 		}
@@ -1047,19 +1074,11 @@ func unpackFPK(root *fsx.Root, stage string, r io.Reader) error {
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := root.Mkdir(stage+"/"+name, true); err != nil {
+			if err := root.Mkdir(stage+"/"+name, 0o755, true); err != nil {
 				return err
 			}
 		default:
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return fmt.Errorf("读取 %s 失败: %w", name, err)
-			}
-			total += int64(len(data))
-			if total > maxImportBytes {
-				return errors.New("包体积过大，已中止")
-			}
-			if err := root.WriteFile(stage+"/"+name, data, 0o644); err != nil {
+			if err := writeEntry(root, stage+"/"+name, tr, &total); err != nil {
 				return err
 			}
 		}
@@ -1101,20 +1120,12 @@ func unpackFPK(root *fsx.Root, stage string, r io.Reader) error {
 			continue
 		}
 		if hdr.Typeflag == tar.TypeDir {
-			if err := root.Mkdir(stage+"/app/"+name, true); err != nil {
+			if err := root.Mkdir(stage+"/app/"+name, 0o755, true); err != nil {
 				return err
 			}
 			continue
 		}
-		data, err := io.ReadAll(itr)
-		if err != nil {
-			return err
-		}
-		total += int64(len(data))
-		if total > maxImportBytes {
-			return errors.New("包体积过大，已中止")
-		}
-		if err := root.WriteFile(stage+"/app/"+name, data, 0o644); err != nil {
+		if err := writeEntry(root, stage+"/app/"+name, itr, &total); err != nil {
 			return err
 		}
 	}

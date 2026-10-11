@@ -4,9 +4,11 @@
  * 比较讲究的两点，都是 fnpackup 做不到的：
  *
  *  1. 官方 fnpack 生成的模板是**对齐过的**（`appname               = demo`），
- *     而且用户可能写注释、写空行。这里把每一行原样记住，回写时保持顺序、
- *     注释和分隔符风格，只改动真正被编辑过的键——避免「打开一次 manifest
- *     保存后整个文件被重排」这种事情。
+ *     而且用户可能写注释、写空行、缩进。这里把每一行原样记住（`=` 左边的全部字符，
+ *     含行首缩进与对齐用的空格），回写时保持顺序、注释、缩进和分隔符风格，只改动
+ *     真正被编辑过的键——避免「打开一次 manifest 保存后整个文件被重排」这种事。
+ *     会被规范化的是**值的写法**：`"1.0.0"` 的引号、值后面的行尾空格不会保留
+ *     （值本身不变），多行值统一写成 `"""..."""`。用户改的是值，不是引号。
  *  2. `desc` 常常是 `"""多行内容"""`，不能被按行切开（fnpackup 的实现会把
  *     第二行当成一个新的键）。
  */
@@ -17,7 +19,7 @@ export interface ManifestEntry {
   raw: string
   key: string
   value: string
-  /** `=` 左边原样保留的文本（含对齐用的空格）；新建的键是 `key + ' '`。 */
+  /** `=` 左边原样保留的文本（含行首缩进与对齐用的空格）；新建的键是 `key + ' '`。 */
   left: string
   /** `=` 右边原样的空格，例如对齐模板里 `= value` 的那一个空格。 */
   pre: string
@@ -53,9 +55,11 @@ export class Manifest {
       const left = trimmed.slice(0, eq)
       const right = trimmed.slice(eq + 1)
       const key = left.trim()
-      // 原样记住 "=" 两边的空白：fnpack 的模板是对齐过的，保存时不能压成
-      // `key = value`，否则「只改一个字段」会把整份文件重排（模块注释的承诺）。
-      const pad = left === key ? key : left
+      // 原样记住 "=" 左边的全部字符：行首缩进 + 对齐用的空格。fnpack 的模板是对齐过的，
+      // 保存时不能压成 `key = value`，否则「只改一个字段」会把整份文件重排
+      // （模块注释的承诺）。
+      const indent = line.slice(0, line.length - line.trimStart().length)
+      const pad = indent + left
       const pre = right.slice(0, right.length - right.trimStart().length) || ' '
 
       if (!key) {

@@ -6,6 +6,7 @@ package fsx
 
 import (
 	"archive/zip"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,9 @@ import (
 
 // ErrNotExist 表示目标不存在。
 var ErrNotExist = os.ErrNotExist
+
+// ErrExists 表示目标已经存在，且这次操作不允许覆盖它（见 Root.Rename）。
+var ErrExists = errors.New("目标已存在")
 
 // Entry 是目录列表里的一项。
 type Entry struct {
@@ -180,27 +184,42 @@ func (x *Root) WriteFile(rel string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if err := x.writeFile(rel, data, perm); err != nil {
+	if _, err := x.WriteReader(rel, bytes.NewReader(data), perm); err != nil {
 		return err
 	}
-	// chmod 失败不阻断写入：文件内容已经落盘，模式位只影响产物质量。
-	_ = x.forceMode(rel, perm)
 	return nil
 }
 
-func (x *Root) writeFile(rel string, data []byte, perm os.FileMode) error {
+// WriteReader 把 r 的内容流式写进文件，自动创建父目录，返回写入的字节数。
+//
+// 上传、导入这类「内容有多大不由我们说了算」的路径走它，内存占用与文件大小无关
+// （以前是 io.ReadAll，上传一个几百 MB 的程序就得先在内存里放一份）。
+//
+// 权限处理与 WriteFile 一致：写完显式 chmod 一次，理由见 forceMode 的说明。
+func (x *Root) WriteReader(rel string, r io.Reader, perm os.FileMode) (int64, error) {
+	rel, err := Rel(rel)
+	if err != nil {
+		return 0, err
+	}
 	if parent := path.Dir(rel); parent != "." {
 		if err := x.r.MkdirAll(parent, 0o755); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	f, err := x.r.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	defer f.Close()
-	_, err = f.Write(data)
-	return err
+	n, err := io.Copy(f, r)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return n, err
+	}
+	// chmod 失败不阻断写入：文件内容已经落盘，模式位只影响产物质量。
+	_ = x.forceMode(rel, perm)
+	return n, nil
 }
 
 // forceMode 在创建后显式设置一次模式位。
@@ -277,39 +296,25 @@ func (x *Root) RepairModes(base string, scriptDirs []string) (int, error) {
 	})
 	return repaired, err
 }
-func (x *Root) canRead(rel string) bool {
-	f, err := x.r.Open(rel)
-	if err != nil {
-		return false
-	}
-	_ = f.Close()
-	return true
-}
-
-func (x *Root) canTraverse(rel string) bool {
-	f, err := x.r.Open(rel)
-	if err != nil {
-		return false
-	}
-	_, err = f.ReadDir(1)
-	_ = f.Close()
-	return err == nil || errors.Is(err, io.EOF)
-}
-
-// Mkdir 创建目录。
-func (x *Root) Mkdir(rel string, all bool) error {
+// Mkdir 创建目录，perm 会显式设置一遍。
+//
+// perm 是参数而不是写死的 0o755：飞牛卷上 open(O_CREAT, mode) 的 mode 会被忽略、
+// 新建项改为继承父目录，所以只有事后 chmod 才真的生效（见 setMode）。调用方要的权限
+// 并不相同（解压的暂存目录要 0o700），参数化之后就不会出现「传了 0o700 却落成 0o755」
+// 这种看不见的偏差。
+func (x *Root) Mkdir(rel string, perm os.FileMode, all bool) error {
 	rel, err := Rel(rel)
 	if err != nil {
 		return err
 	}
 	if all {
-		if err := x.r.MkdirAll(rel, 0o755); err != nil {
+		if err := x.r.MkdirAll(rel, perm); err != nil {
 			return err
 		}
-	} else if err := x.r.Mkdir(rel, 0o755); err != nil {
+	} else if err := x.r.Mkdir(rel, perm); err != nil {
 		return err
 	}
-	return x.setMode(rel, 0o755)
+	return x.setMode(rel, perm)
 }
 
 // Remove 删除文件或目录。dir 为真时允许递归删除目录。
@@ -354,6 +359,14 @@ func (x *Root) Rename(from, to string) error {
 		if err := x.r.MkdirAll(parent, 0o755); err != nil {
 			return err
 		}
+	}
+	// 目标已存在就拒绝，绝不覆盖。
+	//
+	// rename(2) 会把同名文件直接顶掉，而调用方（文件管理器的重命名）只是想改个名字
+	// ——用户的另一个文件就这么没了，还没有任何提示。解压合并那条路
+	// （archive.mergeEntry）在调用前已经确认过目标不存在，所以这里的检查不会挡住它。
+	if _, statErr := x.r.Lstat(to); statErr == nil {
+		return fmt.Errorf("%w：%s", ErrExists, to)
 	}
 	return x.r.Rename(from, to)
 }
@@ -568,14 +581,6 @@ func (x *Root) walk(rel string, fn func(string, os.FileInfo) error) error {
 		}
 	}
 	return nil
-}
-
-// WriteFileTo 在受限目录外写文件（打包产物落到 OutputDir 时用）。
-func WriteFileTo(absPath string, data []byte, perm os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(absPath, data, perm)
 }
 
 // CopyTree 按绝对路径递归复制文件或目录。

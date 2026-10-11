@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"io"
 	"io/fs"
 	"net/http"
 	"path"
@@ -111,12 +110,6 @@ func contentTypeOf(name string) string {
 	default:
 		return "application/octet-stream"
 	}
-}
-
-// copyBody 把响应体交给 w，同时保证 Content-Length 已知。
-func copyBody(w io.Writer, r io.Reader) error {
-	_, err := io.Copy(w, r)
-	return err
 }
 
 func jsonString(s string) string {

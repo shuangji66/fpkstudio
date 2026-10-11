@@ -21,7 +21,8 @@ make clean               # 删二进制与 embed
 
 cd frontend
 npm run typecheck        # vue-tsc，类型检查（改了 .vue / .ts 必跑）
-npm run check            # 五个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名 + 语义路径
+npm run check            # 六个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
+                         #   （含 manifest 回写）+ 语义路径 + 文件管理器 store（重命名 / 保存）
 npm run build            # vite 构建到 frontend/dist
 ```
 
@@ -170,7 +171,18 @@ frontend/src/
   **别再加一次项目名前缀**：算出来的缓存键（`state.dirs` 的键）根本不存在，`refreshDir`
   会静默什么都不做，表现是「解压成功了，但列表里看不到新文件」。
 - 系统 `tar` 对越界成员（`/etc/passwd`、`../x`）**只给警告、退出码还是 0**，靠它挡不住；
-  `fsx.Extract` 是自己先用 `tar -t` 列成员名再判的。要动这段的话，别把成员校验去掉。
+  `unzip` 更省事——它把越界名字截断成一个安全名字照写不误，退出码给 1。所以
+  `fsx.Extract` 解压前先列一遍成员名（tar 用 `tar -t`、zip 用 `unzip -Z1`）自己判，
+  要动这段的话别把成员校验去掉。归档里的**符号链接一律不还原**（`fsx.dropLinks`，
+  tar / zip 都一样）：链接可以指向归档外面，留在项目里会被后面的复制 / 打包顺着读出去。
+- **重命名不等于「改个名字」**，`stores/workspace.ts` 的 `renameEntryAt` 里三件事要一起做对：
+  打开着的标签要跟着改路径（编辑器宿主是按 `file.path` 做 key 的，key 一变组件就重建，
+  内容只能从 `draft || origin` 取——顺手清掉 `origin` 的表现是「改个文件名，编辑框空了，
+  随手敲一个字保存，文件就只剩那一个字」）；目录改名要连**子标签**一起改（否则保存照着
+  旧路径写回去，凭空复活一个文件）；目标重名要拒绝（`rename(2)` 会直接覆盖同名文件，
+  后端 `fsx.Rename` 与 store 各挡一道）。这三条钉在 `check:workspace` 里。
+- `EditorHost.onBeforeUnmount` 交草稿时用的是**标签对象的引用**（`tabRef`），不是
+  `props.path`：重命名会让两者不一样，用旧路径查不到标签，那份没保存的内容就丢了。
 - 切换桌面 / 移动布局会把编辑器宿主整块卸载重建（`ProjectTab` 里用 `v-if="!mobile"` 换了
   另一套宿主）。编辑器里没保存的内容靠 `FileTab.draft` 在 `EditorHost.onBeforeUnmount`
   里接力；**新增编辑器组件时，`getContent()` 要能拿到当前文本**，否则这份接力会断，
@@ -214,7 +226,10 @@ frontend/src/
 - 解压工具默认按 `/usr/bin/...` 找（`fsx.binPath`），找不到才回落到 PATH：服务进程的
   PATH 不保证有 /usr/bin，而这些工具在飞牛上就在那儿。不给它们加环境变量。
   tar 的命令**不带 `-z` / `-j` / `-J` / `--zstd`**：GNU tar 读归档时按魔数自己认压缩格式，
-  一个命令覆盖全部 tar 变体。**zip 用标准库 `archive/zip`**（`unzip` 不是每个系统都有）。
+  一个命令覆盖全部 tar 变体。**zip 也走系统命令 `unzip`**（`fsx.UnzipBin`），不再用
+  标准库 `archive/zip`：解压统一交给系统工具，行为跟用户在终端里敲一遍一致，边角情况
+  （属性位、跨平台名字、加密包）不用我们自己维护。`unzip` 必须带 `-o`——不给的话它遇到
+  同名文件会停下来等 stdin，而服务进程没有终端，请求会一直挂着。
 - **归档后缀有两份判据，改一处必须改两处**：后端 `fsx.archiveKinds`（长的排前面，
   `.tar.gz` 必须在 `.gz` 之前）和前端 `utils/format.ts` 的 `isArchive`。少一边的表现是
   「菜单里没有解压」或者「点了报不支持的格式」；`check:format` 盯着前端那一半。

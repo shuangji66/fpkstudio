@@ -402,6 +402,41 @@ async function extract() {
     } else {
       ElMessage.success(t('tree.extractDone', { name, files: res.files }))
     }
+    // 归档里的符号链接不会还原，单独说一句（不是错误，但用户得知道少了什么）。
+    if (res.links > 0) ElMessage.warning(t('tree.extractLinks', { count: res.links }))
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+/**
+ * 重命名当前项。
+ *
+ * 文件树里是行内输入框，这里是列表 / 网格，没有「正在编辑的那一行」可用，所以走
+ * 弹窗。真正的重名判断在 store 里（`renameEntryAt`），这里只挡住空名字和带分隔符的
+ * 名字——后者会让文件被搬进子目录，不是用户按「重命名」时想要的。
+ */
+async function rename() {
+  const path = menu.path
+  const name = path.split('/').pop() ?? path
+  hideMenu()
+  let next = ''
+  try {
+    const res = await ElMessageBox.prompt(t('tree.namePrompt'), t('common.rename'), {
+      inputValue: name,
+      inputValidator: (value) =>
+        value && value.trim() && !/[\\/]/.test(value.trim()) ? true : t('tree.renameInvalid'),
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+    })
+    next = String(res.value ?? '').trim()
+  } catch {
+    return
+  }
+  if (!next || next === name) return
+  const parent = path.slice(0, path.lastIndexOf('/'))
+  try {
+    await workspace.renameEntryAt(props.project, path, `${parent}/${next}`)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
   }
@@ -441,6 +476,9 @@ const menuItems = computed<MenuItem[]>(() => {
   if (state.value.clipboard) {
     items.push({ label: t('tree.paste'), disabled: !canPaste.value, run: () => void paste() })
   }
+  // 重命名在文件树里是行内输入框，这里是列表 / 网格、没有「正在编辑的那一行」可用，
+  // 所以走弹窗。少了这一条的话，标签页模式下用户根本改不了文件名。
+  items.push({ label: t('common.rename'), run: () => void rename() })
   items.push({
     label: t('tree.copy'),
     run: () => {

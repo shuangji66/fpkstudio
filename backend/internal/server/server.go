@@ -279,13 +279,26 @@ func writeError(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
 
+// maxJSONBody 是请求体的上限。写文件接口也走它，所以给得宽一点。
+const maxJSONBody = 32 << 20
+
 func decodeJSON(r *http.Request, v any) error {
 	if r.Body == nil {
 		return badRequest("请求体为空")
 	}
-	dec := json.NewDecoder(io.LimitReader(r.Body, 32<<20))
+	// 用 LimitedReader 而不是 io.LimitReader：截断之后要能分辨「超限」和「本来就是
+	// 坏 JSON」。以前两者都报「请求体不是合法 JSON: unexpected EOF」，用户存一个
+	// 超过 32MB 的文件只会看到这句莫名其妙的话。
+	body := &io.LimitedReader{R: r.Body, N: maxJSONBody + 1}
+	dec := json.NewDecoder(body)
 	if err := dec.Decode(v); err != nil {
+		if body.N <= 0 {
+			return badRequest("请求体过大（上限 %d MB）", maxJSONBody>>20)
+		}
 		return badRequest("请求体不是合法 JSON: %v", err)
+	}
+	if body.N <= 0 {
+		return badRequest("请求体过大（上限 %d MB）", maxJSONBody>>20)
 	}
 	return nil
 }

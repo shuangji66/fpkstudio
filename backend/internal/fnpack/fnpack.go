@@ -11,7 +11,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -173,10 +172,4 @@ func (c *Client) Create(ctx context.Context, dir, name string, docker, withUI bo
 // Build 在项目目录内打包。
 func (c *Client) Build(ctx context.Context, projectDir string) (string, error) {
 	return c.Run(ctx, projectDir, logging.SourceBuild, "build")
-}
-
-// ArtifactExists 判断某个路径下是否真的有可执行文件。
-func ArtifactExists(p string) bool {
-	fi, err := os.Stat(p)
-	return err == nil && !fi.IsDir()
 }

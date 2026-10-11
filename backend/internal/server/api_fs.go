@@ -114,7 +114,7 @@ func (s *Server) handleFsCreate(w http.ResponseWriter, r *http.Request) error {
 	root := s.prj.Root()
 	var err error
 	if req.Dir {
-		err = root.Mkdir(req.Path, true)
+		err = root.Mkdir(req.Path, 0o755, true)
 	} else {
 		err = root.WriteFile(req.Path, nil, 0o644)
 	}
@@ -150,6 +150,10 @@ func (s *Server) handleFsRename(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("缺少目标路径")
 	}
 	if err := s.prj.Root().Rename(req.Path, req.To); err != nil {
+		// 「目标已存在」是用户能自己解决的事（换个名字），不该报成服务端错误。
+		if errors.Is(err, fsx.ErrExists) {
+			return badRequest("%v", err)
+		}
 		return internal("重命名失败: %v", err)
 	}
 	return writeJSON(w, map[string]any{"ok": true, "path": req.To})
@@ -196,16 +200,18 @@ func (s *Server) handleFsUpload(w http.ResponseWriter, r *http.Request) error {
 			if err != nil {
 				return internal("读取上传文件失败: %v", err)
 			}
-			data, err := io.ReadAll(f)
+			// 边收边写，不把整个文件读进内存：app/server 下放的是原生程序，几百 MB
+			// 的二进制在这里很常见。
+			size, err := root.WriteReader(dst, f, uploadMode(dst))
 			f.Close()
 			if err != nil {
-				return internal("读取上传文件失败: %v", err)
-			}
-			if err := root.WriteFile(dst, data, uploadMode(dst)); err != nil {
+				// 写了一半的文件不能留：它顶掉的是同名的那份（overwrite），留在那儿
+				// 就是一个看着正常、其实是残渣的文件。
+				_ = root.Remove(dst, false)
 				return internal("写入 %s 失败: %v", dst, err)
 			}
-			written = append(written, map[string]any{"path": dst, "size": len(data)})
-			s.log.Infof("上传 %s（%s）", dst, fsx.HumanSize(int64(len(data))))
+			written = append(written, map[string]any{"path": dst, "size": size})
+			s.log.Infof("上传 %s（%s）", dst, fsx.HumanSize(size))
 		}
 	}
 	if len(written) == 0 {
@@ -216,8 +222,9 @@ func (s *Server) handleFsUpload(w http.ResponseWriter, r *http.Request) error {
 
 // handleFsExtract 把压缩包解压到它自己所在的目录。
 //
-// 只认 tar / tar.gz / tgz / gz，实际解压交给系统 tar / gzip（见 fsx.Extract）；
-// 同名文件一律跳过，不覆盖用户已有的内容，跳过的数量回给界面。
+// 支持的格式见 fsx.ArchiveKindOf（tar 全家族 / zip / 单个文件的 gz、bz2、xz、zst），
+// 实际解压交给系统的 tar / unzip / gzip 等（见 fsx.Extract）；同名文件一律跳过、
+// 不覆盖用户已有的内容，归档里的符号链接也不还原——跳过的数量都回给界面。
 func (s *Server) handleFsExtract(w http.ResponseWriter, r *http.Request) error {
 	var req pathReq
 	if err := decodeJSON(r, &req); err != nil {
@@ -232,13 +239,18 @@ func (s *Server) handleFsExtract(w http.ResponseWriter, r *http.Request) error {
 		return internal("解压失败: %v", err)
 	}
 	s.log.Infof(
-		"解压 %s 到 %s（%d 个文件，跳过 %d 个已存在）",
-		req.Path, res.Dir, res.Files, res.Skipped,
+		"解压 %s 到 %s（%d 个文件，跳过 %d 个已存在，丢弃 %d 个符号链接）",
+		req.Path, res.Dir, res.Files, res.Skipped, res.Links,
 	)
 	return writeJSON(w, res)
 }
 
 // handleFsDownload 下载单个文件，或者把目录打成 zip。
+//
+// 响应头是在开始写正文之前发出的，所以**正文中途出错时没法再回一个 JSON 错误**：
+// 那时候再让 wrap 去 writeError，只会在日志里留一条 superfluous WriteHeader、
+// 并给浏览器塞一个半截文件。这里改成记日志 + 直接断开——下载失败本来就只能靠
+// 浏览器那边发现「文件不完整」。
 func (s *Server) handleFsDownload(w http.ResponseWriter, r *http.Request) error {
 	rel, err := queryRel(r)
 	if err != nil {
@@ -256,7 +268,10 @@ func (s *Server) handleFsDownload(w http.ResponseWriter, r *http.Request) error 
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", "attachment; filename=\""+sanitizeHeader(name)+"\"")
 		w.Header().Set("Cache-Control", "no-store")
-		return root.ZipDir(rel, w)
+		if err := root.ZipDir(rel, w); err != nil {
+			s.log.Warnf("打包下载 %s 失败: %v", rel, err)
+		}
+		return nil
 	}
 
 	f, fi, err := root.OpenFile(rel)
@@ -269,8 +284,10 @@ func (s *Server) handleFsDownload(w http.ResponseWriter, r *http.Request) error 
 	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+sanitizeHeader(name)+"\"")
 	w.Header().Set("Cache-Control", "no-store")
-	_, err = io.Copy(w, f)
-	return err
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warnf("下载 %s 中断: %v", rel, err)
+	}
+	return nil
 }
 
 // uploadMode 决定上传文件落地时的模式。

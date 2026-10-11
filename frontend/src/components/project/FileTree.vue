@@ -398,7 +398,7 @@ async function onFiles(event: Event) {
   }
 }
 
-/** 解压到压缩包所在的目录（后端调系统 tar / gzip，同名文件跳过）。 */
+/** 解压到压缩包所在的目录（后端调系统 tar / unzip，同名文件跳过）。 */
 async function extract(path: string) {
   hideMenu()
   const name = path.split('/').pop() ?? path
@@ -411,6 +411,8 @@ async function extract(path: string) {
     } else {
       ElMessage.success(t('tree.extractDone', { name, files: res.files }))
     }
+    // 归档里的符号链接不会还原，单独说一句（不是错误，但用户得知道少了什么）。
+    if (res.links > 0) ElMessage.warning(t('tree.extractLinks', { count: res.links }))
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
   }

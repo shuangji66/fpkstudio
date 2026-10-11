@@ -181,7 +181,7 @@ func TestOutputSameAsProjectRoot(t *testing.T) {
 	}
 
 	// 造一个项目与一份产物（就放在这个既是项目目录又是输出目录的地方）。
-	if err := m.prj.Mkdir("demo", true); err != nil {
+	if err := m.prj.Mkdir("demo", 0o755, true); err != nil {
 		t.Fatalf("创建项目失败: %v", err)
 	}
 	if err := m.prj.WriteFile("demo/manifest", []byte("appname               = demo\nversion               = 1.0.0\nplatform              = x86\n"), 0o644); err != nil {

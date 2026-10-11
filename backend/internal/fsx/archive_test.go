@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -415,8 +416,9 @@ func TestExtractSingleFileCompressors(t *testing.T) {
 	}
 }
 
-// zip 走标准库：正常解压、同名跳过、越界拒绝。
+// zip 走系统的 unzip：正常解压、同名跳过、越界拒绝。
 func TestExtractZip(t *testing.T) {
+	requireTools(t, UnzipBin)
 	root := t.TempDir()
 	x, err := Open(root, true)
 	if err != nil {
@@ -460,6 +462,7 @@ func TestExtractZip(t *testing.T) {
 }
 
 func TestExtractZipRejectsTraversal(t *testing.T) {
+	requireTools(t, UnzipBin)
 	root := t.TempDir()
 	x, err := Open(root, true)
 	if err != nil {
@@ -492,6 +495,163 @@ func TestCheckMemberBackslash(t *testing.T) {
 	if err := checkMember("a\\b\\c"); err != nil {
 		t.Errorf("正常成员被拒: %v", err)
 	}
+}
+
+// 归档里的符号链接不还原：Info-ZIP 和 tar 默认都会把链接原样建出来，而链接可以指向
+// 归档外面（`leak -> /etc/passwd`），留在项目里会被后面的复制 / 打包顺着读出去。
+func TestExtractZipDropsSymlinks(t *testing.T) {
+	requireTools(t, UnzipBin)
+	root := t.TempDir()
+	x, err := Open(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Close()
+
+	if err := copyInto(t, makeZipWithSymlink(t), filepath.Join(root, "bundle.zip")); err != nil {
+		t.Fatal(err)
+	}
+	res, err := x.Extract("bundle.zip")
+	if err != nil {
+		t.Fatalf("解压失败: %v", err)
+	}
+	if res.Links != 1 {
+		t.Errorf("Links = %d，期望 1", res.Links)
+	}
+	if res.Files != 1 {
+		t.Errorf("Files = %d，期望 1（链接不算文件）", res.Files)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "leak")); err == nil {
+		t.Error("符号链接被还原出来了，应当被丢掉")
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "app", "keep.txt")); string(got) != "keep" {
+		t.Errorf("普通文件没解出来: %q", got)
+	}
+}
+
+// tar 那条路同样不还原链接（dropLinks 对所有归档生效）。
+func TestExtractTarDropsSymlinks(t *testing.T) {
+	requireTools(t, TarBin)
+	root := t.TempDir()
+	x, err := Open(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Close()
+
+	// 用系统 tar 拼一个带符号链接的包：-C 到临时目录里，免得把链接建到仓库里。
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/passwd", filepath.Join(src, "leak")); err != nil {
+		t.Skipf("建不了符号链接，跳过: %v", err)
+	}
+	out, err := exec.Command(TarBin, "-cf", filepath.Join(root, "bundle.tar"), "-C", src, "keep.txt", "leak").Output()
+	if err != nil {
+		t.Fatalf("打包失败: %v: %s", err, out)
+	}
+
+	res, err := x.Extract("bundle.tar")
+	if err != nil {
+		t.Fatalf("解压失败: %v", err)
+	}
+	if res.Links != 1 {
+		t.Errorf("Links = %d，期望 1", res.Links)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "leak")); err == nil {
+		t.Error("符号链接被还原出来了，应当被丢掉")
+	}
+}
+
+// 重命名不许覆盖已存在的目标：rename(2) 默认会把同名文件顶掉，那是数据丢失。
+func TestRenameRefusesExistingTarget(t *testing.T) {
+	root := t.TempDir()
+	x, err := Open(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Close()
+
+	if err := x.WriteFile("a.txt", []byte("A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.WriteFile("b.txt", []byte("B"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = x.Rename("a.txt", "b.txt")
+	if !errors.Is(err, ErrExists) {
+		t.Fatalf("期望 ErrExists，实际 %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "b.txt")); string(got) != "B" {
+		t.Errorf("目标被覆盖了: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "a.txt")); string(got) != "A" {
+		t.Errorf("源文件不见了: %q", got)
+	}
+	// 正常改名不受影响
+	if err := x.Rename("a.txt", "c.txt"); err != nil {
+		t.Fatalf("正常改名失败: %v", err)
+	}
+}
+
+// WriteReader 要能流式落盘、建父目录、并把模式位显式设上。
+func TestWriteReader(t *testing.T) {
+	root := t.TempDir()
+	x, err := Open(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Close()
+
+	n, err := x.WriteReader("a/b/c.sh", strings.NewReader("hello"), 0o755)
+	if err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("写入字节数 = %d，期望 5", n)
+	}
+	fi, err := os.Stat(filepath.Join(root, "a", "b", "c.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o755 {
+		t.Errorf("模式位 = %04o，期望 0755", fi.Mode().Perm())
+	}
+}
+
+// makeZipWithSymlink 拼一个带符号链接成员的 zip（链接指向 /etc/passwd）。
+func makeZipWithSymlink(t *testing.T) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+
+	w, err := zw.Create("app/keep.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("keep")); err != nil {
+		t.Fatal(err)
+	}
+
+	hdr := &zip.FileHeader{Name: "leak", Method: zip.Store}
+	hdr.SetMode(os.ModeSymlink | 0o777)
+	link, err := zw.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := link.Write([]byte("/etc/passwd")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	p := filepath.Join(t.TempDir(), "symlink.zip")
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // makeZip 用标准库拼一个 zip。

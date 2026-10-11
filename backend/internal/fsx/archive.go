@@ -1,11 +1,9 @@
 package fsx
 
 import (
-	"archive/zip"
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -14,23 +12,27 @@ import (
 )
 
 // 解压：tar 系列交给系统的 tar，单个文件的 .gz/.bz2/.xz/.zst 交给对应的解压工具，
-// zip 用标准库。
+// zip 交给系统的 unzip。**全部走外部命令**，不用标准库的 archive/tar 与 archive/zip。
 //
-// 用外部命令而不是标准库的 archive/tar，是因为用户明确要求「调用系统压缩工具」：
-// 行为跟用户在终端里敲 tar 一致（GNU 的各种扩展、长文件名、稀疏文件都由 tar 自己
-// 处理）。zip 反过来用 archive/zip：unzip / 7z 不是每个系统都有，而 zip 恰恰是最
-// 常见的格式，标准库能省掉一个「目标机器上没装」的坑。
+// 理由和用户的要求一致：行为跟用户在终端里敲一遍一样（GNU tar 的各种扩展、长文件名、
+// 稀疏文件；Info-ZIP 的属性位、加密包、跨平台名字），也省得我们自己维护一份
+// 「归档格式的边界情况」——这类代码出错的代价是写坏用户的目录。
 //
 // tar 不带压缩参数：GNU tar 会按魔数自己认出 gz / bz2 / xz / zst，一个命令覆盖
 // 全部 tar 变体，也省得我们把后缀和压缩算法绑死。
 //
-// 安全上做三件事：
-//  1. tar 自己没有「不许写到目标目录之外」的开关，所以解压前先用 `tar -t` 列一遍
-//     成员名，含绝对路径或 `..` 段的归档直接拒绝（成员名是 C 风格转义输出的，
-//     换行不会把一行拆成两行）；zip 的成员名同样逐个校验。
+// 安全上做四件事：
+//  1. 解压前先列一遍成员名（tar 用 `tar -t`、zip 用 `unzip -Z1`），含绝对路径或
+//     `..` 段的归档直接拒绝。**不能只看退出码**：tar 对越界名字只给警告、退出码还是
+//     0；Info-ZIP 更省事——它把越界名字截断成一个安全的名字照写不误，退出码给 1。
+//     （tar 的输出是 C 风格转义的，换行不会把一行拆成两行；zip 的成员名直接输出，
+//     但拆错了只会多校验几行垃圾，判据仍然是「出现越界段就拒绝」，失败方向是安全
+//     的那一侧。）
 //  2. 先解到目标目录里的一个暂存目录，再逐个搬进来。暂存目录由这一次请求独占，
 //     归档里的符号链接够不到它外面；搬迁走 os.Root 的 rename，同样出不去。
-//  3. 所有写入都走 os.Root，不用拼绝对路径的 os.OpenFile。
+//  3. 归档里的**符号链接一律不还原**（见 dropLinks）：链接可以指向归档外面，
+//     留在用户的项目里既没有用处，又会被后面的复制 / 打包顺着读出去。
+//  4. 所有写入都走 os.Root，不用拼绝对路径的 os.OpenFile。
 //
 // 同名冲突一律**跳过**，不覆盖：解压最常见的情形是往一个已经存在的目录上补内容
 // （比如把 app.tgz 解到已经有 app/ 的项目里），静默覆盖用户的文件是不可逆的。
@@ -48,6 +50,7 @@ var (
 	Bzip2Bin = "/usr/bin/bzip2"
 	XzBin    = "/usr/bin/xz"
 	ZstdBin  = "/usr/bin/zstd"
+	UnzipBin = "/usr/bin/unzip"
 )
 
 // binPath 解析要用的外部命令。
@@ -146,6 +149,8 @@ type ExtractResult struct {
 	Files int `json:"files"`
 	// Skipped 是因为同名已存在而跳过的文件数。
 	Skipped int `json:"skipped"`
+	// Links 是归档里带、但被丢掉没还原的符号链接数（见 dropLinks）。
+	Links int `json:"links"`
 }
 
 // Extract 把 rel 指向的归档解压到它所在的目录。
@@ -176,7 +181,9 @@ func (x *Root) Extract(rel string) (ExtractResult, error) {
 	res.Dir = path.Dir(rel)
 
 	staging := path.Join(res.Dir, fmt.Sprintf(".fpkstudio-extract-%d", time.Now().UnixNano()))
-	if err := x.r.Mkdir(staging, 0o700); err != nil {
+	// 走 x.Mkdir 而不是 x.r.Mkdir：飞牛卷上 mkdir(2) 的 mode 可能被忽略，这里要的
+	// 0o700 只有事后 chmod 才落得下来（见 Root.Mkdir 的说明）。
+	if err := x.Mkdir(staging, 0o700, false); err != nil {
 		return res, fmt.Errorf("创建暂存目录失败: %w", err)
 	}
 	// 无论成败都清掉暂存目录：留下它只会让用户的目录里多一个看不懂的东西。
@@ -194,10 +201,45 @@ func (x *Root) Extract(rel string) (ExtractResult, error) {
 		return res, err
 	}
 
+	// 符号链接一律不还原：tar 和 zip 都可能在归档里带链接，而链接可以指向归档之外。
+	if links, err := x.dropLinks(staging); err != nil {
+		return res, err
+	} else {
+		res.Links = links
+	}
+
 	if err := x.mergeInto(staging, res.Dir, &res); err != nil {
 		return res, err
 	}
 	return res, nil
+}
+
+// dropLinks 删掉解压到 base 里的符号链接，返回删除的数量。
+//
+// 和 unpackFPK 里「不还原链接」是同一条策略，只是那边是手写 tar 解析时顺手跳过的。
+// 这里必须显式做一次，因为 tar 和 unzip 默认都会把链接原样还原出来：
+//
+//	ln -s /etc/passwd leak
+//
+// 这样的链接留在用户的项目里，界面上点不进去（os.Root 拒绝穿出去），却会在打包 /
+// 导出时被顺着读出去（CopyTree 打开的是链接指向的文件），内容就这么进了别人的 fpk。
+// 删掉它、并把数量报给界面，比留一个「看着在、其实不能用」的条目清楚。
+//
+// 不往下递归：链接本身不是目录（Lstat 说了算），Walk 不会跟着它走。
+func (x *Root) dropLinks(base string) (int, error) {
+	n := 0
+	err := x.Walk(base, func(cur string, _ bool, _ string) error {
+		fi, err := x.r.Lstat(cur)
+		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			return nil
+		}
+		if err := x.Remove(cur, false); err != nil {
+			return err
+		}
+		n++
+		return nil
+	})
+	return n, err
 }
 
 // untar 先校验成员名，再用 tar 解到暂存目录（staging 是相对路径）。
@@ -220,16 +262,31 @@ func (x *Root) untar(srcAbs, staging string) error {
 }
 
 func runTar(args ...string) ([]byte, error) {
-	bin, err := binPath(TarBin)
+	return runTool(TarBin, "tar", args...)
+}
+
+// runUnzip 跑一次 unzip，返回 stdout（`-Z1` 的成员清单就在 stdout 上）。
+func runUnzip(args ...string) ([]byte, error) {
+	return runTool(UnzipBin, "unzip", args...)
+}
+
+// runTool 执行一个解压工具，返回 stdout；失败时把输出的尾巴带进错误里。
+//
+// stdin 故意不接：这些工具在遇到「要不要覆盖」「密码是多少」时会等输入，而我们没有
+// 终端可问——不接 stdin 时它们读到 EOF 会自己失败退出，好过把整个请求吊住。
+func runTool(bin, name string, args ...string) ([]byte, error) {
+	exe, err := binPath(bin)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(exe, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("tar %s 失败: %w: %s", strings.Join(args, " "), err, tailText(stderr.String()))
+		// 有的工具把警告写在 stdout 上，两边都看一眼再取尾巴。
+		detail := strings.TrimSpace(stderr.String() + "\n" + stdout.String())
+		return nil, fmt.Errorf("%s %s 失败: %w: %s", name, strings.Join(args, " "), err, tailText(detail))
 	}
 	return stdout.Bytes(), nil
 }
@@ -311,81 +368,36 @@ func (x *Root) decompress(srcAbs, base, staging string, kind ArchiveKind) error 
 	return nil
 }
 
-// unzip 用标准库解 zip 到暂存目录。
+// unzip 用系统的 unzip 把 zip 解到暂存目录。
 //
-// 走标准库而不是 unzip / 7z：它们不是每个系统都有，而 zip 恰恰是最常见的格式。
-// 成员名照 tar 那条路一样先全量校验（zip 的 Name 同样能带 `..` 或绝对路径），
-// 写入全部走 os.Root。
+// 走外部命令而不是标准库 archive/zip（按需求）：行为跟用户在终端里敲一遍一致，
+// Info-ZIP 处理的那些边角（属性位、跨平台名字、加密包）不用我们再维护一份。
+//
+// 三件事必须做对：
+//  1. 先 `unzip -Z1` 列出全部成员名逐个校验。**不能只看退出码**：实测 Info-ZIP 遇到
+//     `../evil` / `/abs` 这类名字时会「警告 + 把名字截断成安全的样子」照写不误，
+//     退出码只给 1，靠它挡不住（和 tar 那个坑一模一样）。
+//  2. 必须先校验完再解压：一半解出来、一半被拒会留下一个说不清状态的目录。
+//  3. `-o` 不能省。不给的话 unzip 遇到同名文件会停下来等 stdin 回话，而这里没有终端，
+//     进程会一直挂着（暂存目录是这次请求独占的，覆盖没有风险）。加密包同理：没有
+//     stdin，unzip 读不到密码就自己退出，不会把服务吊死。
+//
+// 符号链接由 Extract 在解压完之后统一丢掉（见 dropLinks）。
 func (x *Root) unzip(rel, staging string) error {
-	f, err := x.r.Open(rel)
+	src := x.Abs(rel)
+
+	out, err := runUnzip("-Z1", src)
 	if err != nil {
+		// 列不出成员，多半是「不是 zip」或者「空包」——unzip 的原话在错误尾巴里，
+		// 这里补一句人话，别让用户只看到 `unzip -Z1 … 失败`。
+		return fmt.Errorf("读不出 zip 的成员清单（可能不是有效的 zip，或者包是空的）: %w", err)
+	}
+	if err := checkMembers(out); err != nil {
 		return err
 	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
+
+	if _, err := runUnzip("-qq", "-o", "-d", x.Abs(staging), src); err != nil {
 		return err
-	}
-	zr, err := zip.NewReader(f, fi.Size())
-	if err != nil {
-		return fmt.Errorf("不是有效的 zip：%w", err)
-	}
-
-	// 先全量校验再动手：一半解出来、一半被拒会留下一个说不清状态的目录。
-	for _, entry := range zr.File {
-		if err := checkMember(entry.Name); err != nil {
-			return err
-		}
-	}
-	for _, entry := range zr.File {
-		if err := x.unzipEntry(entry, staging); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (x *Root) unzipEntry(entry *zip.File, staging string) error {
-	// Windows 打的包可能用反斜杠；统一成正斜杠再进沙箱。
-	name := strings.ReplaceAll(entry.Name, "\\", "/")
-	name = strings.TrimPrefix(name, "/")
-	if name == "" {
-		return nil
-	}
-	rel := path.Join(staging, name)
-
-	if entry.FileInfo().IsDir() {
-		return x.r.MkdirAll(rel, 0o755)
-	}
-	if parent := path.Dir(rel); parent != "." {
-		if err := x.r.MkdirAll(parent, 0o755); err != nil {
-			return err
-		}
-	}
-
-	src, err := entry.Open()
-	if err != nil {
-		return fmt.Errorf("读取 %s 失败: %w", name, err)
-	}
-	defer src.Close()
-
-	// 符号链接在 zip 里存成「内容是目标路径的普通文件」，按原样还原。
-	if entry.Mode()&os.ModeSymlink != 0 {
-		target, err := io.ReadAll(io.LimitReader(src, 4096))
-		if err != nil {
-			return fmt.Errorf("读取 %s 失败: %w", name, err)
-		}
-		_ = x.r.Remove(rel)
-		return x.r.Symlink(string(target), rel)
-	}
-
-	dst, err := x.r.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return fmt.Errorf("创建 %s 失败: %w", name, err)
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("写入 %s 失败: %w", name, err)
 	}
 	return nil
 }
