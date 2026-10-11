@@ -21,11 +21,13 @@
       <el-button size="small" :disabled="pickDisabled" :title="pickTitle" @click="emit('pick')">
         {{ fromUser ? t('settings.dirs.replace') : t('settings.dirs.add') }}
       </el-button>
+      <!-- 取消设置是「回到默认」这种带副作用的动作，给它一个红框（但不填充）区别于旁边的更换按钮 -->
       <el-button
         v-if="fromUser"
         size="small"
-        text
         type="danger"
+        plain
+        class="border-red-400 bg-transparent hover:bg-red-50 disabled:opacity-50 dark:border-red-500/70 dark:hover:bg-red-950/40"
         :disabled="busy"
         @click="emit('clear')"
       >
@@ -52,11 +54,6 @@
     >
       {{ t('settings.dirs.envIgnored', { path: defaultPath }) }}
     </p>
-    <p v-else class="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
-      {{
-        fromUser ? t('settings.dirs.defaultHint', { path: defaultPath }) : t('settings.dirs.notSet')
-      }}
-    </p>
   </div>
 </template>
 
@@ -70,7 +67,7 @@ defineProps<{
   path: string
   /** 是否来自用户设置（否则就是环境变量给的默认目录）。 */
   fromUser: boolean
-  /** 默认目录，用于告诉用户「取消设置会回到哪里」。 */
+  /** 环境变量给的默认目录，只在 envIgnored 提示里用得到。 */
   defaultPath: string
   /** 转换后的展示路径（trim.file.path）；拿不到时为空。 */
   semantic: string

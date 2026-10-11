@@ -47,25 +47,14 @@
                 <div class="mt-1">{{ t('pack.noPlatformsHint') }}</div>
               </div>
 
-              <div class="grid grid-cols-[10rem_1fr] items-center gap-x-3">
-                <span class="text-right text-xs text-slate-600 dark:text-slate-300">{{ t('pack.serverDir') }}</span>
-                <div>
-                  <el-input v-model="serverDir" size="small" class="w-64" />
-                  <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{{ t('pack.serverDirHint') }}</p>
-                </div>
+              <!-- 输入框与下面的说明左对齐，不再挂一个右侧对齐的标签列 -->
+              <div>
+                <el-input v-model="serverDir" size="small" class="w-64" />
+                <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{{ t('pack.serverDirHint') }}</p>
               </div>
             </template>
 
-            <p v-else class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-              {{ t('pack.singleHint') }}
-            </p>
-
-            <div class="flex items-center gap-4">
-              <el-checkbox v-model="copyOut">{{ t('pack.copyOut') }}</el-checkbox>
-              <span class="mono truncate text-[11px] text-slate-400 dark:text-slate-500" :title="outputDir">
-                {{ t('pack.outputDir') }}: {{ outputDir }}
-              </span>
-            </div>
+            <el-checkbox v-model="copyOut">{{ t('pack.copyOut') }}</el-checkbox>
 
             <div class="flex items-center gap-2">
               <el-button
@@ -209,7 +198,6 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Box, Download, EditPen, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useSystemStore } from '@/stores/system'
 import { downloadEntry, readFile } from '@/api/endpoints'
 import type { Artifact } from '@/api/types'
 import { humanSize } from '@/utils/format'
@@ -222,10 +210,8 @@ const props = defineProps<{ project: string }>()
 const { t, te } = useI18n()
 const hostAvailable = computed(() => isHostAvailable())
 const workspace = useWorkspaceStore()
-const system = useSystemStore()
 
 const state = computed(() => workspace.state(props.project))
-const outputDir = computed(() => system.info?.outputDir ?? '')
 const multi = ref(state.value.settings.multiPlatform)
 const selectedPlatforms = ref<string[]>([...state.value.settings.platforms])
 const serverDir = ref(state.value.settings.serverDir)

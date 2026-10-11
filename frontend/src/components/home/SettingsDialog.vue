@@ -14,14 +14,18 @@
       <!-- 主题 -->
       <section>
         <p class="label-text mb-2">{{ t('settings.theme.title') }}</p>
-        <el-radio-group :model-value="theme.mode" @update:model-value="onTheme">
-          <el-radio-button value="light">{{ t('settings.theme.light') }}</el-radio-button>
-          <el-radio-button value="dark">{{ t('settings.theme.dark') }}</el-radio-button>
-          <el-radio-button value="system">{{ t('settings.theme.system') }}</el-radio-button>
-        </el-radio-group>
-        <p class="mt-2 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-          {{ themeHint }}
-        </p>
+        <!-- 三个主题各是一个独立按钮（不是连成一排的分段控件） -->
+        <div class="flex flex-wrap items-center gap-2">
+          <el-button
+            v-for="mode in THEME_MODES"
+            :key="mode"
+            size="small"
+            :type="theme.mode === mode ? 'primary' : 'default'"
+            @click="onTheme(mode)"
+          >
+            {{ t(`settings.theme.${mode}`) }}
+          </el-button>
+        </div>
       </section>
 
       <!-- 目录设置 -->
@@ -128,6 +132,9 @@ import { useThemeStore, type ThemeMode } from '@/stores/theme'
 
 type Slot = 'projectRoot' | 'outputDir'
 
+/** 主题按钮的取值顺序，文案走 i18n 的 settings.theme.<mode>。 */
+const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system']
+
 /** 仓库地址：关于一节里的图标链到这里。 */
 const REPO_URL = 'https://github.com/shuangji66/fpkstudio'
 type Translate = (key: string, named?: Record<string, unknown>) => string
@@ -148,15 +155,6 @@ const busy = ref(false)
 
 const hostAvailable = computed(() => isHostAvailable())
 
-const themeHint = computed(() => {
-  if (theme.mode !== 'system') {
-    return t('settings.theme.hintFixed', { theme: t(`settings.theme.${theme.resolved}`) })
-  }
-  return theme.hostThemeValue
-    ? t('settings.theme.hintHost', { theme: t(`settings.theme.${theme.resolved}`) })
-    : t('settings.theme.hintBrowser', { theme: t(`settings.theme.${theme.resolved}`) })
-})
-
 const fail = (err: unknown): string => trimErrorMessage(t as Translate, te, err)
 
 /** 目录能不能在文件管理器里打开：宿主能力 + 有路径（默认目录也算有）。 */
@@ -171,8 +169,8 @@ async function openFolder(path: string | undefined) {
   }
 }
 
-function onTheme(value: string | number | boolean | undefined) {
-  theme.setMode(String(value) as ThemeMode)
+function onTheme(mode: ThemeMode) {
+  theme.setMode(mode)
 }
 
 const semanticOf = (slot: Slot): string => {

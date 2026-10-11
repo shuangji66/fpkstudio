@@ -1,16 +1,12 @@
 <template>
   <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-4">
     <div class="mx-auto max-w-5xl">
-      <p class="rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-        {{ t('shortcuts.hint') }}
-      </p>
-
       <!--
         流式瀑布：卡片按列依次落下，而不是被网格一行一行地拉齐。
         多列布局（columns）而不是 grid，正是为了让长短不一的几组各自紧贴上一张卡片，
         组与组之间不留「高度差」造成的空洞；窄屏只有一列。
       -->
-      <div class="mt-3 columns-1 gap-3 lg:columns-2">
+      <div class="columns-1 gap-3 lg:columns-2">
         <section
           v-for="group in groups"
           :key="group.key"

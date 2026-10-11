@@ -40,15 +40,27 @@
 
         <span class="flex-1" />
 
-        <!-- 显示切换：平铺（卡片）/ 列表（一行一个），记住上一次的选择 -->
-        <el-radio-group v-model="view" size="small">
-          <el-radio-button value="grid" :title="t('home.viewGrid')">
-            <el-icon class="mr-1 align-[-2px]"><Grid /></el-icon>{{ t('home.viewGrid') }}
-          </el-radio-button>
-          <el-radio-button value="list" :title="t('home.viewList')">
-            <el-icon class="mr-1 align-[-2px]"><Menu /></el-icon>{{ t('home.viewList') }}
-          </el-radio-button>
-        </el-radio-group>
+        <!-- 显示切换：平铺（卡片）/ 列表（一行一个），两个独立按钮，记住上一次的选择 -->
+        <div class="flex items-center gap-2">
+          <el-button
+            size="small"
+            :type="view === 'grid' ? 'primary' : 'default'"
+            :icon="Grid"
+            :title="t('home.viewGrid')"
+            @click="view = 'grid'"
+          >
+            {{ t('home.viewGrid') }}
+          </el-button>
+          <el-button
+            size="small"
+            :type="view === 'list' ? 'primary' : 'default'"
+            :icon="Menu"
+            :title="t('home.viewList')"
+            @click="view = 'list'"
+          >
+            {{ t('home.viewList') }}
+          </el-button>
+        </div>
 
         <!-- 设置：主题 + 项目根目录 / fpk 输出目录 -->
         <el-button size="small" :icon="Setting" @click="settingsOpen = true">
