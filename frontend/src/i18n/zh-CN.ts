@@ -33,6 +33,7 @@ export default {
     close: '关闭标签',
     closeOthers: '关闭其他标签',
     closeDirty: '「{name}」还有未保存的改动，确定关闭吗？',
+    closeOthersDirty: '「{names}」还有未保存的改动，确定关闭其他标签吗？',
     project: '项目',
   },
   home: {

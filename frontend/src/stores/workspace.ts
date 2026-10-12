@@ -213,6 +213,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return s
   }
 
+  /**
+   * 丢掉一个项目的全部状态（项目标签关掉时调用，见 ProjectTab 的卸载钩子）。
+   *
+   * 这份状态是**项目目录在内存里的一份副本**：树、打开过的文件、打包配置、产物……
+   * 而项目就躺在磁盘上，应用外面完全可能被动过（换一份 manifest、从别处导进来一份、
+   * 删掉再建一个同名的）。留着它的表现就是「关掉再打开，看到的还是上一次那一份」——
+   * 树、编辑器里的内容全是旧的，只有手动刷新才更新；换个同名的项目甚至会直接把上一个
+   * 项目的文件列出来。
+   *
+   * 所以关标签 = 退出项目：下次进来走 `ensure` 的冷路径，重新读盘。
+   */
+  function forget(name: string) {
+    delete states.value[name]
+  }
+
   /** 打开项目时做一次完整的初始化。 */
   async function ensure(name: string) {
     const s = state(name)
@@ -845,6 +860,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     states,
     state,
     ensure,
+    forget,
     loadDir,
     toggleDir,
     refreshDir,

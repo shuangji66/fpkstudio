@@ -3,7 +3,7 @@
  *
  *   npm run check:workspace
  *
- * 盯三件事，都是踩过的：
+ * 盯四件事，都是踩过的：
  *  1. **重命名一个打开着的文件**：标签要跟着改名，而 `origin` / `dirty` / `draft` 一个
  *     都不能丢。编辑器宿主是按 `file.path` 做 key 的，key 一变组件就重建、内容只能从
  *     `draft || origin` 里取——清掉 origin 的表现是「改个文件名，编辑框空了，随手敲一个
@@ -11,6 +11,9 @@
  *  2. **重命名目录**：目录里已经打开的文件标签路径要一起改，否则保存会照着旧路径写回去，
  *     凭空「复活」一个文件（后端写文件会顺手建父目录）。
  *  3. **重名 / 非法名字要拒绝**：rename(2) 会直接覆盖同名文件，用户只是想改个名。
+ *  4. **关掉项目标签**（`forget`）之后重新打开：内存里那份状态要真的没了、重新读一遍盘。
+ *     项目在应用外面被换过（手动换掉文件、从别处导入一份）时，留着旧状态的表现是
+ *     「关掉再打开还是老内容，得手动刷新」。
  *
  * 跑的是真实的 store：window / localStorage / fetch 自己搭，后端用一个内存文件表模拟。
  * 不是集成测试，只是把上面几条判据钉住，免得以后又被改回去。
@@ -217,6 +220,26 @@ const tabOf = (project, path) => workspace.state(project).files.find((f) => f.pa
   check('删除目录后没有残留的缓存键', workspace.state('demo').dirs['demo/dir3'], undefined)
   check('删除目录后没有残留的展开状态', workspace.state('demo').expanded['demo/dir3'], undefined)
   check('删除目录后子标签被关掉', tabOf('demo', 'dir3/renamed.txt'), undefined)
+}
+
+// ---- 6. 关掉项目标签（forget）之后重新打开：看到的必须是磁盘上现在这一份 ----
+{
+  await workspace.ensure('demo')
+  const before = await workspace.openFile('demo', 'demo/renamed.txt')
+  check('关标签前读到的还是内存里那份', before.origin, 'EDITED BUT UNSAVED\n')
+
+  // 应用外面换了文件：用户手动换掉、或者从别处导进来一份
+  files.set('demo/renamed.txt', 'REPLACED OUTSIDE\n')
+  files.set('demo/added-later.txt', 'NEW\n')
+
+  workspace.forget('demo') // 关标签
+  check('关标签后状态被丢掉', workspace.states.demo, undefined)
+
+  await workspace.ensure('demo') // 再打开
+  const listed = (workspace.state('demo').dirs.demo ?? []).map((entry) => entry.name)
+  check('再打开会重新列目录', listed.includes('added-later.txt'), true)
+  const after = await workspace.openFile('demo', 'demo/renamed.txt')
+  check('再打开读到的是磁盘上的新内容', after.origin, 'REPLACED OUTSIDE\n')
 }
 
 console.log(failed ? `\n${failed} 项不通过` : '\n文件管理器 store 检查全部通过')

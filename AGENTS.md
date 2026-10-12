@@ -160,6 +160,11 @@ frontend/src/
 
 ## 已经踩过的坑
 
+- **关掉项目标签要连内存状态一起丢**（`workspace.forget`，挂在 `ProjectTab` 的卸载钩子
+  上）。项目在磁盘上，应用外面随时可能被换掉（手动换文件、从别处导入一份、删掉再建一个
+  同名的），状态留着就是「关掉再打开还是老内容，只有手动刷新才更新」，同名重建时还会把
+  上一个项目的文件列出来。别改成在某个关闭入口里清——漏一个入口就少一条路生效；也正
+  因为关标签会丢状态，「关闭其他标签」必须先问一声未保存的改动（`TabBar.closeOthers`）。
 - `fnpack create` 失败时**退出码仍是 0**，错误只打在 stdout 上——判据要看目录 / manifest
   有没有真的落地（见 `Manager.Create`）。
 - `fnpack` 模板自带 `.DS_Store`，在部分文件系统上会让 `fnpack build` 直接失败，
@@ -207,6 +212,12 @@ frontend/src/
   `demo/app/server` 这种带项目名的写法；返回里的路径（解压结果的 `dir`）同样是这一套。
   **别再加一次项目名前缀**：算出来的缓存键（`state.dirs` 的键）根本不存在，`refreshDir`
   会静默什么都不做，表现是「解压成功了，但列表里看不到新文件」。
+- **验「静态资源有没有缓存」别开着 DevTools 的「禁用缓存」**（Chrome 一开 DevTools 就默认勾着），
+  也别用 Ctrl+Shift+R / Shift+F5——这两种都绕过缓存，看到的是「每个 asset 都 200 + 完整响应体」，
+  和「响应头没生效」长得一模一样。三档要分清：头是 `immutable` 时**普通刷新一个 asset 请求都没有**；
+  头是 `no-cache` 时是 **304**；全 200 才说明那次刷新绕过了缓存。别靠肉眼盯 DevTools，
+  用 `curl -D-` 看头、用 `performance.getEntriesByType('resource')` 的 `transferSize`（0 = 命中缓存）
+  或用反代/网关自己的 access log（它记的是真的请求）来判。
 - 系统 `tar` 对越界成员（`/etc/passwd`、`../x`）**只给警告、退出码还是 0**，靠它挡不住；
   `unzip` 更省事——它把越界名字截断成一个安全名字照写不误，退出码给 1。所以
   `fsx.Extract` 解压前先列一遍成员名（tar 用 `tar -t`、zip 用 `unzip -Z1`）自己判，

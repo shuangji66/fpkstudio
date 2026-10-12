@@ -73,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import FileTree from '@/components/project/FileTree.vue'
 import FileTabs from '@/components/project/FileTabs.vue'
@@ -130,4 +130,17 @@ onMounted(async () => {
   if (!projects.count) await projects.refresh()
   await workspace.ensure(props.name)
 })
+
+/**
+ * 标签被关掉 = 退出这个项目：把它在内存里的那份状态一起丢掉，下次打开重新读盘
+ * （留着它的坏处见 `forget` 的注释——项目在磁盘上，应用外面随时可能被换掉）。
+ *
+ * 用卸载（而不是 beforeUnmount）：先让子组件（编辑器宿主）把没保存的草稿交回 store，
+ * 之后才丢；反过来的话那些回调会往一份刚被丢掉的状态里写。
+ *
+ * 这里也是「关标签」的唯一收口：标签上的关闭按钮、右键的「关闭其他标签」、项目被重命名
+ * / 删除时的关标签，最后都是这个组件被卸载。别改成在某个关闭入口里清——漏掉一个入口的
+ * 表现就是「从那条路关掉再打开，看到的还是老内容」。
+ */
+onUnmounted(() => workspace.forget(props.name))
 </script>

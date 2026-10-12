@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,12 @@ import (
 // newTestServer 造一个挂在临时数据目录上的 Server（不嵌前端，只测 API）。
 func newTestServer(t *testing.T) (*Server, string) {
 	t.Helper()
+	return newTestServerWeb(t, "/", os.DirFS(t.TempDir()))
+}
+
+// newTestServerWeb 同上，额外指定 baseURL 与内嵌的前端产物（测静态资源用）。
+func newTestServerWeb(t *testing.T, baseURL string, web fs.FS) (*Server, string) {
+	t.Helper()
 
 	dataDir := t.TempDir()
 	cfg := &config.Config{
@@ -29,7 +36,7 @@ func newTestServer(t *testing.T) (*Server, string) {
 		DataDir:     dataDir,
 		ProjectsDir: filepath.Join(dataDir, "projects"),
 		OutputDir:   filepath.Join(dataDir, "output"),
-		BaseURL:     "/",
+		BaseURL:     baseURL,
 		FnpackBin:   "fnpack",
 		LogLevel:    "error",
 		StateFile:   filepath.Join(dataDir, "state.json"),
@@ -47,7 +54,7 @@ func newTestServer(t *testing.T) (*Server, string) {
 	}
 	t.Cleanup(prj.Close)
 
-	s := New(cfg, log, fn, prj, os.DirFS(t.TempDir()), state.Empty(cfg.StateFile), trimapi.New("", "", log))
+	s := New(cfg, log, fn, prj, web, state.Empty(cfg.StateFile), trimapi.New("", "", log))
 	return s, dataDir
 }
 

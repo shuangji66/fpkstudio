@@ -47,7 +47,7 @@
       <button
         type="button"
         class="block w-full whitespace-nowrap px-3 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
-        @click="tabs.closeOthers(menu.id)"
+        @click="closeOthers"
       >
         {{ t('tab.closeOthers') }}
       </button>
@@ -113,5 +113,33 @@ async function close(tab: Tab) {
     }
   }
   tabs.close(tab.id)
+}
+
+/**
+ * 关闭其他标签。
+ *
+ * 被关掉的项目标签里只要有没保存的改动，就要和单关一个标签走同一套确认：关标签就是
+ * 退出项目（工作区状态跟着丢，见 ProjectTab 的卸载钩子），不问一声的话这里就成了唯一
+ * 一条会默默丢掉改动的路。
+ */
+async function closeOthers() {
+  const dirtyTitles: string[] = []
+  for (const tab of tabs.tabs) {
+    // 留下的是弹菜单那一张（menu.id），其余全部关掉——只有项目标签有工作区状态
+    if (!tab.closable || tab.id === menu.id || tab.kind !== 'project') continue
+    if (dirty(tab.project) > 0) dirtyTitles.push(tab.title)
+  }
+  if (dirtyTitles.length) {
+    try {
+      await ElMessageBox.confirm(
+        t('tab.closeOthersDirty', { names: dirtyTitles.join(' / ') }),
+        t('common.tip'),
+        { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') },
+      )
+    } catch {
+      return
+    }
+  }
+  tabs.closeOthers(menu.id)
 }
 </script>

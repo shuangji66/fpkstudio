@@ -44,7 +44,14 @@ func (s *Server) staticHandler() http.Handler {
 			return
 		}
 
-		if strings.Contains(name, "/assets/") {
+		// 前端产物分两类：`assets/` 下的文件名带内容哈希（Vite 生成的 chunk / css），
+		// 内容一变名字就变，可以放心让浏览器缓存一年；其余（index.html、图标这类固定
+		// 名字的文件）每次都得回源确认，不然升级之后用户拿到的还是旧页面。
+		//
+		// 判据用 `name` 这个**去掉前导斜杠**的相对路径（形状是 `assets/xxx.js`）。写成
+		// Contains(name, "/assets/") 的话只有嵌套目录下的 assets 才认得出来，根目录这份
+		// 会全部落进 no-cache——表现就是「缓存头加了，但资源每次都在回源」。
+		if strings.HasPrefix(name, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-cache")

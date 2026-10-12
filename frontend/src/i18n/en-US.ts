@@ -33,6 +33,7 @@ export default {
     close: 'Close tab',
     closeOthers: 'Close other tabs',
     closeDirty: '"{name}" has unsaved changes. Close anyway?',
+    closeOthersDirty: '"{names}" has unsaved changes. Close the other tabs anyway?',
     project: 'Project',
   },
   home: {
