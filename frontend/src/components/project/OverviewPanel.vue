@@ -7,9 +7,12 @@
       {{ state.error }}
     </div>
 
-    <div
-      class="mx-auto grid max-w-6xl grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_24rem]"
-    >
+    <!--
+      宽屏下左右各占一半：左边打包 / 结果 / 产物，右边 manifest 预览。
+      （清单那一列原来是固定 24rem 的，桌面宽屏上会显得偏窄，而且右边的空白用不上。）
+      窄屏仍然是一列。
+    -->
+    <div class="mx-auto grid max-w-6xl grid-cols-1 items-start gap-3 lg:grid-cols-2">
       <!-- 左列：发布设置 / 结果 / 产物 -->
       <div class="space-y-3">
         <!-- 架构选择 -->
