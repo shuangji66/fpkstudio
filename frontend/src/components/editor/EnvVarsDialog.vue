@@ -34,10 +34,16 @@
           {{ t(section.noteKey) }}
         </p>
         <ul class="divide-y divide-slate-100 dark:divide-slate-700">
-          <li v-for="row in section.rows" :key="row.name" class="flex items-start gap-2 px-3 py-1">
+          <!--
+            flex-wrap：一行放不下就换行，不要让说明被挤成 0 宽。
+            常用运行时那几条是一整行 export PATH=…（手机宽度下比弹窗还宽），
+            复制按钮得能自己折行（min-w-0 break-all，shrink-0 会顶住不缩），
+            这时说明会整块落到下一行，而不是被压成一条竖着排字的 0 宽列。
+          -->
+          <li v-for="row in section.rows" :key="row.name" class="flex flex-wrap items-start gap-2 px-3 py-1">
             <button
               type="button"
-              class="mono shrink-0 rounded px-1 text-[11px] text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              class="mono min-w-0 rounded px-1 text-left text-[11px] break-all text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
               :title="t('envVars.copyHint')"
               @click="copy(row.name)"
             >
@@ -86,6 +92,10 @@ interface Section {
  *
  * 清单与说明沿用 fnpackup 的「环境变量」页——这些名字是飞牛 install.sh 里
  * 约定的，写生命周期脚本时按这张表查。
+ *
+ * `vars` 里的项会渲染成 `${<项>}`，所以除了裸变量名，也可以放一段**变量上的 shell
+ * 展开**（比如取列表里的第一项）：点一下复制走的就是整段能直接粘进脚本的写法。
+ * 这种项在语言包里的键就是它自己（`envVars.vars.<项>`）。
  */
 const STATIC_GROUPS: { key: string; labelKey: string; vars: string[] }[] = [
   { key: 'basic', labelKey: 'envVars.basic', vars: ['TRIM_APPNAME', 'TRIM_APPVER', 'TRIM_OLD_APPVER'] },
@@ -117,7 +127,12 @@ const STATIC_GROUPS: { key: string; labelKey: string; vars: string[] }[] = [
       'TRIM_RUN_GID',
     ],
   },
-  { key: 'share', labelKey: 'envVars.dataShare', vars: ['TRIM_DATA_SHARE_PATHS'] },
+  {
+    key: 'share',
+    labelKey: 'envVars.dataShare',
+    // 除了裸变量，这里再放一段 shell 展开：脚本里多数时候只要第一个共享路径
+    vars: ['TRIM_DATA_SHARE_PATHS', 'TRIM_DATA_SHARE_PATHS%%:*'],
+  },
   {
     key: 'temp',
     labelKey: 'envVars.tempLog',
@@ -147,6 +162,31 @@ const STATIC_GROUPS: { key: string; labelKey: string; vars: string[] }[] = [
   },
 ]
 
+/**
+ * 常用运行时。
+ *
+ * 飞牛把各语言的运行时装在 /var/apps/ 下，脚本里跑 node / java / python 之前得先把
+ * 它挂进 PATH。这些不是「变量」而是一整条命令，所以单独列一组、原样列出来点一下复制。
+ *
+ * 命令里的版本号是占位符（`<version>`）：复制走的是**模板**，用户按自己机器上的版本
+ * 改一下就行，所以另一份「能直接用的实例」不作为可复制项列出来——只在说明里点一句
+ * 例子（`example`）长什么样。
+ */
+const RUNTIME_ROWS: { name: string; example: string }[] = [
+  {
+    name: 'export PATH=/var/apps/nodejs_v<version>/target/bin:$PATH',
+    example: 'nodejs_v24',
+  },
+  {
+    name: 'export PATH=/var/apps/java-<version>-openjdk/target/bin:$PATH',
+    example: 'java-21-openjdk',
+  },
+  {
+    name: 'export PATH=/var/apps/python<version>/target/bin:$PATH',
+    example: 'python312',
+  },
+]
+
 const WIZARD_FILES: { file: string; labelKey: string }[] = [
   { file: 'install', labelKey: 'envVars.wizardInstall' },
   { file: 'uninstall', labelKey: 'envVars.wizardUninstall' },
@@ -167,6 +207,14 @@ const sections = computed<Section[]>(() => [
       desc: t(`envVars.vars.${name}`),
     })),
   })),
+  {
+    key: 'runtime',
+    labelKey: 'envVars.runtime',
+    rows: RUNTIME_ROWS.map((row) => ({
+      name: row.name,
+      desc: t('envVars.runtimeExample', { example: row.example }),
+    })),
+  },
   {
     key: 'manifest',
     labelKey: 'envVars.manifest',

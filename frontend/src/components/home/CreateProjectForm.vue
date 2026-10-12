@@ -37,8 +37,6 @@
         {{ loading ? t('home.create.creating') : t('home.create.submit') }}
       </el-button>
     </div>
-
-    <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{{ t('home.create.hint') }}</p>
   </div>
 </template>
 

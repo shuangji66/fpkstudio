@@ -218,11 +218,14 @@ frontend/src/
 - `#app` 是 `position: fixed` 的（钉可视视口），**别再给它加 `transform`**：transform 会
   给里面的 `position: fixed` 元素换一个包含块，弹层会全歪。弹窗是 teleport 到 body 的，
   不受影响。
-- 触屏上没有「把鼠标移开」这个动作：工具栏按钮的 `el-tooltip` 点一下就**一直挂在屏幕上**
-  挡着内容。文件管理器工具栏的提示都给了 `:hide-after`（`TOOLTIP_HIDE`），**移动端干脆
-  整个禁用**（`:disabled="layout.isMobile"`）；新加提示按钮记得跟上。同理
-  `opacity-0 group-hover:opacity-100` 这种「悬停才出现」的按钮在触屏上等于不存在
-  （项目标签的关闭按钮就踩过），移动端要常显。
+- 触屏上没有「把鼠标移开」这个动作：工具栏按钮的自绘提示（`el-tooltip`）点一下就
+  **一直挂在屏幕上**挡着内容；自绘的那一层还得自己管显隐，鼠标点完按钮移开时也容易
+  留在屏幕上不消失。**工具栏按钮的说明一律挂原生 `title`**（同时给 `aria-label`）：
+  系统提示由浏览器接管，移开即消失、触屏上根本不出现。文件管理器的两个工具栏
+  （`FileTree.vue` / `FileBrowser.vue`）已经全部改完；只有要富文本说明的地方
+  （`ManifestEditor.vue` 字段旁那个问号）还留着 `el-tooltip`。**新加工具栏按钮不要再加
+  `el-tooltip`**。同理 `opacity-0 group-hover:opacity-100` 这种「悬停才出现」的按钮
+  在触屏上等于不存在（项目标签的关闭按钮就踩过），移动端要常显。
 - **移动端输入框字号是 16px**（`style.css`）：iOS Safari 聚焦小于 16px 的输入框会把整个
   页面放大且不缩回去，`user-scalable=no` 从 iOS 10 起被忽略，只能靠字号挡。别把窄屏下
   的输入框字号改回 12–14px。

@@ -67,7 +67,6 @@ export default {
       withoutUi: 'No entry',
       submit: 'Create',
       creating: 'Creating…',
-      hint: 'Runs fnpack create for the standard skeleton, then adds the building/ workspace fpkstudio needs.',
     },
     import: {
       title: 'Import fpk',
@@ -232,8 +231,6 @@ export default {
     entryPrefixPlaceholder: 'e.g. niubi',
     entryPrefixHint: 'Fill in a prefix to generate the <prefix>_256.png / <prefix>_64.png targets for this entry.',
     removeEntry: 'Remove this group',
-    targetHint:
-      'Size is the internal processing resolution (256 is plenty). The small scale is relative to the large icon and defaults to "same"; pick 1/4 to match the icon_64.png filename. Writing overwrites existing files.',
   },
   envVars: {
     button: 'Env vars',
@@ -258,6 +255,8 @@ export default {
     authPath: 'Authorized directories',
     versionInfo: 'Version information',
     sysFeature: 'System features',
+    runtime: 'Common runtimes',
+    runtimeExample: 'e.g. {example}',
     vars: {
       TRIM_APPNAME: 'App name (from appname in manifest)',
       TRIM_APPVER: 'App version (from version in manifest)',
@@ -279,6 +278,7 @@ export default {
       TRIM_RUN_UID: 'User ID running the script',
       TRIM_RUN_GID: 'Group ID running the script',
       TRIM_DATA_SHARE_PATHS: 'Data sharing path list, separated by colons',
+      'TRIM_DATA_SHARE_PATHS%%:*': 'First data sharing path in the list (the list is colon-separated; %%:* cuts everything from the first colon on)',
       TRIM_TEMP_LOGFILE: 'System log file path (user-visible logs)',
       TRIM_TEMP_UPGRADE_FOLDER: 'Temporary directory for upgrades',
       TRIM_PKGINST_TEMP_DIR: 'Temporary directory for package extraction',

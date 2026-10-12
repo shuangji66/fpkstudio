@@ -2,63 +2,91 @@
   <div class="flex h-full min-h-0 flex-col">
     <!--
       工具栏：一个文件管理器该有的东西都在这儿。窄面板放不下一行时会自己折行，
-      按钮都只有图标 + tooltip，所以折行也不会把某一组拆散。
+      按钮都只有图标（文字说明挂在原生 title 上），所以折行也不会把某一组拆散。
     -->
     <div class="flex shrink-0 flex-wrap items-center gap-0 border-b border-slate-200 dark:border-slate-700 px-1 py-0.5">
-      <el-tooltip :content="t('files.back')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button
-          text
-          size="default"
-          class="tree-tool"
-          :icon="ArrowLeft"
-          :disabled="!state.browserBack.length"
-          @click="workspace.browseBack(project)"
-        />
-      </el-tooltip>
-      <el-tooltip :content="t('files.forward')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button
-          text
-          size="default"
-          class="tree-tool"
-          :icon="ArrowRight"
-          :disabled="!state.browserForward.length"
-          @click="workspace.browseForward(project)"
-        />
-      </el-tooltip>
-      <el-tooltip :content="t('common.refresh')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button text size="default" class="tree-tool" :icon="Refresh" @click="refresh" />
-      </el-tooltip>
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="ArrowLeft"
+        :disabled="!state.browserBack.length"
+        :title="t('files.back')"
+        :aria-label="t('files.back')"
+        @click="workspace.browseBack(project)"
+      />
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="ArrowRight"
+        :disabled="!state.browserForward.length"
+        :title="t('files.forward')"
+        :aria-label="t('files.forward')"
+        @click="workspace.browseForward(project)"
+      />
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="Refresh"
+        :title="t('common.refresh')"
+        :aria-label="t('common.refresh')"
+        @click="refresh"
+      />
 
       <span class="mx-1 h-4 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
 
-      <el-tooltip :content="t('tree.newFile')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button text size="default" class="tree-tool" :icon="DocumentAdd" @click="create(false)" />
-      </el-tooltip>
-      <el-tooltip :content="t('tree.newDir')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button text size="default" class="tree-tool" :icon="FolderAdd" @click="create(true)" />
-      </el-tooltip>
-      <el-tooltip :content="t('tree.upload')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button text size="default" class="tree-tool" :icon="UploadFilled" @click="pickFiles" />
-      </el-tooltip>
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="DocumentAdd"
+        :title="t('tree.newFile')"
+        :aria-label="t('tree.newFile')"
+        @click="create(false)"
+      />
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="FolderAdd"
+        :title="t('tree.newDir')"
+        :aria-label="t('tree.newDir')"
+        @click="create(true)"
+      />
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="UploadFilled"
+        :title="t('tree.upload')"
+        :aria-label="t('tree.upload')"
+        @click="pickFiles"
+      />
 
       <span class="mx-1 h-4 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
 
-      <el-tooltip
-        :content="state.browserView === 'list' ? t('files.grid') : t('files.list')"
-        placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile"
-      >
-        <el-button
-          text
-          size="default"
-          class="tree-tool"
-          :icon="state.browserView === 'list' ? Grid : List"
-          @click="workspace.setBrowserView(project, state.browserView === 'list' ? 'grid' : 'list')"
-        />
-      </el-tooltip>
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="state.browserView === 'list' ? Grid : List"
+        :title="state.browserView === 'list' ? t('files.grid') : t('files.list')"
+        :aria-label="state.browserView === 'list' ? t('files.grid') : t('files.list')"
+        @click="workspace.setBrowserView(project, state.browserView === 'list' ? 'grid' : 'list')"
+      />
       <!-- 移动端固定就是这一种形态，没有左栏可以切回去 -->
-      <el-tooltip v-if="!mobile" :content="t('files.switchToTree')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button text size="default" class="tree-tool" :icon="Fold" @click="toTree" />
-      </el-tooltip>
+      <el-button
+        v-if="!mobile"
+        text
+        size="default"
+        class="tree-tool"
+        :icon="Fold"
+        :title="t('files.switchToTree')"
+        :aria-label="t('files.switchToTree')"
+        @click="toTree"
+      />
     </div>
 
     <!-- 路径：点哪一段就去哪一层，省得只靠「后退」一层层退 -->
@@ -214,7 +242,6 @@ import {
 } from '@element-plus/icons-vue'
 import type { FsEntry } from '@/api/types'
 import { useUpload } from './useUpload'
-import { useLayoutStore } from '@/stores/layout'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { formatTime, humanSize, isArchive } from '@/utils/format'
 
@@ -223,15 +250,6 @@ const props = defineProps<{ project: string; mobile?: boolean }>()
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const { upload } = useUpload()
-const layout = useLayoutStore()
-
-/**
- * 工具提示显示多久后自动收起来。
- *
- * 触屏上没有「把鼠标移开」这个动作，点一下按钮提示会一直挂在屏幕上挡着内容；
- * 给个上限即可——鼠标用户也只是看到它自己收回去，不影响使用。
- */
-const TOOLTIP_HIDE = 1500
 
 const state = computed(() => workspace.state(props.project))
 

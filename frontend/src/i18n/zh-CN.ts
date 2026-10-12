@@ -65,7 +65,6 @@ export default {
       withoutUi: '不带入口',
       submit: '创建',
       creating: '正在创建…',
-      hint: '会调用 fnpack create 生成标准项目骨架，再补上 fpkstudio 需要的 building/ 工作目录。',
     },
     import: {
       title: '导入 fpk',
@@ -228,8 +227,6 @@ export default {
     entryPrefixPlaceholder: '比如 niubi',
     entryPrefixHint: '填上前缀才会生成这个入口的 <前缀>_256.png / <前缀>_64.png 两条写入项。',
     removeEntry: '删除这组',
-    targetHint:
-      '尺寸是内部处理分辨率（256 就够），小图缩放决定小图相对大图的尺寸，默认「不变」；想跟文件名（icon_64.png）对上就选 1/4。写入会覆盖同名文件。',
   },
   envVars: {
     button: '环境变量',
@@ -254,6 +251,8 @@ export default {
     authPath: '授权目录',
     versionInfo: '版本信息',
     sysFeature: '系统特征',
+    runtime: '常用运行时',
+    runtimeExample: '例如 {example}',
     vars: {
       TRIM_APPNAME: '应用的名称（来自 manifest 中的 appname）',
       TRIM_APPVER: '应用的版本号（来自 manifest 中的 version）',
@@ -275,6 +274,7 @@ export default {
       TRIM_RUN_UID: '当前执行脚本的用户 ID',
       TRIM_RUN_GID: '当前执行脚本的用户组 ID',
       TRIM_DATA_SHARE_PATHS: '数据共享路径列表，多个路径用冒号分隔',
+      'TRIM_DATA_SHARE_PATHS%%:*': '取列表里的第一个数据共享路径（列表用冒号分隔，%%:* 从第一个冒号起全部砍掉）',
       TRIM_TEMP_LOGFILE: '系统日志文件路径（用户可见的日志）',
       TRIM_TEMP_UPGRADE_FOLDER: '升级过程的临时目录',
       TRIM_PKGINST_TEMP_DIR: '安装包解压的临时目录',

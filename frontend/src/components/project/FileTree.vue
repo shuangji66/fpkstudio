@@ -2,22 +2,34 @@
   <div class="flex h-full min-h-0 flex-col">
     <!-- 工具栏：按钮紧凑排布，窄侧边栏（最小 180px）也放得下；再窄就换行 -->
     <div class="flex shrink-0 flex-wrap items-center gap-0 border-b border-slate-200 dark:border-slate-700 px-1 py-0.5">
-      <el-tooltip :content="t('common.refresh')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button text size="default" class="tree-tool" :icon="Refresh" @click="refreshAll" />
-      </el-tooltip>
-      <el-tooltip :content="allCollapsed ? t('tree.expandAll') : t('tree.collapseAll')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button
-          text
-          size="default"
-          class="tree-tool"
-          :icon="allCollapsed ? Expand : Fold"
-          @click="allCollapsed ? expandAll() : collapseAll()"
-        />
-      </el-tooltip>
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="Refresh"
+        :title="t('common.refresh')"
+        :aria-label="t('common.refresh')"
+        @click="refreshAll"
+      />
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="allCollapsed ? Expand : Fold"
+        :title="allCollapsed ? t('tree.expandAll') : t('tree.collapseAll')"
+        :aria-label="allCollapsed ? t('tree.expandAll') : t('tree.collapseAll')"
+        @click="allCollapsed ? expandAll() : collapseAll()"
+      />
       <!-- 文件管理器的另一种形态：固定「文件」标签 + 列表 / 网格 -->
-      <el-tooltip :content="t('files.switchToTabs')" placement="bottom" :hide-after="TOOLTIP_HIDE" :disabled="layout.isMobile">
-        <el-button text size="default" class="tree-tool" :icon="Switch" @click="toTabs" />
-      </el-tooltip>
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="Switch"
+        :title="t('files.switchToTabs')"
+        :aria-label="t('files.switchToTabs')"
+        @click="toTabs"
+      />
     </div>
 
     <div
@@ -175,7 +187,6 @@ import {
   Switch,
 } from '@element-plus/icons-vue'
 import { useUpload } from './useUpload'
-import { useLayoutStore } from '@/stores/layout'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { isArchive } from '@/utils/format'
 
@@ -184,15 +195,6 @@ const props = defineProps<{ project: string }>()
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const { upload } = useUpload()
-const layout = useLayoutStore()
-
-/**
- * 工具提示显示多久后自动收起来。
- *
- * 触屏上没有「把鼠标移开」这个动作，点一下按钮提示会一直挂在屏幕上挡着内容；
- * 给个上限即可——鼠标用户也只是看到它自己收回去，不影响使用。
- */
-const TOOLTIP_HIDE = 1500
 
 const state = computed(() => workspace.state(props.project))
 

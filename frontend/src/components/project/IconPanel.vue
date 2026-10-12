@@ -181,8 +181,6 @@
               {{ progress.done }}/{{ progress.total }}
             </span>
           </div>
-
-          <p class="text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">{{ t('iconTab.targetHint') }}</p>
         </div>
       </div>
     </div>
