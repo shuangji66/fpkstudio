@@ -2,6 +2,7 @@ package fsx
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -30,9 +31,15 @@ import (
 //     的那一侧。）
 //  2. 先解到目标目录里的一个暂存目录，再逐个搬进来。暂存目录由这一次请求独占，
 //     归档里的符号链接够不到它外面；搬迁走 os.Root 的 rename，同样出不去。
-//  3. 归档里的**符号链接一律不还原**（见 dropLinks）：链接可以指向归档外面，
+//  3. 归档里的**符号链接与非普通文件一律不还原**（见 sanitizeExtracted）：链接可以指向归档外面，
 //     留在用户的项目里既没有用处，又会被后面的复制 / 打包顺着读出去。
 //  4. 所有写入都走 os.Root，不用拼绝对路径的 os.OpenFile。
+//  5. 归档本身必须是 Root 里的**普通文件**（requireRegularFile）：交给外部命令的是
+//     绝对路径（x.Abs），os.Root 在这一步帮不上忙，一个指向 Root 之外的符号链接就能
+//     让解压把外部文件的内容读进项目里。
+//  6. 解压结果里的**非普通文件一律删掉**（见 sanitizeExtracted）：tar 能造出 FIFO，
+//     而 FIFO 在没人写的时候 open 会一直阻塞——留在项目里，之后每次读它 / 解压它都会
+//     永久占住一个 goroutine 和一个子进程。
 //
 // 同名冲突一律**跳过**，不覆盖：解压最常见的情形是往一个已经存在的目录上补内容
 // （比如把 app.tgz 解到已经有 app/ 的项目里），静默覆盖用户的文件是不可逆的。
@@ -149,12 +156,17 @@ type ExtractResult struct {
 	Files int `json:"files"`
 	// Skipped 是因为同名已存在而跳过的文件数。
 	Skipped int `json:"skipped"`
-	// Links 是归档里带、但被丢掉没还原的符号链接数（见 dropLinks）。
+	// Links 是归档里带、但被丢掉没还原的符号链接数（见 sanitizeExtracted）。
 	Links int `json:"links"`
+	// Specials 是归档里带、但被丢掉没还原的非普通文件数（FIFO、设备节点、socket…）。
+	Specials int `json:"specials"`
 }
 
 // Extract 把 rel 指向的归档解压到它所在的目录。
-func (x *Root) Extract(rel string) (ExtractResult, error) {
+//
+// ctx 用来取消外部命令（客户端断开时不该留一个 tar 在后台跑）；超时由调用方给，
+// 见 server 里的 extractTimeout。
+func (x *Root) Extract(ctx context.Context, rel string) (ExtractResult, error) {
 	var res ExtractResult
 
 	rel, err := Rel(rel)
@@ -162,20 +174,17 @@ func (x *Root) Extract(rel string) (ExtractResult, error) {
 		return res, err
 	}
 	if rel == "." {
-		return res, errors.New("请选择一个压缩包")
+		return res, fmt.Errorf("%w：请选择一个压缩包", ErrInvalidPath)
 	}
-	fi, err := x.r.Lstat(rel)
-	if err != nil {
+	// 归档本身必须是 Root 里的普通文件：外部命令吃的是绝对路径（x.Abs），沙箱帮不上忙。
+	if err := x.requireRegularFile(rel); err != nil {
 		return res, err
-	}
-	if fi.IsDir() {
-		return res, errors.New("目标是目录，不能解压")
 	}
 
 	base := path.Base(rel)
 	kind, ok := ArchiveKindOf(base)
 	if !ok {
-		return res, fmt.Errorf("不支持的压缩包格式：%s", base)
+		return res, fmt.Errorf("%w：不支持的压缩包格式：%s", ErrInvalidPath, base)
 	}
 	res.Kind = string(kind)
 	res.Dir = path.Dir(rel)
@@ -191,22 +200,24 @@ func (x *Root) Extract(rel string) (ExtractResult, error) {
 
 	switch {
 	case kind.isTar():
-		err = x.untar(x.Abs(rel), staging)
+		err = x.untar(ctx, x.Abs(rel), staging)
 	case kind == KindZip:
-		err = x.unzip(rel, staging)
+		err = x.unzip(ctx, rel, staging)
 	default:
-		err = x.decompress(x.Abs(rel), base, staging, kind)
+		err = x.decompress(ctx, x.Abs(rel), base, staging, kind)
 	}
 	if err != nil {
 		return res, err
 	}
 
-	// 符号链接一律不还原：tar 和 zip 都可能在归档里带链接，而链接可以指向归档之外。
-	if links, err := x.dropLinks(staging); err != nil {
+	// 链接与 FIFO / 设备节点都不还原、也不留：链接可以指向归档之外，FIFO 会让之后
+	// 每一次读它都永久阻塞。数量报给界面，别让用户以为文件凭空少了。
+	links, specials, err := x.sanitizeExtracted(staging)
+	if err != nil {
 		return res, err
-	} else {
-		res.Links = links
 	}
+	res.Links = links
+	res.Specials = specials
 
 	if err := x.mergeInto(staging, res.Dir, &res); err != nil {
 		return res, err
@@ -214,7 +225,7 @@ func (x *Root) Extract(rel string) (ExtractResult, error) {
 	return res, nil
 }
 
-// dropLinks 删掉解压到 base 里的符号链接，返回删除的数量。
+// sanitizeExtracted 删掉解压到 base 里的符号链接与非普通文件，返回两类删除的数量。
 //
 // 和 unpackFPK 里「不还原链接」是同一条策略，只是那边是手写 tar 解析时顺手跳过的。
 // 这里必须显式做一次，因为 tar 和 unzip 默认都会把链接原样还原出来：
@@ -223,31 +234,64 @@ func (x *Root) Extract(rel string) (ExtractResult, error) {
 //
 // 这样的链接留在用户的项目里，界面上点不进去（os.Root 拒绝穿出去），却会在打包 /
 // 导出时被顺着读出去（CopyTree 打开的是链接指向的文件），内容就这么进了别人的 fpk。
-// 删掉它、并把数量报给界面，比留一个「看着在、其实不能用」的条目清楚。
 //
-// 不往下递归：链接本身不是目录（Lstat 说了算），Walk 不会跟着它走。
-func (x *Root) dropLinks(base string) (int, error) {
-	n := 0
-	err := x.Walk(base, func(cur string, _ bool, _ string) error {
-		fi, err := x.r.Lstat(cur)
-		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+// 非普通文件（FIFO / 设备节点 / socket）是另一码事，但危害更直接：FIFO 没有写者时
+// open(2) 会一直阻塞，`tar -tf pipe` 与 `/api/fs/read` 都会**永久挂住**，一个请求占一个
+// goroutine 加一个子进程，客户端断开也不结束。tar 造 FIFO 不需要 root，所以这不是
+// 「反正也创建不了」的东西。删掉它、把数量报给界面，比留一个「点了就卡死」的条目清楚。
+//
+// 不往下递归：链接与非普通文件都不是目录（Lstat 说了算），Walk 不会跟着它们走。
+func (x *Root) sanitizeExtracted(base string) (links, specials int, err error) {
+	err = x.Walk(base, func(cur string, _ bool, _ string) error {
+		fi, statErr := x.r.Lstat(cur)
+		if statErr != nil {
 			return nil
 		}
-		if err := x.Remove(cur, false); err != nil {
-			return err
+		mode := fi.Mode()
+		switch {
+		case mode&os.ModeSymlink != 0:
+			if rmErr := x.Remove(cur, false); rmErr != nil {
+				return rmErr
+			}
+			links++
+		case !mode.IsRegular() && !mode.IsDir():
+			if rmErr := x.Remove(cur, false); rmErr != nil {
+				return rmErr
+			}
+			specials++
 		}
-		n++
 		return nil
 	})
-	return n, err
+	return links, specials, err
+}
+
+// requireRegularFile 确认 rel 是 Root 里的普通文件。
+//
+// 用 Lstat：跟随链接就失去了意义——指向 Root 之外的链接正是要挡的那种。
+func (x *Root) requireRegularFile(rel string) error {
+	fi, err := x.r.Lstat(rel)
+	if err != nil {
+		return err
+	}
+	// 三种都算「用户选错了目标」（400），不是服务端故障（500）。
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w：%s 是符号链接，不能解压（链接可能指向项目目录之外）", ErrInvalidPath, rel)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("%w：%s 是目录，不能解压", ErrInvalidPath, rel)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("%w：%s 不是普通文件（FIFO / 设备节点不能解压）", ErrInvalidPath, rel)
+	}
+	return nil
 }
 
 // untar 先校验成员名，再用 tar 解到暂存目录（staging 是相对路径）。
 //
 // 不带 -z / -j / -J / --zstd：GNU tar 读归档时会按魔数认出压缩格式，一个命令覆盖
 // 全部 tar 变体。
-func (x *Root) untar(srcAbs, staging string) error {
-	out, err := runTar("-tf", srcAbs)
+func (x *Root) untar(ctx context.Context, srcAbs, staging string) error {
+	out, err := runTar(ctx, "-tf", srcAbs)
 	if err != nil {
 		return err
 	}
@@ -255,31 +299,33 @@ func (x *Root) untar(srcAbs, staging string) error {
 		return err
 	}
 
-	if _, err := runTar("-xf", srcAbs, "-C", x.Abs(staging)); err != nil {
+	if _, err := runTar(ctx, "-xf", srcAbs, "-C", x.Abs(staging)); err != nil {
 		return err
 	}
 	return nil
 }
 
-func runTar(args ...string) ([]byte, error) {
-	return runTool(TarBin, "tar", args...)
+func runTar(ctx context.Context, args ...string) ([]byte, error) {
+	return runTool(ctx, TarBin, "tar", args...)
 }
 
 // runUnzip 跑一次 unzip，返回 stdout（`-Z1` 的成员清单就在 stdout 上）。
-func runUnzip(args ...string) ([]byte, error) {
-	return runTool(UnzipBin, "unzip", args...)
+func runUnzip(ctx context.Context, args ...string) ([]byte, error) {
+	return runTool(ctx, UnzipBin, "unzip", args...)
 }
 
 // runTool 执行一个解压工具，返回 stdout；失败时把输出的尾巴带进错误里。
 //
 // stdin 故意不接：这些工具在遇到「要不要覆盖」「密码是多少」时会等输入，而我们没有
 // 终端可问——不接 stdin 时它们读到 EOF 会自己失败退出，好过把整个请求吊住。
-func runTool(bin, name string, args ...string) ([]byte, error) {
+func runTool(ctx context.Context, bin, name string, args ...string) ([]byte, error) {
 	exe, err := binPath(bin)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(exe, args...)
+	// CommandContext：请求被取消（客户端断开）或超时就把子进程杀掉，不留一个
+	// 在后台继续跑的解压进程。
+	cmd := exec.CommandContext(ctx, exe, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -338,10 +384,10 @@ var singleTools = map[ArchiveKind]struct {
 
 // decompress 解压「不是 tar、只是单个文件被压过」的归档：解出来写到暂存目录里的
 // 同名文件（去掉压缩后缀）。
-func (x *Root) decompress(srcAbs, base, staging string, kind ArchiveKind) error {
+func (x *Root) decompress(ctx context.Context, srcAbs, base, staging string, kind ArchiveKind) error {
 	tool, ok := singleTools[kind]
 	if !ok {
-		return fmt.Errorf("不支持解压这种格式：%s", base)
+		return fmt.Errorf("%w：不支持解压这种格式：%s", ErrInvalidPath, base)
 	}
 	bin, err := binPath(tool.bin)
 	if err != nil {
@@ -358,7 +404,7 @@ func (x *Root) decompress(srcAbs, base, staging string, kind ArchiveKind) error 
 	}
 	defer f.Close()
 
-	cmd := exec.Command(bin, "-dc", srcAbs)
+	cmd := exec.CommandContext(ctx, bin, "-dc", srcAbs)
 	cmd.Stdout = f
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -382,11 +428,11 @@ func (x *Root) decompress(srcAbs, base, staging string, kind ArchiveKind) error 
 //     进程会一直挂着（暂存目录是这次请求独占的，覆盖没有风险）。加密包同理：没有
 //     stdin，unzip 读不到密码就自己退出，不会把服务吊死。
 //
-// 符号链接由 Extract 在解压完之后统一丢掉（见 dropLinks）。
-func (x *Root) unzip(rel, staging string) error {
+// 符号链接与非普通文件由 Extract 在解压完之后统一丢掉（见 sanitizeExtracted）。
+func (x *Root) unzip(ctx context.Context, rel, staging string) error {
 	src := x.Abs(rel)
 
-	out, err := runUnzip("-Z1", src)
+	out, err := runUnzip(ctx, "-Z1", src)
 	if err != nil {
 		// 列不出成员，多半是「不是 zip」或者「空包」——unzip 的原话在错误尾巴里，
 		// 这里补一句人话，别让用户只看到 `unzip -Z1 … 失败`。
@@ -396,7 +442,7 @@ func (x *Root) unzip(rel, staging string) error {
 		return err
 	}
 
-	if _, err := runUnzip("-qq", "-o", "-d", x.Abs(staging), src); err != nil {
+	if _, err := runUnzip(ctx, "-qq", "-o", "-d", x.Abs(staging), src); err != nil {
 		return err
 	}
 	return nil

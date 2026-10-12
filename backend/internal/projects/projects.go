@@ -16,7 +16,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
+	"unicode"
 
 	"fpkstudio/internal/config"
 	"fpkstudio/internal/fnpack"
@@ -25,11 +27,11 @@ import (
 )
 
 const (
-	// fnpack 默认从 app/server 取原生程序。
-	defaultServerDir = "app/server"
+	// DefaultServerDir 是 fnpack 默认从 app/server 取原生程序（打包偏好里可改）。
+	DefaultServerDir = "app/server"
 	// 打包偏好存放位置（放在项目内的 building/，跟 fnpackup 保持一致）。
 	settingsFile = "building/settings.json"
-	// 导入 fpk 时的体积上限，防解压炸弹。
+	// 导入 fpk 时的解压体积上限，防解压炸弹。
 	maxImportBytes = 8 << 30
 	maxImportFiles = 200000
 )
@@ -39,6 +41,12 @@ var defaultPlatforms = []string{"arm", "x86"}
 
 // maxModTimeScan 是算「最后修改时间」时最多看的条目数（见 Manager.Info）。
 const maxModTimeScan = 20000
+
+// maxImportFileBytes 是单个 fpk 包本身的大小上限，和上传那条路的 1G 对齐。
+//
+// 走飞牛文件选择器导入时没有请求体可卡（后端直接读本机文件），所以按文件大小判一次。
+// 变量而不是常量：测试里把它调小，避免真的造一个 1G 的文件。
+var maxImportFileBytes int64 = 1 << 30
 
 // ProjectInfo 是项目列表里的一项。
 type ProjectInfo struct {
@@ -123,6 +131,9 @@ var (
 	ErrNotFound = errors.New("项目不存在")
 	// ErrExists 表示同名项目已经存在。
 	ErrExists = errors.New("项目已存在")
+	// ErrInvalidInput 表示用户填的东西不合法（manifest 字段、架构名、server 目录…），
+	// 是「改一下就能过」的那类错误：HTTP 层把它翻成 400，而不是当成服务端故障的 500。
+	ErrInvalidInput = errors.New("输入不合法")
 )
 
 // cachedModTime / rememberModTime / forgetModTime 是「最后修改时间」的小缓存（见
@@ -337,9 +348,60 @@ func samePath(a, b string) bool {
 // 正常部署下不会相同（配置里会把重了的输出目录退回默认值，界面上也拒绝两个槽选同
 // 一个目录），但默认值仍可能撞上：项目目录可以被指到数据目录下的任何位置，包括
 // $DATA_DIR/output。那时复制到输出目录等于复制到自己身上，列产物也会列两遍。
-func (m *Manager) outputIsProject() bool {
-	s := m.snap()
+//
+// 快照由调用方给：它和同一次操作里的其它判断必须看同一套目录。
+func outputIsProject(s *rootsSnapshot) bool {
 	return filepath.Clean(s.outputDir) == filepath.Clean(s.projectRoot)
+}
+
+// copyIntoRoot 把暂存区里的一个文件写进某个沙箱根下的相对路径。
+//
+// 为什么不用绝对路径复制：产物名由 manifest 的 appname / version / platform 拼出来，
+// 那些值是用户（以及导入的 fpk）能随便写的文本，`filepath.Join` 会把 `..` 规整掉，
+// 于是「写进项目目录」变成「写到项目根之外的任意路径」。走 Root.WriteReader 之后，
+// 路径先过 fsx.Rel（含 `..` 直接拒绝），落盘位置不可能跑到沙箱之外，模式位也按仓库
+// 约定显式 chmod 一遍。
+func (m *Manager) copyIntoRoot(root *fsx.Root, rel string, srcAbs string) error {
+	in, err := os.Open(srcAbs)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if _, err := root.WriteReader(rel, in, 0o644); err != nil {
+		return err
+	}
+	return nil
+}
+
+// safeArtifactPart 校验一个要拼进产物文件名的成分。
+//
+// 只判「非空」是不够的：manifest 是纯文本，`version = ../../x` 这种值会被
+// `fmt.Sprintf("%s-%s-%s.fpk", …)` 拼成一个带 `..` 的文件名，而 `Root.Abs` 是
+// filepath.Join（会 Clean），最终写到项目根之外。这里按「一个文件名的成分」来收：
+// 不含路径分隔符、不是 `.`/`..`、不含控制字符、长度有上限。
+//
+// 不校验「符合 fnpack 的 appname 规则」（3–32 位、字母数字开头结尾）：那是 fnpack
+// 的判断，它自己会报错；这里只负责「拼出来的名字不会跑出目录」。
+func safeArtifactPart(kind, value string) (string, error) {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return "", fmt.Errorf("%w：%s 不能为空", ErrInvalidInput, kind)
+	}
+	if v == "." || v == ".." {
+		return "", fmt.Errorf("%w：%s 不能是 %q", ErrInvalidInput, kind, v)
+	}
+	if strings.ContainsAny(v, `/\`) || strings.ContainsRune(v, 0) {
+		return "", fmt.Errorf("%w：%s 不能包含路径分隔符：%q", ErrInvalidInput, kind, v)
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			return "", fmt.Errorf("%w：%s 不能包含控制字符：%q", ErrInvalidInput, kind, v)
+		}
+	}
+	if len(v) > 64 {
+		return "", fmt.Errorf("%w：%s 过长（%d 字节，上限 64）：%q", ErrInvalidInput, kind, len(v), v)
+	}
+	return v, nil
 }
 
 // copyIntoStage 把项目目录复制到 home 沙箱里的暂存位置。
@@ -360,8 +422,12 @@ func (m *Manager) copyIntoStage(s *rootsSnapshot, prjRel, stageRel string) error
 func (m *Manager) Root() *fsx.Root { return m.prjRoot() }
 
 // List 列出全部项目。
+//
+// 整个过程只看一份快照（s）：以前这里多次读裸字段，配合 Info 内部又各读一次，
+// 用户在刷新列表时改了项目根目录就会拿到「新的根 + 旧的相对路径」这种混搭。
 func (m *Manager) List() ([]ProjectInfo, error) {
-	entries, err := m.prjRoot().List(".")
+	s := m.snap()
+	entries, err := s.prj.List(".")
 	if err != nil {
 		return nil, err
 	}
@@ -370,10 +436,10 @@ func (m *Manager) List() ([]ProjectInfo, error) {
 		if !e.Dir {
 			continue
 		}
-		info, err := m.Info(e.Name)
+		info, err := m.info(s, e.Name)
 		if err != nil {
 			// 单个项目目录损坏不应该让整个列表挂掉。
-			out = append(out, ProjectInfo{Name: e.Name, ModTime: e.ModTime, AbsPath: m.prjRoot().Abs(e.Name)})
+			out = append(out, ProjectInfo{Name: e.Name, ModTime: e.ModTime, AbsPath: s.prj.Abs(e.Name)})
 			continue
 		}
 		out = append(out, info)
@@ -382,12 +448,15 @@ func (m *Manager) List() ([]ProjectInfo, error) {
 }
 
 // Info 读取单个项目的信息。
-func (m *Manager) Info(name string) (ProjectInfo, error) {
+func (m *Manager) Info(name string) (ProjectInfo, error) { return m.info(m.snap(), name) }
+
+// info 是 Info 的快照版：调用方一次操作里读多个项目时用它，别再各读一次快照。
+func (m *Manager) info(s *rootsSnapshot, name string) (ProjectInfo, error) {
 	rel, err := projectPath(name)
 	if err != nil {
 		return ProjectInfo{}, err
 	}
-	st, err := m.prjRoot().Stat(rel)
+	st, err := s.prj.Stat(rel)
 	if err != nil {
 		return ProjectInfo{}, err
 	}
@@ -395,57 +464,68 @@ func (m *Manager) Info(name string) (ProjectInfo, error) {
 		return ProjectInfo{}, fmt.Errorf("%w：%s 不是目录", ErrNotFound, name)
 	}
 
-	info := ProjectInfo{Name: name, ModTime: st.ModTime, AbsPath: m.prjRoot().Abs(rel)}
+	info := ProjectInfo{Name: name, ModTime: st.ModTime, AbsPath: s.prj.Abs(rel)}
 	// 列表里显示的是「最后修改时间」：目录自身的 mtime 只在增删条目时变，
 	// 改 manifest、换 building 里的产物都看不出来，所以取整棵树里最新的。
 	// 限制扫描条目数，避免大项目把一个时间扫穿；结果再放 2 秒缓存（见 modTimeCache）。
 	if cached, ok := m.cachedModTime(rel); ok {
 		info.ModTime = cached
-	} else if newest, err := m.prjRoot().LatestModTime(rel, maxModTimeScan); err == nil && !newest.IsZero() {
+	} else if newest, err := s.prj.LatestModTime(rel, maxModTimeScan); err == nil && !newest.IsZero() {
 		info.ModTime = newest.Format("2006-01-02 15:04:05")
 		m.rememberModTime(rel, info.ModTime)
 	}
-	if data, err := m.prjRoot().ReadFile(rel + "/manifest"); err == nil {
+	if data, err := s.prj.ReadFile(rel + "/manifest"); err == nil {
 		kv := parseManifest(string(data))
 		info.AppName = kv["appname"]
 		info.Version = kv["version"]
 		info.DisplayName = kv["display_name"]
 		info.Platform = kv["platform"]
 	}
-	info.Docker = m.exists(rel + "/app/docker/docker-compose.yaml")
-	info.UI = m.exists(rel + "/app/ui/config")
-	info.Building = m.exists(rel + "/building")
+	info.Docker = existsIn(s.prj, rel+"/app/docker/docker-compose.yaml")
+	info.UI = existsIn(s.prj, rel+"/app/ui/config")
+	info.Building = existsIn(s.prj, rel+"/building")
 	return info, nil
 }
 
 // Exists 返回项目的形态信息。
 func (m *Manager) Exists(name string) (ExistsInfo, error) {
+	s := m.snap()
 	rel, err := projectPath(name)
 	if err != nil {
 		return ExistsInfo{}, err
 	}
-	st, err := m.prjRoot().Stat(rel)
+	st, err := s.prj.Stat(rel)
 	if err != nil {
 		return ExistsInfo{Exists: false}, nil
 	}
 	return ExistsInfo{
 		Exists: st.Dir,
-		Docker: m.exists(rel + "/app/docker/docker-compose.yaml"),
-		UI:     m.exists(rel + "/app/ui/config"),
+		Docker: existsIn(s.prj, rel+"/app/docker/docker-compose.yaml"),
+		UI:     existsIn(s.prj, rel+"/app/ui/config"),
 	}, nil
+}
+
+// existsIn 判断沙箱里某个路径在不在（一次操作里判断多项时用它，别各读一次快照）。
+func existsIn(root *fsx.Root, rel string) bool {
+	_, err := root.Stat(rel)
+	return err == nil
 }
 
 // Create 调用 fnpack 创建项目骨架，并补齐 fpkstudio 需要的工作目录。
 func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) error {
+	// 名字先 trim 再往下传：判重名用的是 projectPath（内部 trim），而调 fnpack 用的是
+	// 原始入参——名字带首尾空格时会「按 trim 后的名字判重、按原样建目录」。
+	name = strings.TrimSpace(name)
+	s := m.snap()
 	rel, err := projectPath(name)
 	if err != nil {
 		return err
 	}
-	if _, err := m.prjRoot().Stat(rel); err == nil {
+	if _, err := s.prj.Stat(rel); err == nil {
 		return fmt.Errorf("%w：%s", ErrExists, name)
 	}
 
-	out, err := m.fn.Create(ctx, m.snap().projectRoot, name, docker, withUI)
+	out, err := m.fn.Create(ctx, s.projectRoot, name, docker, withUI)
 	if err != nil {
 		return fmt.Errorf("fnpack create 失败: %w", err)
 	}
@@ -453,18 +533,18 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 	// 「目录 / manifest 有没有真的落地」为判据，并把 fnpack 的原话带出来——
 	// 否则用户只会看到一句没头没脑的「报告成功但目录没生成」，不知道是自己
 	// 项目名不合规。
-	if _, err := m.prjRoot().Stat(rel); err != nil {
+	if _, err := s.prj.Stat(rel); err != nil {
 		if reason := fnpack.FailureReason(out); reason != "" {
 			return fmt.Errorf("fnpack create 失败: %s", reason)
 		}
 		return fmt.Errorf("fnpack create 没有生成项目目录 %s，请查看日志里 fnpack 的输出", rel)
 	}
-	if !m.exists(rel + "/manifest") {
+	if !existsIn(s.prj, rel+"/manifest") {
 		return fmt.Errorf("fnpack create 没有生成项目骨架（缺少 %s/manifest）", rel)
 	}
 
 	// fnpack 模板里带了 .DS_Store，在部分文件系统上会让后续 build 直接失败。
-	if n := stripJunk(m.prjRoot(), rel); n > 0 {
+	if n := stripJunk(s.prj, rel); n > 0 {
 		m.log.Infof("清理模板里的冗余文件 %d 个", n)
 	}
 	// 这里刻意不修模式位（打包时会修暂存副本）：fnpack 新建的文件在飞牛卷上
@@ -474,7 +554,7 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 	// （架构目录名就是 fpk 的 platform 值，内容会被复制到 app/server 再打包）。
 	dirs := append([]string{rel + "/building", rel + "/building/platform"}, platformDirs(rel)...)
 	for _, d := range dirs {
-		if err := m.prjRoot().Mkdir(d, 0o755, true); err != nil {
+		if err := s.prj.Mkdir(d, 0o755, true); err != nil {
 			return err
 		}
 	}
@@ -483,24 +563,28 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 
 // Delete 删除项目目录。
 func (m *Manager) Delete(name string) error {
+	// 判存在与删除必须看同一份快照：以前 Stat 用一次、Remove 又读一次裸字段，
+	// 用户正好在这中间换了项目根目录时，删掉的是**新根**下的同名项目。
+	s := m.snap()
 	rel, err := projectPath(name)
 	if err != nil {
 		return err
 	}
-	if _, err := m.prjRoot().Stat(rel); err != nil {
+	if _, err := s.prj.Stat(rel); err != nil {
 		return fmt.Errorf("%w：%s", ErrNotFound, name)
 	}
 	defer m.forgetModTime(rel)
-	return m.prjRoot().Remove(rel, true)
+	return s.prj.Remove(rel, true)
 }
 
 // Platforms 列出 building/platform 下的架构目录。
 func (m *Manager) Platforms(name string) ([]string, error) {
+	s := m.snap()
 	rel, err := projectPath(name)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := m.prjRoot().List(rel + "/building/platform")
+	entries, err := s.prj.List(rel + "/building/platform")
 	if err != nil {
 		return []string{}, nil
 	}
@@ -530,8 +614,9 @@ func (m *Manager) Artifacts(name string) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
+	s := m.snap()
 	appname := name
-	if data, err := m.prjRoot().ReadFile(rel + "/manifest"); err == nil {
+	if data, err := s.prj.ReadFile(rel + "/manifest"); err == nil {
 		if a := strings.TrimSpace(parseManifest(string(data))["appname"]); a != "" {
 			appname = a
 		}
@@ -564,11 +649,10 @@ func (m *Manager) Artifacts(name string) ([]Artifact, error) {
 			})
 		}
 	}
-	s := m.snap()
 	collect(s.prj, rel, "project", nil)
 	// 两个目录是同一个位置时只列项目那一份：否则同一份产物会以两种 scope 出现，
 	// 用户看到的是「列表里有一个文件出现两次，路径一模一样」。
-	if !m.outputIsProject() {
+	if !outputIsProject(s) {
 		collect(s.output, ".", "output", func(n string) bool {
 			return strings.HasPrefix(n, appname+"-") || n == appname+".fpk"
 		})
@@ -584,8 +668,8 @@ func (m *Manager) GetSettings(name string) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	s := Settings{ServerDir: defaultServerDir, CopyToOutput: true, Platforms: []string{}}
-	data, err := m.prjRoot().ReadFile(rel + "/" + settingsFile)
+	s := Settings{ServerDir: DefaultServerDir, CopyToOutput: true, Platforms: []string{}}
+	data, err := m.snap().prj.ReadFile(rel + "/" + settingsFile)
 	if err != nil {
 		return s, nil
 	}
@@ -593,7 +677,7 @@ func (m *Manager) GetSettings(name string) (Settings, error) {
 		return s, nil
 	}
 	if s.ServerDir == "" {
-		s.ServerDir = defaultServerDir
+		s.ServerDir = DefaultServerDir
 	}
 	return normalizeSettings(s), nil
 }
@@ -616,13 +700,13 @@ func (m *Manager) SaveSettings(name string, s Settings) error {
 		return err
 	}
 	if s.ServerDir == "" {
-		s.ServerDir = defaultServerDir
+		s.ServerDir = DefaultServerDir
 	}
 	data, err := json.MarshalIndent(normalizeSettings(s), "", "  ")
 	if err != nil {
 		return err
 	}
-	return m.prjRoot().WriteFile(rel+"/"+settingsFile, data, 0o644)
+	return m.snap().prj.WriteFile(rel+"/"+settingsFile, data, 0o644)
 }
 
 // Pack 执行打包。
@@ -635,42 +719,61 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 	if err != nil {
 		return nil, err
 	}
-	manifestBytes, err := m.prjRoot().ReadFile(rel + "/manifest")
+	// 这一次打包全程用同一套目录：从读 manifest 到复制产物都走 s，中途用户改了
+	// 目录设置也不会出现「照新根判断、按旧根读写」的混搭（见 rootsSnapshot 的说明）。
+	s := m.snap()
+
+	manifestBytes, err := s.prj.ReadFile(rel + "/manifest")
 	if err != nil {
 		return nil, fmt.Errorf("读取 manifest 失败: %w", err)
 	}
 	kv := parseManifest(string(manifestBytes))
-	appname := strings.TrimSpace(kv["appname"])
-	if appname == "" {
-		return nil, errors.New("manifest 里没有 appname")
+	// appname / version / platform 都会被拼进产物文件名，所以逐个按「文件名成分」校验。
+	// 只判非空是不够的：manifest 是用户（以及导入的 fpk）能随便写的文本，一个
+	// `version = ../../../../tmp/x` 就能让产物写到项目根之外——`Root.Abs` 是
+	// filepath.Join，会老老实实把 `..` 规整掉（见 safeArtifactPart 的说明）。
+	appname, err := safeArtifactPart("manifest 里的 appname", kv["appname"])
+	if err != nil {
+		return nil, err
 	}
 	version := strings.TrimSpace(kv["version"])
 	if version == "" {
 		version = "0.0.0"
 	}
-	if kv["platform"] == "" {
-		return nil, errors.New("manifest 里没有 platform（旧版可能叫 arch，请改名为 platform）")
+	if version, err = safeArtifactPart("manifest 里的 version", version); err != nil {
+		return nil, err
+	}
+	manifestPlatform, err := safeArtifactPart("manifest 里的 platform", kv["platform"])
+	if err != nil {
+		return nil, fmt.Errorf("%w（旧版可能叫 arch，请改名为 platform）", err)
 	}
 
 	serverDir := strings.TrimSpace(req.ServerDir)
 	if serverDir == "" {
-		serverDir = defaultServerDir
+		serverDir = DefaultServerDir
 	}
 	serverRel, err := fsx.Rel(serverDir)
 	if err != nil {
-		return nil, fmt.Errorf("server 目录非法: %w", err)
+		return nil, fmt.Errorf("%w：server 目录非法: %v", ErrInvalidInput, err)
+	}
+	// "." 表示项目根：prepareStage 会先 Remove 掉那个位置，整个暂存项目连同 manifest
+	// 一起被删掉，后面只会报一句「没有 manifest」，用户完全看不出是自己填的目录不对。
+	if serverRel == "." {
+		return nil, fmt.Errorf("%w：server 目录不能是项目根（%q），它会被架构目录的内容整份替换掉", ErrInvalidInput, serverDir)
 	}
 
 	targets := make([]string, 0, len(req.Platforms))
 	for _, p := range req.Platforms {
-		if p = strings.TrimSpace(p); p != "" {
-			targets = append(targets, p)
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
 		}
+		if p, err = safeArtifactPart("架构名", p); err != nil {
+			return nil, err
+		}
+		targets = append(targets, p)
 	}
 	single := len(targets) == 0
-
-	// 这一次打包全程用同一套目录（见 rootsSnapshot 的说明）。
-	s := m.snap()
 
 	stageName := fmt.Sprintf("build-%s-%d", sanitize(req.Name), time.Now().UnixNano())
 	stage := "tmp/" + stageName
@@ -709,7 +812,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 	for _, platform := range rounds {
 		res := PackResult{Platform: platform}
 		if platform == "" {
-			res.Platform = strings.TrimSpace(kv["platform"])
+			res.Platform = manifestPlatform
 		}
 
 		if platform != "" {
@@ -757,27 +860,28 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 			continue
 		}
 
+		// 三个成分都过过 safeArtifactPart，fileName 不可能再带路径分隔符或 `..`；
+		// 落地一律走沙箱（copyIntoRoot → Root.WriteReader），不再用绝对路径拼。
 		fileName := fmt.Sprintf("%s-%s-%s.fpk", appname, version, res.Platform)
-		inProject := m.prjRoot().Abs(rel + "/" + fileName)
-		if err := copyFile(src, inProject); err != nil {
+		inProjectRel := rel + "/" + fileName
+		if err := m.copyIntoRoot(s.prj, inProjectRel, src); err != nil {
 			res.OK = false
 			res.Log = fmt.Sprintf("写入项目目录失败: %v", err)
 			results = append(results, res)
 			continue
 		}
 		res.File = fileName
-		res.Path = inProject
+		res.Path = s.prj.Abs(inProjectRel)
 		res.Size = st.Size()
 
-		if req.CopyOut && !m.outputIsProject() {
-			dst := m.outputRoot().Abs(fileName)
-			if err := copyFile(src, dst); err != nil {
+		if req.CopyOut && !outputIsProject(s) {
+			if err := m.copyIntoRoot(s.output, fileName, src); err != nil {
 				res.OK = false
 				res.Log = fmt.Sprintf("复制到输出目录失败: %v", err)
 				results = append(results, res)
 				continue
 			}
-			res.Path = dst
+			res.Path = s.output.Abs(fileName)
 		}
 
 		res.OK = true
@@ -792,17 +896,27 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 // prepareStage 把 building/platform/<platform>/ 的内容覆盖到暂存区的 server 目录。
 //
 // 约定与 fnpackup 一致：架构目录里放的是「该架构下 app/<serverDir> 应有的全部内容」。
+//
+// 「先删干净、再整份复制」是刻意的替换语义，不是合并：留着目标里原有的文件，另一个架构
+// 的二进制就会跟着打进这个架构的包。
+//
+// **不要在这里预建目标目录**（以前就是这么写的，代价是多架构打包全废）：复制走的是
+// `Root.Copy` / `fsx.CopyTree`，前者对「已存在的目标」直接返回 `ErrExists`，而这里刚
+// `Remove` 过目标、它必然不存在；`Root.copy` 自己会把目标目录和父目录建出来。
+//
+// 目录一律走调用方给的快照 `s`（stat / list / 复制都用同一套值）：以前 stat/list 读的是
+// 裸快照、复制用的是 `s`，用户在这中间换了项目根就会「照新根判断、按旧根复制」。
 func (m *Manager) prepareStage(s *rootsSnapshot, stage string, prjRel string, serverRel string, platform string) error {
 	srcInPrj := prjRel + "/building/platform/" + platform
 
-	srcStat, err := m.prjRoot().Stat(srcInPrj)
+	srcStat, err := s.prj.Stat(srcInPrj)
 	if err != nil {
 		return fmt.Errorf("找不到架构目录 building/platform/%s", platform)
 	}
 	if !srcStat.Dir {
 		return fmt.Errorf("building/platform/%s 不是目录", platform)
 	}
-	children, err := m.prjRoot().List(srcInPrj)
+	children, err := s.prj.List(srcInPrj)
 	if err != nil {
 		return err
 	}
@@ -813,21 +927,20 @@ func (m *Manager) prepareStage(s *rootsSnapshot, stage string, prjRel string, se
 	dstRel := stage + "/project/" + serverRel
 	// 目标可能不存在（fnpack 只创建 app/server 与 app/www），不存在的错误直接忽略。
 	_ = m.home.Remove(dstRel, true)
-	if err := m.home.Mkdir(dstRel, 0o755, true); err != nil {
-		return err
-	}
 	return m.copyIntoStage(s, srcInPrj, dstRel)
 }
 
 // Import 把上传的 .fpk 解成一个项目目录。
 func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (ProjectInfo, error) {
+	// 一次导入全程只看一份快照：落地、补架构目录、读回信息都对着同一个项目根。
+	s := m.snap()
 	stage := fmt.Sprintf("tmp/import-%d", time.Now().UnixNano())
 	if err := m.home.Mkdir(stage, 0o755, true); err != nil {
 		return ProjectInfo{}, err
 	}
 	defer func() { _ = m.home.Remove(stage, true) }()
 
-	if err := unpackFPK(m.home, stage, r); err != nil {
+	if err := unpackFPK(ctx, m.home, stage, r); err != nil {
 		return ProjectInfo{}, err
 	}
 
@@ -850,32 +963,74 @@ func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (Pro
 		name = fmt.Sprintf("imported-%d", time.Now().Unix())
 	}
 
-	rel, err := projectPath(name)
-	if err != nil {
-		return ProjectInfo{}, err
-	}
-	if _, err := m.prjRoot().Stat(rel); err == nil {
-		name = fmt.Sprintf("%s-%d", name, time.Now().Unix())
-		rel, err = projectPath(name)
-		if err != nil {
-			return ProjectInfo{}, err
+	// 选名字与落地之间有一个窗口：另一个并发导入可能正好占掉刚选中的名字。
+	// `ErrExists` 就是「名字被抢了」，换一个再来（暂存区此时一个字节都没动过）；
+	// 换成「报一个目标已存在、让用户重导一次」对用户没有意义。
+	var rel string
+	for attempt := 0; ; attempt++ {
+		candidate, candidateRel, nameErr := m.freeProjectName(s, name)
+		if nameErr != nil {
+			return ProjectInfo{}, nameErr
 		}
-	}
+		name, rel = candidate, candidateRel
 
-	if err := m.moveIntoProjects(stage, rel); err != nil {
-		return ProjectInfo{}, err
+		moveErr := m.moveIntoProjects(s, stage, rel)
+		if moveErr == nil {
+			break
+		}
+		if !errors.Is(moveErr, ErrExists) || attempt >= 4 {
+			return ProjectInfo{}, moveErr
+		}
 	}
 	// 导入的 fpk 里没有多架构工作目录（包内只有打包后的 app/），这里补上 arm / x86：
 	// 与 Create 保持一致，多架构发布勾一下就能用。失败只记日志——项目已经落地了，
 	// 而且前端的「打开多架构发布」还会再补一次。
 	for _, dir := range platformDirs(rel) {
-		if err := m.prjRoot().Mkdir(dir, 0o755, true); err != nil {
+		if err := s.prj.Mkdir(dir, 0o755, true); err != nil {
 			m.log.Warnf("创建架构目录 %s 失败: %v", dir, err)
 		}
 	}
 
 	m.log.Infof("导入项目 %s 完成", name)
-	return m.Info(name)
+	info, err := m.Info(name)
+	if err != nil {
+		// 项目已经落地了：只是「读不出项目信息」（例如包里的 manifest 不完整）。
+		// 这时候报一个错会让用户以为导入失败、再导一次，反而多出一份，所以记一条日志、
+		// 把能确定的部分回给调用方。
+		m.log.Warnf("导入 %s 完成，但读取项目信息失败: %v", name, err)
+		return ProjectInfo{Name: name, AbsPath: s.prj.Abs(rel)}, nil
+	}
+	return info, nil
+}
+
+// freeProjectName 挑一个当前还不存在的项目名，返回「名字 + 相对路径」。
+//
+// 为什么不能只试一次：以前重名时把名字改成 `<name>-<unix 秒>` 就完事了，**不再复查**。
+// 同一秒里导入第二个同 appname 的包时，那个带时间戳的名字已经存在，于是
+// moveIntoProjects 的 rename 失败（ENOTEMPTY）、退回 CopyTree 合并——第二个包的内容
+// 被第三个包静默覆盖，用户看到的是「导入成功」。所以这里必须试到真的空位为止。
+func (m *Manager) freeProjectName(s *rootsSnapshot, name string) (string, string, error) {
+	base := name
+	stamp := time.Now().Unix()
+	for i := 0; i < 1000; i++ {
+		var candidate string
+		switch {
+		case i == 0:
+			candidate = base
+		case i == 1:
+			candidate = fmt.Sprintf("%s-%d", base, stamp)
+		default:
+			candidate = fmt.Sprintf("%s-%d-%d", base, stamp, i)
+		}
+		rel, err := projectPath(candidate)
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := s.prj.Stat(rel); err != nil {
+			return candidate, rel, nil
+		}
+	}
+	return "", "", fmt.Errorf("%w：同名项目太多，请换一个名字再导入", ErrExists)
 }
 
 // ImportPath 从本机的一个绝对路径导入 fpk。
@@ -906,7 +1061,11 @@ func (m *Manager) ImportPath(ctx context.Context, absPath string) (ProjectInfo, 
 		return ProjectInfo{}, fmt.Errorf("读取文件状态失败: %w", err)
 	}
 	if fi.IsDir() {
-		return ProjectInfo{}, fmt.Errorf("这是一个目录，不是 fpk 文件：%s", absPath)
+		return ProjectInfo{}, fmt.Errorf("%w：这是一个目录，不是 fpk 文件：%s", ErrInvalidInput, absPath)
+	}
+	if fi.Size() > maxImportFileBytes {
+		return ProjectInfo{}, fmt.Errorf("%w：包体积 %s 超过上限 %s",
+			ErrInvalidInput, fsx.HumanSize(fi.Size()), fsx.HumanSize(maxImportFileBytes))
 	}
 
 	info, err := m.Import(ctx, f, filepath.Base(absPath))
@@ -920,13 +1079,24 @@ func (m *Manager) ImportPath(ctx context.Context, absPath string) (ProjectInfo, 
 //
 // 优先 rename（同文件系统时是瞬时的）；项目根目录可以是另一个挂载点上的授权
 // 目录，跨设备 rename 会 EXDEV，那时退回复制 + 删源。
-func (m *Manager) moveIntoProjects(stage, rel string) error {
+func (m *Manager) moveIntoProjects(s *rootsSnapshot, stage, rel string) error {
 	src := m.home.Abs(stage)
-	dst := m.prjRoot().Abs(rel)
+	dst := s.prj.Abs(rel)
 
 	err := os.Rename(src, dst)
 	if err == nil {
 		return nil
+	}
+	// 只有「跨设备」才退回复制（项目根可以落在另一个挂载点上）。
+	//
+	// **不能对所有失败都兜底**：目标已存在时 rename 报 ENOTEMPTY，而 fsx.CopyTree 是
+	// 合并语义（逐文件 O_TRUNC），退回去等于把另一个项目的文件覆盖掉，还报成功。
+	// 目标存在就该老老实实报错，由调用方换个名字（见 freeProjectName）。
+	if !errors.Is(err, syscall.EXDEV) {
+		return fmt.Errorf("移动到项目目录失败: %w", err)
+	}
+	if _, statErr := os.Lstat(dst); statErr == nil {
+		return fmt.Errorf("%w：%s", ErrExists, rel)
 	}
 	if copyErr := fsx.CopyTree(src, dst); copyErr != nil {
 		return fmt.Errorf("移动到项目目录失败: %v（尝试复制也没成功: %w）", err, copyErr)
@@ -948,9 +1118,10 @@ func platformDirs(rel string) []string {
 
 // ---- 内部工具 ----
 
+// exists 是「这个路径在不在」的便捷写法（单个判断用；一次判断多项时用 existsIn，
+// 免得各读一次快照）。
 func (m *Manager) exists(rel string) bool {
-	_, err := m.prjRoot().Stat(rel)
-	return err == nil
+	return existsIn(m.prjRoot(), rel)
 }
 
 // stripJunk 删除 macOS / Windows 的元数据文件，返回删除数量。
@@ -1013,15 +1184,20 @@ func sanitize(name string) string {
 }
 
 // setManifestPlatform 在暂存区的 manifest 里改 platform，保留其余字节。
+//
+// 行扫描必须和 parseManifest 一样**跳过 `"""` 多行值**：desc 里出现一行
+// `platform = x86` 时，只按行找第一个 `platform=` 会把描述正文改掉、真正的 platform
+// 行却没动——产物里的 platform 于是和用户在界面上选的不一致，装机行为跟着错。
 func setManifestPlatform(manifestPath, platform string) error {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return err
 	}
 	lines := splitLines(string(data))
-	found := false
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
+
+	idx := -1
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
@@ -1029,38 +1205,37 @@ func setManifestPlatform(manifestPath, platform string) error {
 		if eq <= 0 {
 			continue
 		}
-		if strings.TrimSpace(trimmed[:eq]) != "platform" {
+		value := strings.TrimSpace(trimmed[eq+1:])
+		// `"""` 开了没合上的多行值：整段跳过去（和 parseManifest 的判据一致）。
+		if strings.HasPrefix(value, `"""`) && !strings.HasSuffix(value[3:], `"""`) {
+			for i+1 < len(lines) {
+				i++
+				if strings.Contains(lines[i], `"""`) {
+					break
+				}
+			}
 			continue
 		}
-		lines[i] = "platform=" + platform
-		found = true
-		break
+		if strings.TrimSpace(trimmed[:eq]) == "platform" {
+			idx = i
+			break
+		}
 	}
-	if !found {
-		lines = append(lines[:len(lines)-1], "platform="+platform, "")
+
+	if idx < 0 {
+		// 没找到就补一行：插在末尾那个空元素（文件以换行结尾时 splitLines 会留一个）
+		// 之前，**一行都不丢**。以前是 `append(lines[:len(lines)-1], …)`，manifest
+		// 不以换行结尾时会把最后一行吃掉。
+		insert := len(lines)
+		if insert > 0 && lines[insert-1] == "" {
+			insert--
+		}
+		tail := append([]string{}, lines[insert:]...)
+		lines = append(append(lines[:insert], "platform="+platform), tail...)
+	} else {
+		lines[idx] = "platform=" + platform
 	}
 	return os.WriteFile(manifestPath, []byte(strings.Join(lines, "\n")), 0o644)
-}
-
-func copyFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	// 同上：创建时的模式位不一定被文件系统接受。
-	return out.Chmod(0o644)
 }
 
 func tail(s string, n int) string {
@@ -1103,7 +1278,7 @@ func writeEntry(root *fsx.Root, rel string, r io.Reader, total *int64) error {
 //	├── manifest
 //	├── wizard/
 //	└── ICON.PNG / ICON_256.PNG
-func unpackFPK(root *fsx.Root, stage string, r io.Reader) error {
+func unpackFPK(ctx context.Context, root *fsx.Root, stage string, r io.Reader) error {
 	br := bufio.NewReaderSize(r, 1<<16)
 	magic, _ := br.Peek(2)
 	var tr *tar.Reader
@@ -1124,6 +1299,11 @@ func unpackFPK(root *fsx.Root, stage string, r io.Reader) error {
 		files      int
 	)
 	for {
+		// 客户端取消（关页面 / 点取消）时立刻退出：调用方会把整个暂存目录删掉，
+		// 不会留下一个解了一半的包。
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
@@ -1205,6 +1385,9 @@ func unpackFPK(root *fsx.Root, stage string, r io.Reader) error {
 
 	itr := tar.NewReader(gz)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		hdr, err := itr.Next()
 		if err == io.EOF {
 			break

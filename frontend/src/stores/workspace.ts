@@ -58,7 +58,7 @@ export type BrowserView = 'list' | 'grid'
  * 只回状态、不回文案：给用户看的那句话要按当前语言渲染，那是组件的事。store 里
  * 只用 i18n 取「副本」这个后缀——那是个取值，不是一句话。
  */
-export type PasteOutcome = 'ok' | 'exists' | 'unreadable' | 'invalid'
+export type PasteOutcome = 'ok' | 'exists' | 'unreadable' | 'invalid' | 'same'
 
 /** 固定子标签的 id 一律是 `__xxx__` 这种形状；文件子标签用的是文件路径。 */
 const isFixedTab = (id: string) => id.startsWith('__') && id.endsWith('__')
@@ -79,6 +79,8 @@ export interface FileTab {
   error: string
   /** 是否为文本文件；二进制不给编辑器。 */
   text: boolean
+  /** 文件太大，后端没回内容（见后端 maxReadBytes）：编辑器只给下载入口。 */
+  tooLarge: boolean
   sizeRaw: string
   /** 打开时的原始内容，用于判断改动与「还原」。 */
   origin: string
@@ -423,6 +425,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       loading: true,
       error: '',
       text: true,
+      tooLarge: false,
       sizeRaw: '',
       origin: '',
       draft: '',
@@ -436,6 +439,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const res = await readFile(fullPath)
       tab.text = res.text
+      tab.tooLarge = res.tooLarge === true
       tab.sizeRaw = res.sizeRaw
       tab.origin = res.content
       // 二进制不写 error：是不是「不可编辑」由 EditorHost 按注册表判断
@@ -493,6 +497,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const res = await readFile(`${name}/${rel}`)
       tab.text = res.text
+      tab.tooLarge = res.tooLarge === true
       tab.sizeRaw = res.sizeRaw
       tab.origin = res.content
       tab.error = ''
@@ -634,6 +639,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!canPasteTo(name, destDir)) return 'invalid'
     const fileName = clip.path.split('/').pop() ?? ''
     if (!fileName) return 'invalid'
+    const srcDir = clip.path.split('/').slice(0, -1).join('/') || name
 
     // 目标目录的内容必须现拉一次（force）：缓存里那份可能还是空的
     // ——「粘贴时刚好同名」的判据全靠它，读旧了就会把别人的文件覆盖掉。
@@ -646,11 +652,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
     const siblings = s.dirs[destDir] ?? []
     const taken = siblings.some((entry) => entry.name === fileName)
-    if (taken && clip.cut) return 'exists'
 
-    const to = `${destDir}/${uniqueName(siblings, fileName, i18n.global.t('tree.copySuffix'))}`
-    if (clip.cut) await renameEntryAt(name, clip.path, to)
-    else await copyEntryAt(name, clip.path, to)
+    if (clip.cut) {
+      // 剪切到同一个目录：什么都不用做（用户多半是点错了），剪贴板留着。
+      if (destDir === srcDir) return 'same'
+      if (taken) return 'exists'
+      // 移动走 moveEntryAt，**不是** renameEntryAt：后者是「同目录改个名字」，
+      // 目标必须还在同一个目录里，拿它当移动用会让剪切粘贴在任何目录组合下都失败。
+      await moveEntryAt(name, clip.path, destDir)
+    } else {
+      const to = `${destDir}/${uniqueName(siblings, fileName, i18n.global.t('tree.copySuffix'))}`
+      await copyEntryAt(name, clip.path, to)
+    }
     s.clipboard = null
     // 树里 / 列表里当下就能看到粘贴结果；复制和剪切都只刷了源目录，目标目录补一次。
     s.expanded[destDir] = true
@@ -751,7 +764,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
     await renameEntry(path, to)
     await refreshDir(name, parent)
-    // 改名的是一个目录、而标签页模式正待在里面时，游标跟着改过的前缀走。
+    applyPathChange(name, path, to)
+  }
+
+  /**
+   * 把「某一项的路径从 path 变成了 to」这件事在内存里落实：标签、活动标签、目录缓存、
+   * 展开状态、剪贴板、标签页模式的游标。
+   *
+   * 重命名和移动共用它——两处各写一份的话，迟早有一边漏掉一项，而漏掉的表现都是
+   * 「界面上看着不对、其实内存里已经乱了」：目录缓存留着旧键会画出已被删掉的子项、
+   * 剪贴板留着旧路径会让之后每次粘贴都失败。
+   */
+  function applyPathChange(name: string, path: string, to: string) {
+    const s = state(name)
+    // 改名 / 移动的是一个目录、而标签页模式正待在里面时，游标跟着改过的前缀走。
     if (s.browserDir === path || s.browserDir.startsWith(`${path}/`)) {
       s.browserDir = to + s.browserDir.slice(path.length)
     }
@@ -791,6 +817,41 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  /**
+   * 把一项移动到另一个目录（剪切 + 粘贴）。
+   *
+   * 和 renameEntryAt 分开是必须的：重命名是「同目录里改个名字」，目标必须还在同一个
+   * 目录里（不然用户按「重命名」会被搬走）；移动是「换个目录」。以前剪切粘贴复用了
+   * renameEntryAt，于是同目录被判成重名、跨目录直接报「名称不合法」——剪切功能整个用不了。
+   *
+   * 落地仍然是后端的一次 rename（同一个存储卷，瞬时）；目标重名直接拒绝，绝不覆盖。
+   */
+  async function moveEntryAt(name: string, path: string, destDir: string) {
+    const s = state(name)
+    const fileName = path.split('/').pop() ?? ''
+    const parent = path.split('/').slice(0, -1).join('/') || name
+    if (!fileName || !destDir || destDir === parent || /[\/]/.test(fileName)) {
+      throw new Error(i18n.global.t('tree.renameInvalid'))
+    }
+    // 目标目录必须现拉一次：缓存里那份可能是旧的，拿它判重名会覆盖别人的文件。
+    try {
+      await loadDir(name, destDir, true)
+    } catch {
+      throw new Error(
+        i18n.global.t('tree.renameListFailed', { name: destDir.split('/').pop() ?? destDir }),
+      )
+    }
+    if ((s.dirs[destDir] ?? []).some((entry) => entry.name === fileName)) {
+      throw new Error(i18n.global.t('tree.renameExists', { name: fileName }))
+    }
+
+    const to = `${destDir}/${fileName}`
+    await renameEntry(path, to)
+    await refreshDir(name, parent)
+    applyPathChange(name, path, to)
+    s.expanded[destDir] = true
+  }
+
   async function copyEntryAt(name: string, path: string, to: string) {
     await copyEntry(path, to)
     const parent = path.split('/').slice(0, -1).join('/') || name
@@ -819,8 +880,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     files: File[],
     overwrite: boolean,
     onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
   ) {
-    const res = await uploadFiles(dir, files, overwrite, onProgress)
+    const res = await uploadFiles(dir, files, overwrite, onProgress, signal)
     await refreshDir(name, dir)
     bumpAssets(name)
     return res
@@ -888,6 +950,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     createEntryAt,
     removeEntryAt,
     renameEntryAt,
+    moveEntryAt,
     copyEntryAt,
     extractAt,
     uploadTo,

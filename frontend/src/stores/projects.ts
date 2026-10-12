@@ -51,8 +51,8 @@ export const useProjectsStore = defineStore('projects', () => {
     await refresh()
   }
 
-  async function importFpk(file: File, onProgress?: (p: number) => void) {
-    const res = await importProject(file, onProgress)
+  async function importFpk(file: File, onProgress?: (p: number) => void, signal?: AbortSignal) {
+    const res = await importProject(file, onProgress, signal)
     await refresh()
     return res.project
   }

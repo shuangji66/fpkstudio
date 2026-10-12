@@ -176,7 +176,7 @@ func TestOutputSameAsProjectRoot(t *testing.T) {
 	}
 	defer m.Close()
 
-	if !m.outputIsProject() {
+	if !outputIsProject(m.snap()) {
 		t.Fatalf("项目根 %q 与输出目录 %q 相同，outputIsProject() 应为真", m.ProjectRoot(), m.OutputDir())
 	}
 

@@ -10,7 +10,11 @@ import (
 
 // staticHandler 返回静态资源处理器。
 func (s *Server) staticHandler() http.Handler {
-	index, _ := fs.ReadFile(s.web, "index.html")
+	index, err := fs.ReadFile(s.web, "index.html")
+	if err != nil {
+		// 构建流程保证有它；真缺了的话所有 SPA 路由会回一个空 200，先留个线索。
+		s.log.Warnf("内嵌资源里没有 index.html：SPA 页面会返回空内容（%v）", err)
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, s.cfg.BaseURL)
@@ -30,6 +34,15 @@ func (s *Server) staticHandler() http.Handler {
 		name := path.Clean(rel)
 		if strings.Contains(name, "..") {
 			http.NotFound(w, r)
+			return
+		}
+
+		// index.html 也要走 serveIndex：它带着 base href 与运行时配置的注入。
+		// 原样发出去的话，用 /app/fpkstudio/index.html 打开（书签、外链常见）会拿到一个
+		// 没有 window.__FPKSTUDIO__ 的页面，前端把 baseURL 回落成 "/"，所有 /api/* 都
+		// 打到错误的前缀上——页面画得出来，功能全挂。
+		if name == "index.html" {
+			s.serveIndex(w, index)
 			return
 		}
 

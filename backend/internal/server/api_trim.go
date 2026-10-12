@@ -234,6 +234,9 @@ func sameOrInside(want, allowed string) bool {
 // ---- 飞牛开放 API 的转发 ----
 
 func (s *Server) handleTrimStatus(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodGet); err != nil {
+		return err
+	}
 	return writeJSON(w, map[string]any{
 		"trim": s.trim.Probe(r.Context()),
 		"user": gatewayUserOf(r),
@@ -242,6 +245,9 @@ func (s *Server) handleTrimStatus(w http.ResponseWriter, r *http.Request) error 
 
 // handleTrimFolders 列出当前用户授权给本应用的目录（不含文件授权）。
 func (s *Server) handleTrimFolders(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodGet); err != nil {
+		return err
+	}
 	u := gatewayUserOf(r)
 	paths, err := s.trim.GetUserAccessibleFolders(r.Context(), u.UID)
 	if err != nil {
@@ -256,6 +262,9 @@ func (s *Server) handleTrimFolders(w http.ResponseWriter, r *http.Request) error
 // 反过来的话，用户在选择器里取消、或者选择器直接报错，旧授权已经没了而配置里还写着它，
 // 应用会突然读不到自己的项目目录。授权目录会一份份堆在系统里这件事，靠删旧的解决。
 func (s *Server) handleTrimFolderDelete(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -275,6 +284,9 @@ func (s *Server) handleTrimFolderDelete(w http.ResponseWriter, r *http.Request) 
 
 // handleTrimACL 检查当前用户对若干路径的权限。
 func (s *Server) handleTrimACL(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
 	var req struct {
 		Paths []string `json:"paths"`
 	}
@@ -296,6 +308,9 @@ func (s *Server) handleTrimACL(w http.ResponseWriter, r *http.Request) error {
 // 一丢就变成「系统按别的语言返回」甚至转不出来。查询串与 Accept-Language 仍然认，
 // 给 curl 用。
 func (s *Server) handleTrimSemantic(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
 	var req struct {
 		Paths    []string `json:"paths"`
 		Language string   `json:"language"`
@@ -317,6 +332,9 @@ func (s *Server) handleTrimSemantic(w http.ResponseWriter, r *http.Request) erro
 // 路径是前端传上来的，所以这里按当前登录用户再判一次读权限：pickUserFile 只
 // 保证「应用用户」拿到了 ACL，不代表当前登录用户能读这个文件。
 func (s *Server) handleProjectImportPath(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -338,7 +356,8 @@ func (s *Server) handleProjectImportPath(w http.ResponseWriter, r *http.Request)
 
 	info, err := s.prj.ImportPath(r.Context(), path)
 	if err != nil {
-		return internal("%v", err)
+		// 路径不合法 / 包太大都是用户能自己处理的，回 400；其余才是服务端故障。
+		return projectError(err)
 	}
 	s.log.Infof("从 %s 导入项目 %s", path, info.Name)
 	return writeJSON(w, map[string]any{"ok": true, "project": info})

@@ -1,6 +1,11 @@
 package projects
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseManifestAlignedTemplate(t *testing.T) {
 	// 官方 fnpack 生成的 manifest 是「对齐 + = 两侧留空格」的，不能按固定格式切。
@@ -91,5 +96,66 @@ func TestParseManifestHandlesCRLF(t *testing.T) {
 	kv := parseManifest(text)
 	if kv["appname"] != "demo" || kv["version"] != "1.0.0" {
 		t.Errorf("CRLF 未被处理: %v", kv)
+	}
+}
+
+// setManifestPlatform 是「按行改 manifest」的那一处，必须和 parseManifest 一样跳过
+// `"""` 多行值：desc 正文里出现一行 `platform = x86` 时，改错行的表现是「产物里的
+// platform 和用户选的不一致」，而且描述正文被改坏。
+func TestSetManifestPlatformSkipsMultilineValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest")
+	src := "appname = demo\ndesc = \"\"\"\nplatform = x86 这是描述里的一行\n\"\"\"\nplatform = all\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := setManifestPlatform(path, "arm"); err != nil {
+		t.Fatalf("setManifestPlatform 失败: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+
+	if !strings.Contains(got, "platform = x86 这是描述里的一行") {
+		t.Errorf("描述正文被改坏了：\n%s", got)
+	}
+	if !strings.Contains(got, "platform=arm") {
+		t.Errorf("真正的 platform 行没被改：\n%s", got)
+	}
+	if strings.Contains(got, "platform = all") {
+		t.Errorf("原来的 platform 行还在：\n%s", got)
+	}
+	if v := parseManifest(got)["platform"]; v != "arm" {
+		t.Errorf("解析回来的 platform = %q，期望 arm", v)
+	}
+	// 其余行一个都不能少。
+	for _, want := range []string{"appname = demo", "desc = \"\"\""} {
+		if !strings.Contains(got, want) {
+			t.Errorf("少了 %q：\n%s", want, got)
+		}
+	}
+}
+
+// 没有 platform 键时补一行，且不能丢掉已有的最后一行（文件不以换行结尾的情况）。
+func TestSetManifestPlatformAppendsWithoutDroppingLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest")
+	src := "appname = demo\nversion = 1.0.0"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := setManifestPlatform(path, "x86"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	got := string(data)
+	if !strings.Contains(got, "version = 1.0.0") {
+		t.Errorf("最后一行被吃掉了：%q", got)
+	}
+	if !strings.Contains(got, "platform=x86") {
+		t.Errorf("没有补上 platform：%q", got)
 	}
 }

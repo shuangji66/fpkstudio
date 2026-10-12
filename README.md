@@ -321,7 +321,7 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
   会被整体拒绝（tar 自己对越界名字只给警告、退出码还是 0；`unzip` 更省事，它把越界名字
   截断成安全名字照写不误、退出码给 1——两者都挡不住，所以解压前先自己列一遍成员名：
   tar 用 `tar -t`、zip 用 `unzip -Z1`；zip 的反斜杠分隔同样按 `/` 归一后再判）。
-  归档里的**符号链接一律不还原**（`fsx.dropLinks`）：链接可以指向归档外面，
+  归档里的**符号链接一律不还原**（`fsx.sanitizeExtracted`，非普通文件也一样）：链接可以指向归档外面，
   `ln -s /etc/passwd leak` 留在项目里既点不进去，又会被后面的复制 / 打包顺着读出去；
   丢掉的数量会一并提示。
 - **移动布局**：窄屏（< 768px，和 Tailwind 的 `md` 断点一致）自动切过去，也可以在
@@ -418,11 +418,15 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
     小图缩放默认「不变」（小图和大图一样大，也就是 ICON.PNG 落成 256px）；想跟文件名
     （icon_64.png）对上就手动选 1/4。写入直接覆盖同名文件，
     写完后文件树、缩略图与图片预览都会刷新（URL 上带了 `assetRev`，不吃浏览器缓存）。
+- **上传与导入都能取消**：上传 / 导入进行中，工具条（或导入面板）上会出现进度与
+  「取消」，点了立刻 abort；服务端跟着停、写了一半的文件删掉。单个请求上限 1G，
+  超了会明确回一句「超过上限」，不会写一个半截文件进去。
 - **复制 / 剪切 / 粘贴**：右键节点、或用行尾那个低调的「···」出菜单。复制和剪切
   **只记路径**（剪贴板，两种模式共用），粘到哪个目录由你选：在目录上粘贴就是粘进去，
   在文件上粘贴就落到它的父目录。剪切中的那一行会淡一半；**粘一次就清空剪贴板**
   （复制和剪切都是）——它在这里只是「搬一次文件」的中转，留着反而容易在切了几层目录
-  之后粘错地方。目标重名时复制自动加「副本」、**绝不覆盖**，剪切则直接拒绝（改名到一个
+  之后粘错地方。**剪切到同一个目录**等于什么都没做（剪贴板留着）。目标重名时复制自动加
+  「副本」、**绝不覆盖**，剪切则直接拒绝（改名到一个
   已存在的路径上，轻则报错重则覆盖，不如让用户自己决定）。菜单贴近窗口右 / 下边缘时会
   自己收回来，不会被切掉。
 - **上传带进度**：文件树的目录菜单和标签页顶栏都能上传（同名直接覆盖），上传期间是
@@ -684,21 +688,22 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/system/info` | 版本、目录、socket、fnpack 探测结果 |
+| GET | `/api/projects` | 项目列表（`GET` 之外的方法回 405，所有写接口同理） |
 | GET | `/api/projects` | 项目列表 |
 | POST | `/api/projects/create` | `{name, docker, ui}` → 调 `fnpack create`；项目名需 3–32 位、字母数字开头结尾，中间可含 `. _ -` |
 | POST | `/api/projects/delete` | `{name}` |
 | GET | `/api/projects/exists?name=` | 是否存在、是否 docker、是否有桌面入口 |
 | GET | `/api/projects/platforms?name=` | `building/platform/` 下的架构目录 |
 | GET/PUT | `/api/projects/settings?name=` | 打包偏好（`platforms` 始终是数组，不会返回 `null`） |
-| POST | `/api/projects/import` | multipart 上传 `.fpk`，解包成项目 |
+| POST | `/api/projects/import` | multipart 上传 `.fpk`（**上限 1G**，超了回 413；可取消），解包成项目 |
 | POST | `/api/projects/pack` | `{name, platforms[], serverDir, copyOut}` |
 | GET | `/api/projects/artifacts?name=` | 产物列表（项目内 + 输出目录） |
 | GET/POST | `/api/fs/list?path=` | 目录列表，`path` 也可以放在 JSON body 里（前端就是这么调的） |
-| GET/POST | `/api/fs/read?path=` | 读文件（二进制会返回 `text:false`，不带内容） |
+| GET/POST | `/api/fs/read?path=` | 读文件（二进制会返回 `text:false`，不带内容）。**超过 8MB 的文件只回元信息**（`tooLarge:true`，`content` 为空），界面给「下载后用本机编辑器改」的提示 |
 | POST | `/api/fs/write` | `{path, content}`（`GET`/`PUT` 也收，前端用 POST） |
 | POST | `/api/fs/create` \| `delete` \| `rename` \| `copy` | 文件操作；`create` **文件已存在时拒绝**（不会把已有文件清空），目录仍是幂等的 `mkdir -p`；`rename` / `copy` 目标已存在时也拒绝 |
-| POST | `/api/fs/upload` | multipart（`path` / `overwrite` / `file`）；`overwrite=false` 时**跳过**已存在的文件（响应里给 `skipped`），`true` 才覆盖。`app/server/` 下的文件按 0755 落地 |
-| POST | `/api/fs/extract` | `{path}` → 解压到压缩包所在目录（系统 tar / unzip / gzip），返回 `{kind, dir, files, skipped, links}`；同名文件跳过不覆盖，符号链接不还原 |
+| POST | `/api/fs/upload` | multipart（`path` / `overwrite` / `file`）；`overwrite=false` 时**跳过**已存在的文件（响应里给 `skipped`），`true` 才覆盖。**单个请求上限 1G**（超了回 413），客户端断开 / 取消时服务端跟着停、半截文件删掉；打包落地目录（`serverDir`，默认 `app/server`）下的文件按 0755 落地，其余 0644 |
+| POST | `/api/fs/extract` | `{path}` → 解压到压缩包所在目录（系统 tar / unzip / gzip），返回 `{kind, dir, files, skipped, links, specials}`；同名文件跳过不覆盖；符号链接与 FIFO / 设备节点都不还原（`links` / `specials` 是丢掉的个数）；归档本身必须是沙箱里的普通文件（符号链接会被拒绝）；一次解压有 10 分钟上限 |
 | GET | `/api/fs/download?path=` | 下载文件，目录会打成 zip |
 | GET | `/api/logs?after=&limit=&source=` | 增量拉日志；响应里的 `boot` 是后端进程标识 |
 | GET | `/api/logs/stream?after=` | SSE 实时日志；第一帧是 `event: boot`（带进程标识与 `lastSeq`），前端靠它判断「后端换进程了、去重游标要归零」 |
@@ -708,7 +713,11 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
 | POST | `/api/trim/folders/delete` | `{path}` → 删除一条目录授权 |
 | POST | `/api/trim/acl` | `{paths[]}` → 当前用户对若干路径的读 / 写 / 删权限 |
 | POST | `/api/trim/semantic` | `{paths[]}` + `?language=` → 语义化路径（`/vol1/...` → 存储空间1/…） |
-| POST | `/api/projects/import-path` | `{path}` → 导入本机某个绝对路径上的 fpk（飞牛文件选择器选的） |
+| POST | `/api/projects/import-path` | `{path}` → 导入本机某个绝对路径上的 fpk（飞牛文件选择器选的）；包本身**上限 1G**（这条没有请求体可卡，按文件大小判） |
+
+**状态码语义**：目标不存在 = 404（前端按「还没创建」处理），路径不合法 / 目标是目录 /
+目标已存在 = 400 / 409，没有权限 = 403，请求体或上传超限 = 413，方法不对 = 405，其余才是 500。
+`path` 里的 `..` 会被拒绝（400），越界的写法不会静默改写。
 
 `/api/trim/*` 与 `/api/projects/import-path` 都按**飞牛统一网关转发的用户**判权限
 （`X-Trim-Userid`，见下节），没经过网关时退化成后端进程自己的 uid。
@@ -786,6 +795,26 @@ Makefile 用的本地缓存目录都在 `.gitignore` 里，仓库里只留源码
   连不上才当残留文件清掉。退出时只删自己那个 socket（比对 inode），不会误删新实例的。
 - **构建产物清理**。fnpack 模板自带 `.DS_Store`，在部分文件系统上会让 `fnpack build`
   直接失败，所以创建和导入项目后都会清掉这些文件。
+- **产物文件名只由受校验的成分拼成**。产物叫 `<appname>-<version>-<platform>.fpk`，三个
+  成分都来自 manifest（用户能随便写，导入的 fpk 更是别人给的），所以拼之前按「一个文件名的
+  成分」逐个校验（不含分隔符 / 控制字符、不是 `.` 或 `..`、长度有上限）；落地走
+  `fsx.Root.WriteReader`，不用绝对路径拼——`filepath.Join` 会把 `..` 规整掉，
+  `version = ../../x` 这种值能让产物写到项目根之外。`serverDir` 同样不许填 `.`
+  （那会把整个暂存项目连同 manifest 一起替换掉）。
+- **解压结果里只有普通文件与目录**。归档成员名先校验（绝对路径 / `..` 直接拒绝），解到本次
+  请求独占的暂存目录，然后把**符号链接与非普通文件**（FIFO、设备节点）都删掉再逐个
+  `rename` 就位。链接会指向归档之外（打包 / 导出时被顺着读出去）；FIFO 更直接——没有写者时
+  `open(2)` 一直阻塞，留在项目里之后每次读它都会永久占住一个 goroutine 和一个子进程。
+  交给外部命令的是绝对路径，`os.Root` 在这一步帮不上忙，所以**归档本身也必须是普通文件**
+  （指向沙箱外的符号链接会被拒绝）。
+- **读、上传、解压都有上限**。`/api/fs/read` 超过 8MB 只回元信息；上传 / 导入单个请求
+  1G（`http.MaxBytesReader`，以前只给了 `ParseMultipartForm` 一个内存阈值，总量不设限时
+  超出的部分会落进程 TMPDIR，一直传就能灌满盘）；解压给 10 分钟上限并把请求的 ctx 传下去，
+  客户端断开时子进程被杀掉。上传与导入都支持取消：前端 abort，后端的写入用
+  `ctxReader` 立刻退出、半截文件删掉。
+- **日志环按配置的上限裁**。上限单独存成 `ringMax`，不能拿 `cap(l.ring)` 当上限：`append`
+  会先把容量翻倍，于是 `len > cap` 在 append 之后永远不成立——那段裁剪曾经是死代码，
+  日志环实际上从不封顶（`internal/logging/ring_test.go` 钉住了这一条）。
 
 ## 已知限制
 
@@ -797,7 +826,10 @@ Makefile 用的本地缓存目录都在 `.gitignore` 里，仓库里只留源码
 - 图标页的「小图」默认按工作尺寸导出（默认 256×256），文件名仍是 `ICON.PNG` /
   `<前缀>_64.png`；想跟文件名对上，把「小图缩放」改成 1/4（64px）。
 - 打包是同步请求，超大项目会让这个 HTTP 请求长时间不返回；日志通过 SSE 实时输出，
-  前端不会卡住，但请求本身没有超时控制。
+  前端不会卡住，但打包请求本身没有超时控制（读 / 上传 / 解压有，见上）。
+- 下载目录（`/api/fs/download?path=<目录>`）会先把 zip 打进数据目录下的临时文件再发正文：
+  这样「某个文件读不了」能回一句错误，而不是发一个里面是 0 字节条目的残包。代价是下载期间
+  多占一份临时空间。
 - 没有项目级别的并发保护：同一个项目同时触发两次打包，第二次会等在暂存区复制之后，
   结果是两份产物互相覆盖（不会污染项目本身）。
 - `wizard` 编辑器的表单不呈现「认识之外的键」（例如 fnOS 以后新增的字段），
@@ -808,7 +840,8 @@ Makefile 用的本地缓存目录都在 `.gitignore` 里，仓库里只留源码
   想用压缩包里的版本覆盖项目里已有的同名文件，得先自己把旧文件删掉。解压也只会刷新
   压缩包所在的那一层目录，更深的子目录里如果已经展开过，那份列表要等下一次刷新。
 - 重命名**不覆盖**已存在的同名文件（直接报错），也不会把文件搬进子目录——名字里带
-  `/` 会被拒掉。要在目录之间搬文件，用「剪切 + 粘贴」。
+  `/` 会被拒掉。要在目录之间搬文件，用「剪切 + 粘贴」（store 里是 `moveEntryAt`，
+  和 `renameEntryAt` 是两条路：后者只负责同目录改名）。
 - 移动布局是同一套组件换排布，不是另一套页面：切换时项目里的编辑器宿主会被重建，
   编辑器里没保存的内容靠 `FileTab.draft` 接力（重新挂载后接着编，脏标记也对得上），
   但「表单 / 源码」的视图选择会回到表单——这一点和切标签不一样。

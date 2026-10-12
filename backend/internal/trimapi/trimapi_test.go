@@ -280,3 +280,53 @@ func TestNewDefaultsSocket(t *testing.T) {
 		t.Errorf("appName = %q，期望 fpkstudio", got)
 	}
 }
+
+// DelUserAccessibleFolder：成功要真的调对 req、带上 uid 与 path；
+// 系统回 suc=false 时也要算失败（否则界面会以为旧授权删掉了）。
+func TestDelUserAccessibleFolder(t *testing.T) {
+	var got apiRequest
+	_, c := fakeGateway(t, func(req apiRequest, _ string) (int, apiResponse) {
+		got = req
+		return http.StatusOK, apiResponse{Code: 0, Data: json.RawMessage(`{"suc":true}`)}
+	})
+
+	if err := c.DelUserAccessibleFolder(context.Background(), 1000, "/vol1/1000/photo"); err != nil {
+		t.Fatalf("删除授权目录失败: %v", err)
+	}
+	if got.Req != ReqDelUserAccessibleFolder {
+		t.Errorf("req = %q，期望 %q", got.Req, ReqDelUserAccessibleFolder)
+	}
+	data, ok := got.Data.(map[string]any)
+	if !ok || data["uid"] != float64(1000) || data["path"] != "/vol1/1000/photo" {
+		t.Errorf("data = %#v", got.Data)
+	}
+
+	// suc=false：系统没有确认删除，必须报错
+	_, c2 := fakeGateway(t, func(apiRequest, string) (int, apiResponse) {
+		return http.StatusOK, apiResponse{Code: 0, Data: json.RawMessage(`{"suc":false}`)}
+	})
+	if err := c2.DelUserAccessibleFolder(context.Background(), 1000, "/vol1/1000/photo"); err == nil {
+		t.Fatal("suc=false 应当报错")
+	}
+}
+
+// CheckUserACL：空路径不发请求；返回的裸数组（实测形态）要能解出来。
+func TestCheckUserACLEdgeCases(t *testing.T) {
+	called := false
+	_, c := fakeGateway(t, func(apiRequest, string) (int, apiResponse) {
+		called = true
+		return http.StatusOK, apiResponse{Code: 0, Data: json.RawMessage(`[{"path":"/a","readable":true}]`)}
+	})
+
+	if list, err := c.CheckUserACL(context.Background(), 1000, nil); err != nil || len(list) != 0 {
+		t.Fatalf("空路径应当直接回空列表: %v %v", list, err)
+	}
+	if called {
+		t.Error("空路径不该发请求")
+	}
+
+	list, err := c.CheckUserACL(context.Background(), 1000, []string{"/a"})
+	if err != nil || len(list) != 1 || !list[0].Readable {
+		t.Fatalf("解析裸数组失败: %+v %v", list, err)
+	}
+}

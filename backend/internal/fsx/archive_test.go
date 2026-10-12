@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -125,7 +126,7 @@ func TestExtractRejectsTraversal(t *testing.T) {
 	if err := copyInto(t, src, filepath.Join(root, "evil.tar")); err != nil {
 		t.Fatal(err)
 	}
-	_, err = x.Extract("evil.tar")
+	_, err = x.Extract(context.Background(), "evil.tar")
 	if err == nil {
 		t.Fatal("含 ../ 成员的归档应当被拒绝")
 	}
@@ -174,7 +175,7 @@ func TestExtractTarSkipsExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := x.Extract("app.tar")
+	res, err := x.Extract(context.Background(), "app.tar")
 	if err != nil {
 		t.Fatalf("解压失败: %v", err)
 	}
@@ -229,7 +230,7 @@ func TestExtractTarGzIntoSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := x.Extract("pkg/bundle.tar.gz")
+	res, err := x.Extract(context.Background(), "pkg/bundle.tar.gz")
 	if err != nil {
 		t.Fatalf("解压失败: %v", err)
 	}
@@ -261,7 +262,7 @@ func TestExtractGz(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := x.Extract("notes.txt.gz")
+	res, err := x.Extract(context.Background(), "notes.txt.gz")
 	if err != nil {
 		t.Fatalf("解压失败: %v", err)
 	}
@@ -282,19 +283,19 @@ func TestExtractRejectsBadTarget(t *testing.T) {
 	}
 	defer x.Close()
 
-	if _, err := x.Extract("."); err == nil {
+	if _, err := x.Extract(context.Background(), "."); err == nil {
 		t.Error("根目录应当被拒绝")
 	}
 	if err := os.MkdirAll(filepath.Join(root, "adir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := x.Extract("adir"); err == nil {
+	if _, err := x.Extract(context.Background(), "adir"); err == nil {
 		t.Error("目录应当被拒绝")
 	}
 	if err := os.WriteFile(filepath.Join(root, "manifest"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := x.Extract("manifest"); err == nil {
+	if _, err := x.Extract(context.Background(), "manifest"); err == nil {
 		t.Error("非压缩包应当被拒绝")
 	}
 }
@@ -357,7 +358,7 @@ func TestExtractTarCompressionVariants(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			res, err := x.Extract(c.name)
+			res, err := x.Extract(context.Background(), c.name)
 			if err != nil {
 				t.Fatalf("解压失败: %v", err)
 			}
@@ -406,7 +407,7 @@ func TestExtractSingleFileCompressors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if _, err := x.Extract("notes.txt" + c.suffix); err != nil {
+			if _, err := x.Extract(context.Background(), "notes.txt"+c.suffix); err != nil {
 				t.Fatalf("解压失败: %v", err)
 			}
 			if got, _ := os.ReadFile(filepath.Join(root, "notes.txt")); string(got) != "hello" {
@@ -440,7 +441,7 @@ func TestExtractZip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := x.Extract("bundle.zip")
+	res, err := x.Extract(context.Background(), "bundle.zip")
 	if err != nil {
 		t.Fatalf("解压失败: %v", err)
 	}
@@ -473,7 +474,7 @@ func TestExtractZipRejectsTraversal(t *testing.T) {
 	if err := copyInto(t, makeZip(t, map[string]string{"../evil.txt": "pwned"}), filepath.Join(root, "evil.zip")); err != nil {
 		t.Fatal(err)
 	}
-	_, err = x.Extract("evil.zip")
+	_, err = x.Extract(context.Background(), "evil.zip")
 	if err == nil {
 		t.Fatal("含 ../ 成员的 zip 应当被拒绝")
 	}
@@ -511,7 +512,7 @@ func TestExtractZipDropsSymlinks(t *testing.T) {
 	if err := copyInto(t, makeZipWithSymlink(t), filepath.Join(root, "bundle.zip")); err != nil {
 		t.Fatal(err)
 	}
-	res, err := x.Extract("bundle.zip")
+	res, err := x.Extract(context.Background(), "bundle.zip")
 	if err != nil {
 		t.Fatalf("解压失败: %v", err)
 	}
@@ -529,7 +530,7 @@ func TestExtractZipDropsSymlinks(t *testing.T) {
 	}
 }
 
-// tar 那条路同样不还原链接（dropLinks 对所有归档生效）。
+// tar 那条路同样不还原链接（sanitizeExtracted 对所有归档生效）。
 func TestExtractTarDropsSymlinks(t *testing.T) {
 	requireTools(t, TarBin)
 	root := t.TempDir()
@@ -552,7 +553,7 @@ func TestExtractTarDropsSymlinks(t *testing.T) {
 		t.Fatalf("打包失败: %v: %s", err, out)
 	}
 
-	res, err := x.Extract("bundle.tar")
+	res, err := x.Extract(context.Background(), "bundle.tar")
 	if err != nil {
 		t.Fatalf("解压失败: %v", err)
 	}

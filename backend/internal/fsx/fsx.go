@@ -24,6 +24,12 @@ var ErrNotExist = os.ErrNotExist
 // ErrExists 表示目标已经存在，且这次操作不允许覆盖它（见 Root.Rename）。
 var ErrExists = errors.New("目标已存在")
 
+// ErrInvalidPath 表示传进来的路径本身不合法（含 `..`、NUL 等）。
+//
+// 单独一个哨兵是为了让 HTTP 层能把它翻成 400（用户改一下就好），而不是当成服务端
+// 故障的 500——以前 `/api/fs/write {"path":"../x"}` 会回 500「路径不允许包含 ..」。
+var ErrInvalidPath = errors.New("路径不合法")
+
 // Entry 是目录列表里的一项。
 type Entry struct {
 	Name    string `json:"name"`
@@ -71,12 +77,16 @@ func (x *Root) Close() error {
 // 返回的路径一定是相对路径、用 "/" 分隔、不含 "." 和 ".." 段。
 func Rel(p string) (string, error) {
 	p = strings.ReplaceAll(p, "\\", "/")
-	p = strings.TrimSpace(p)
-	if p == "" || p == "." || p == "/" {
+	// 只在「整串都是空白」时当成根目录：无条件 TrimSpace 会把 "x "（SMB / Windows 上
+	// 很常见）指向另一个文件 "x"，删改的都是别人。
+	if strings.TrimSpace(p) == "" {
+		return ".", nil
+	}
+	if p == "." || p == "/" {
 		return ".", nil
 	}
 	if strings.ContainsRune(p, 0) {
-		return "", errors.New("路径包含非法字符")
+		return "", fmt.Errorf("%w：路径包含非法字符", ErrInvalidPath)
 	}
 	clean := path.Clean(p)
 	clean = strings.TrimPrefix(clean, "/")
@@ -85,7 +95,7 @@ func Rel(p string) (string, error) {
 	}
 	for _, seg := range strings.Split(clean, "/") {
 		if seg == ".." {
-			return "", errors.New("路径不允许包含 ..")
+			return "", fmt.Errorf("%w：路径不允许包含 ..", ErrInvalidPath)
 		}
 	}
 	return clean, nil
@@ -150,12 +160,62 @@ func (x *Root) List(rel string) ([]Entry, error) {
 }
 
 // ReadFile 读取文件。
+//
+// 只读普通文件：FIFO / 设备节点在没有写者时 open(2) 会一直阻塞，一个请求就能永久占住
+// 一个 goroutine（解压出来的 FIFO 已经会被 sanitizeExtracted 删掉，这里是第二道）。
 func (x *Root) ReadFile(rel string) ([]byte, error) {
 	rel, err := Rel(rel)
 	if err != nil {
 		return nil, err
 	}
+	if err := x.requireReadableFile(rel); err != nil {
+		return nil, err
+	}
 	return x.r.ReadFile(rel)
+}
+
+// requireReadableFile 确认目标是可读的普通文件（符号链接按它指向的东西判）。
+func (x *Root) requireReadableFile(rel string) error {
+	fi, err := x.r.Stat(rel)
+	if err != nil {
+		return err
+	}
+	if fi.IsDir() {
+		return errors.New("目标是目录")
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s 不是普通文件（FIFO / 设备节点读不了）", rel)
+	}
+	return nil
+}
+
+// ReadFileLimit 读文件，最多读 max 字节。
+//
+// 超出时返回 truncated=true 与已读到的前 max 字节——调用方（`/api/fs/read`）据此
+// 只回元信息，不把整份内容塞进 JSON：app/server 下几百 MB 的原生程序很常见，以前
+// 那个接口会先把它整份读进内存再决定要不要回。
+func (x *Root) ReadFileLimit(rel string, max int64) ([]byte, bool, error) {
+	rel, err := Rel(rel)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := x.requireReadableFile(rel); err != nil {
+		return nil, false, err
+	}
+	f, err := x.r.Open(rel)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > max {
+		return data[:max], true, nil
+	}
+	return data, false, nil
 }
 
 // OpenFile 打开文件用于流式读取（下载）。
@@ -164,12 +224,12 @@ func (x *Root) OpenFile(rel string) (*os.File, os.FileInfo, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := x.requireReadableFile(rel); err != nil {
+		return nil, nil, err
+	}
 	fi, err := x.r.Stat(rel)
 	if err != nil {
 		return nil, nil, err
-	}
-	if fi.IsDir() {
-		return nil, nil, errors.New("目标是目录")
 	}
 	f, err := x.r.Open(rel)
 	if err != nil {
@@ -262,7 +322,7 @@ func (x *Root) RepairModes(base string, scriptDirs []string) (int, error) {
 			return nil
 		}
 		perm := fi.Mode().Perm()
-		local := strings.TrimPrefix(strings.TrimPrefix(cur, base), "/")
+		local := relName(base, cur)
 
 		if isDir {
 			if perm&0o700 != 0o700 {
@@ -315,6 +375,11 @@ func (x *Root) Mkdir(rel string, perm os.FileMode, all bool) error {
 	} else if err := x.r.Mkdir(rel, perm); err != nil {
 		return err
 	}
+	// 根目录自己不改模式：`Mkdir(".", 0o755, true)` 会把用户授权的、权限可能更紧的
+	// 项目根目录静默放宽（`/api/fs/create {"path":".","dir":true}` 就能触发）。
+	if rel == "." {
+		return nil
+	}
 	return x.setMode(rel, perm)
 }
 
@@ -325,7 +390,7 @@ func (x *Root) Remove(rel string, dir bool) error {
 		return err
 	}
 	if rel == "." {
-		return errors.New("不允许删除根目录")
+		return fmt.Errorf("%w：不允许删除根目录", ErrInvalidPath)
 	}
 	fi, err := x.r.Lstat(rel)
 	if err != nil {
@@ -351,10 +416,10 @@ func (x *Root) Rename(from, to string) error {
 		return err
 	}
 	if from == "." || to == "." {
-		return errors.New("不允许移动根目录")
+		return fmt.Errorf("%w：不允许移动根目录", ErrInvalidPath)
 	}
 	if to == from || strings.HasPrefix(to, from+"/") {
-		return errors.New("不能把目录移动到自身内部")
+		return fmt.Errorf("%w：不能把目录移动到自身内部", ErrInvalidPath)
 	}
 	if parent := path.Dir(to); parent != "." {
 		if err := x.r.MkdirAll(parent, 0o755); err != nil {
@@ -383,10 +448,10 @@ func (x *Root) Copy(from, to string) error {
 		return err
 	}
 	if from == "." || to == "." {
-		return errors.New("不允许复制根目录")
+		return fmt.Errorf("%w：不允许复制根目录", ErrInvalidPath)
 	}
 	if to == from || strings.HasPrefix(to, from+"/") {
-		return errors.New("不能把目录复制到自身内部")
+		return fmt.Errorf("%w：不能把目录复制到自身内部", ErrInvalidPath)
 	}
 	// 目标已存在就拒绝，绝不覆盖——和 Rename 同一条规矩。copy 内部用 O_TRUNC 写每一个
 	// 文件，静默覆盖会让「复制到这里」变成「把那个文件换掉」，而且不可逆。正常调用方
@@ -477,15 +542,13 @@ func (x *Root) ZipDir(rel string, w io.Writer) error {
 		return err
 	}
 	zw := zip.NewWriter(w)
-	defer zw.Close()
-
 	base := rel
-	return x.walk(rel, func(cur string, fi os.FileInfo) error {
+	err = x.walk(rel, func(cur string, fi os.FileInfo) error {
 		hdr, err := zip.FileInfoHeader(fi)
 		if err != nil {
 			return err
 		}
-		name := strings.TrimPrefix(strings.TrimPrefix(cur, base), "/")
+		name := relName(base, cur)
 		if name == "" {
 			return nil
 		}
@@ -510,6 +573,12 @@ func (x *Root) ZipDir(rel string, w io.Writer) error {
 		_, err = io.Copy(fw, f)
 		return err
 	})
+	// Close 负责写中央目录，它的错误必须带出来：调用方据此判断这个 zip 能不能用
+	// （以前是 defer 里丢掉的，于是「缺文件的残包」也能得到一个 200）。
+	if closeErr := zw.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // ErrWalkStop 用于在遍历回调里提前结束（不算失败）。
@@ -602,6 +671,11 @@ func CopyTree(srcAbs, dstAbs string) error {
 	if err != nil {
 		return err
 	}
+	// 目标已存在就拒绝，绝不覆盖——和 Root.Copy 同一条规矩。copyTree 内部用 O_TRUNC
+	// 写每一个文件，静默覆盖会让「导入一个项目」变成「把同名项目的文件换掉」。
+	if _, statErr := os.Lstat(dstAbs); statErr == nil {
+		return fmt.Errorf("%w：%s", ErrExists, dstAbs)
+	}
 	return copyTree(srcAbs, dstAbs, fi)
 }
 
@@ -670,6 +744,21 @@ func toEntry(fi os.FileInfo) Entry {
 		e.Dir = false
 	}
 	return e
+}
+
+// relName 把遍历拿到的路径 cur 变成相对 base 的名字（zip 条目名、权限判断都用它）。
+//
+// 不能直接 `strings.TrimPrefix(cur, base)`：base 是 "." 时（下载整个项目根、或者
+// 在根上跑 RepairModes）它会把「以点开头」的名字吃掉一个字符——`.hidden/` 变成
+// `hidden/`，和真正的 `hidden/` 撞在一起，zip 里就是两个同名条目互相覆盖。
+func relName(base, cur string) string {
+	if base == "." || base == "" {
+		if cur == "." {
+			return ""
+		}
+		return cur
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(cur, base), "/")
 }
 
 // HumanSize 把字节数格式化成便于展示的形式。

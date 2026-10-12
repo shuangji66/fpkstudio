@@ -45,13 +45,22 @@
       <input ref="input" type="file" accept=".fpk,.tar,.tgz,application/gzip" class="hidden" @change="onPick" />
     </div>
 
-    <el-progress
-      v-if="loading"
-      class="mt-3"
-      :percentage="percent"
-      :stroke-width="6"
-      :format="() => t('home.import.uploading', { percent })"
-    />
+    <p class="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+      {{ t('home.import.limitHint') }}
+    </p>
+
+    <div v-if="loading" class="mt-3 flex items-center gap-2">
+      <el-progress
+        class="min-w-0 flex-1"
+        :percentage="percent"
+        :stroke-width="6"
+        :format="() => t('home.import.uploading', { percent })"
+      />
+      <!-- 只有「浏览器上传」这一路能取消：走飞牛选择器的那条是后端读本机文件，没有请求体可断 -->
+      <el-button v-if="cancelable" size="default" @click="cancelUpload">
+        {{ t('common.cancel') }}
+      </el-button>
+    </div>
   </div>
 </template>
 
@@ -77,6 +86,10 @@ const input = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 const loading = ref(false)
 const percent = ref(0)
+/** 当前这次上传的取消手柄（只有浏览器上传那一路有）。 */
+let controller: AbortController | null = null
+/** 正在上传、且这一路支持取消。 */
+const cancelable = computed(() => loading.value && controller !== null)
 
 const hostAvailable = computed(() => isHostAvailable())
 
@@ -126,17 +139,32 @@ async function pickHostFile() {
 }
 
 async function upload(file: File) {
+  const ctl = new AbortController()
+  controller = ctl
   loading.value = true
   percent.value = 0
   try {
-    const info = await projects.importFpk(file, (p) => {
-      percent.value = p
-    })
+    const info = await projects.importFpk(
+      file,
+      (p) => {
+        percent.value = p
+      },
+      ctl.signal,
+    )
     emit('done', info)
   } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
+    // 用户自己点的取消不是错误
+    if (ctl.signal.aborted) ElMessage.info(t('home.import.canceled'))
+    else ElMessage.error(e instanceof Error ? e.message : String(e))
   } finally {
+    if (controller === ctl) controller = null
     loading.value = false
+    percent.value = 0
   }
+}
+
+/** 取消正在进行的导入（后端收到 ctx 取消后会清掉暂存目录）。 */
+function cancelUpload() {
+  controller?.abort()
 }
 </script>

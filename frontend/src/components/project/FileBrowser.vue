@@ -105,6 +105,23 @@
       </template>
     </div>
 
+    <!-- 上传中：进度 + 取消（取消 = abort，后端也会跟着停，不留半截文件） -->
+    <div
+      v-if="uploading"
+      class="flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-2 py-1"
+    >
+      <el-progress
+        class="min-w-0 flex-1"
+        :percentage="uploadPercent"
+        :stroke-width="6"
+        :show-text="false"
+      />
+      <span class="mono shrink-0 text-[11px] text-slate-500 dark:text-slate-400">{{ uploadPercent }}%</span>
+      <el-button text size="default" class="tree-tool shrink-0" @click="cancelUpload">
+        {{ t('common.cancel') }}
+      </el-button>
+    </div>
+
     <!-- 列表的标题栏：目录不显示大小，所以大小那一格留空 -->
     <div
       v-if="state.browserView === 'list'"
@@ -250,7 +267,7 @@ const props = defineProps<{ project: string; mobile?: boolean }>()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
-const { upload } = useUpload()
+const { upload, cancel: cancelUpload, busy: uploading, percent: uploadPercent } = useUpload()
 const { download } = useDownload()
 
 const state = computed(() => workspace.state(props.project))
@@ -409,6 +426,7 @@ async function paste() {
   try {
     const outcome = await workspace.pasteInto(props.project, destDir)
     if (outcome === 'exists') ElMessage.warning(t('tree.pasteExists', { name }))
+    else if (outcome === 'same') ElMessage.info(t('tree.pasteSame', { name }))
     else if (outcome === 'unreadable') {
       ElMessage.error(t('tree.pasteListFailed', { name: destDir.split('/').pop() ?? destDir }))
     }
@@ -428,8 +446,10 @@ async function extract() {
     } else {
       ElMessage.success(t('tree.extractDone', { name, files: res.files }))
     }
-    // 归档里的符号链接不会还原，单独说一句（不是错误，但用户得知道少了什么）。
+    // 归档里的符号链接与 FIFO / 设备节点都不会还原，单独说一句
+    // （不是错误，但用户得知道少了什么）。
     if (res.links > 0) ElMessage.warning(t('tree.extractLinks', { count: res.links }))
+    if (res.specials > 0) ElMessage.warning(t('tree.extractSpecials', { count: res.specials }))
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
   }

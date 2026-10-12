@@ -52,8 +52,12 @@ type Entry struct {
 
 // Logger 是所有组件的公共日志出口。
 type Logger struct {
-	mu       sync.Mutex
-	ring     []Entry
+	mu   sync.Mutex
+	ring []Entry
+	// ringMax 是内存里最多留几条。**必须单独存**，不能拿 cap(l.ring) 当上限：
+	// append 会先把容量翻倍，于是「len > cap」在 append 之后永远不成立——那段裁剪
+	// 以前是死代码，日志环实际上从不封顶，进程跑久了内存只涨不落。
+	ringMax  int
 	seq      int64
 	file     *os.File
 	fileSize int64
@@ -76,6 +80,7 @@ func New(logFile, level string, ringSize int) (*Logger, error) {
 	}
 	l := &Logger{
 		ring:    make([]Entry, 0, ringSize),
+		ringMax: ringSize,
 		minRank: rankOf(level),
 		subs:    make(map[int]chan Entry),
 		boot:    fmt.Sprintf("%d", time.Now().UnixNano()),
@@ -146,9 +151,9 @@ func (l *Logger) write(source, level, msg string) {
 		Msg:    msg,
 	}
 	l.ring = append(l.ring, e)
-	if len(l.ring) > cap(l.ring) {
-		// 丢掉最旧的一批，避免每次 append 都搬内存。
-		drop := len(l.ring) - cap(l.ring)
+	// 按配置的上限裁（见 ringMax 的说明）：超过就丢掉最旧的一批。
+	if len(l.ring) > l.ringMax {
+		drop := len(l.ring) - l.ringMax
 		l.ring = append(l.ring[:0], l.ring[drop:]...)
 	}
 	l.writeFileLocked(now, source, level, msg)

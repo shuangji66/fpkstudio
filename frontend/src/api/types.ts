@@ -90,6 +90,8 @@ export interface FileContent {
   sizeRaw: string
   text: boolean
   content: string
+  /** 为真表示文件太大，后端没有把内容带回来（编辑器要给「去下载」的提示）。 */
+  tooLarge: boolean
 }
 
 /** 解压结果（`/api/fs/extract`）。 */
@@ -102,8 +104,10 @@ export interface ExtractResult {
   files: number
   /** 因为同名已存在而跳过的文件数。 */
   skipped: number
-  /** 归档里带、但没有还原的符号链接数（后端不还原链接，见 fsx.dropLinks）。 */
+  /** 归档里带、但没有还原的符号链接数（后端不还原链接，见 fsx.sanitizeExtracted）。 */
   links: number
+  /** 归档里带、但没有还原的非普通文件数（FIFO / 设备节点，见 fsx.sanitizeExtracted）。 */
+  specials: number
 }
 
 export interface LogEntry {
@@ -123,10 +127,14 @@ export interface GatewayUser {
   fromGateway: boolean
 }
 
-/** 飞牛开放 API 的可用状态。 */
+/**
+ * 飞牛开放 API 的可用状态。
+ *
+ * 不带 socket 路径：那套网关 socket 只在服务端用，不往浏览器下发（见后端
+ * trimapi.Status 的说明）。
+ */
 export interface TrimStatus {
   available: boolean
-  socket: string
   app: string
   message: string
 }

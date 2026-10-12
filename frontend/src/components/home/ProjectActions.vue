@@ -91,6 +91,15 @@ async function openFolder() {
 /** 目录名规则与 fnpack create 保持一致：字母数字开头，可含 . _ -。 */
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
+/**
+ * 应用标识（appname）的规则：3–32 位、字母数字开头结尾，中间可含 . _ -。
+ *
+ * 「创建副本」会把新项目名直接写进副本 manifest 的 `appname`，所以要按 appname 的规则
+ * 校验——比目录名严：名字太短 / 太长 / 以 `.` 结尾都过不了 fnpack，而报错会等到打包那一步
+ * 才出现（「appname ilegal」），用户完全不知道是自己起名字时就错了。
+ */
+const APPNAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{1,30}[A-Za-z0-9]$/
+
 function run(command: string) {
   if (command === 'rename') void rename()
   else if (command === 'duplicate') void duplicate()
@@ -162,8 +171,8 @@ async function duplicate() {
   try {
     const res = await ElMessageBox.prompt(t('home.duplicatePrompt', { name: from }), t('home.duplicate'), {
       // 刻意不给默认值：副本名得自己想，随手回车只会撞上「已经有一个叫 xxx 的项目」
-      inputPattern: NAME_RE,
-      inputErrorMessage: t('home.renameInvalid'),
+      inputPattern: APPNAME_RE,
+      inputErrorMessage: t('home.duplicateInvalid'),
       confirmButtonText: t('common.confirm'),
       cancelButtonText: t('common.cancel'),
     })

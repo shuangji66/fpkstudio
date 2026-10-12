@@ -98,7 +98,9 @@
     </div>
 
     <div v-else-if="!showEditor" class="flex flex-1 flex-col items-center justify-center gap-3">
-      <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('editor.binary') }}</p>
+      <p class="text-xs text-slate-500 dark:text-slate-400">
+        {{ tab.tooLarge ? t('editor.tooLarge', { size: tab.sizeRaw }) : t('editor.binary') }}
+      </p>
       <el-button size="default" @click="workspace.downloadAt(`${project}/${tab.path}`)">
         {{ t('common.download') }}
       </el-button>
@@ -210,8 +212,16 @@ const activeComponent = computed(() => {
   return mode.value === 'form' ? d.component : SourceEditor
 })
 
-/** 能不能渲染出内容：文本文件可以，图片这类标了 previews 的也可以。 */
-const showEditor = computed(() => Boolean(tab.value?.text) || def.value.previews === true)
+/**
+ * 能不能渲染出内容：文本文件可以，图片这类标了 previews 的也可以。
+ *
+ * 太大而没把内容带回来的文件（`tooLarge`）不算——后端只回了元信息，交给编辑器只会
+ * 得到一份空文本，用户还以为文件是空的。
+ */
+const showEditor = computed(
+  () =>
+    !tab.value?.tooLarge && (Boolean(tab.value?.text) || def.value.previews === true),
+)
 
 // 卸载前把手里没保存的内容交回 store（见 loadText 的说明）。父组件的
 // beforeUnmount 先于子组件卸载执行，所以这时候 inner 还是活的。

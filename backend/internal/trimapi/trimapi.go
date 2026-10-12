@@ -109,9 +109,12 @@ func (c *Client) Socket() string { return c.socket }
 func (c *Client) AppName() string { return c.appName }
 
 // Status 描述当前环境的可用状态，用于前端的「是否在飞牛里」提示。
+//
+// Socket **不带 json tag**：这套网关 socket 只在服务端用，不往浏览器下发（AGENTS 的
+// 约定）。前端需要的是「可不可用 + 一句原因」，路径对它没有用处。
 type Status struct {
 	Available bool   `json:"available"`
-	Socket    string `json:"socket"`
+	Socket    string `json:"-"`
 	App       string `json:"app"`
 	Message   string `json:"message"`
 }

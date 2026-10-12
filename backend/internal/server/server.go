@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"path"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +41,9 @@ type Server struct {
 	mux        *http.ServeMux
 	startedAt  time.Time
 	socketFile os.FileInfo
+	// closing 在关服时关闭：SSE 这类「一直挂着等事件」的 handler 靠它主动退出，
+	// 否则 Shutdown 只能等满超时（实测每次 SIGTERM 都要白等 5 秒）。
+	closing chan struct{}
 }
 
 // New 构造 Server。
@@ -52,6 +57,7 @@ func New(cfg *config.Config, log *logging.Logger, fn *fnpack.Client, prj *projec
 		trim:      trim,
 		mux:       http.NewServeMux(),
 		startedAt: time.Now(),
+		closing:   make(chan struct{}),
 	}
 	s.web = web
 	s.routes()
@@ -123,7 +129,18 @@ func (s *Server) api(pattern string, h handlerFunc) {
 func (s *Server) wrap(pattern string, h handlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		err := h(w, r)
+		// 一个 handler 里的 panic 不能把整个进程带走（net/http 自己会 recover，但那样
+		// 连接直接断掉、日志里也只有一行 stderr）。这里兜住并记进日志器。
+		var err error
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					s.log.Errorf("处理 %s 时 panic: %v\n%s", pattern, rec, debug.Stack())
+					err = internal("服务内部错误: %v", rec)
+				}
+			}()
+			err = h(w, r)
+		}()
 		if err != nil {
 			writeError(w, err)
 		}
@@ -163,6 +180,9 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler:           s.mux,
 		ReadHeaderTimeout: 15 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		// net/http 自己的报错（superfluous WriteHeader、连接被重置…）默认只进 stderr，
+		// 而日志弹窗是用户唯一能看到的地方。
+		ErrorLog: log.New(logWriter{s.log}, "", 0),
 	}
 
 	errc := make(chan error, 1)
@@ -182,9 +202,15 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	s.log.Infof("收到退出信号，正在停止…")
+	// 先让 SSE 这类长连接 handler 自己退出，再 Shutdown：Shutdown 不会取消请求的
+	// context，挂着不动的 handler 只能等满超时。
+	close(s.closing)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		s.log.Warnf("优雅停止超时（%v），强制关闭连接", err)
+		_ = srv.Close()
+	}
 	s.cleanup()
 	return nil
 }
@@ -199,12 +225,17 @@ func (s *Server) banner() {
 }
 
 func (s *Server) writePID() error {
-	return os.WriteFile(s.cfg.PIDFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
+	if err := os.WriteFile(s.cfg.PIDFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		return err
+	}
+	// 飞牛卷上 O_CREAT 的 mode 会被忽略（见 fsx 里的同一处说明），显式补一次：
+	// PID 文件读不回来，退出时的清理就少一道判断。
+	return os.Chmod(s.cfg.PIDFile, 0o644)
 }
 
 // ensureNoRunningInstance 检查是否已有实例占用 socket，并清掉残留文件。
 func (s *Server) ensureNoRunningInstance() error {
-	_, err := os.Stat(s.cfg.SocketPath)
+	fi, err := os.Stat(s.cfg.SocketPath)
 	if err != nil {
 		return nil // 不存在，直接开
 	}
@@ -215,7 +246,12 @@ func (s *Server) ensureNoRunningInstance() error {
 		return fmt.Errorf("已有实例在监听 %s，请先停掉它（或换个 %s）", s.cfg.SocketPath, config.EnvSocket)
 	}
 
-	// 连不上，说明是上次异常退出留下的残留文件。
+	// 连不上，说明是上次异常退出留下的残留。但**只删确实是 socket 的那一个**：
+	// 路径填错时（指到一个普通文件上）以前会把那个文件静默删掉。
+	if fi.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("%s 已存在，但它不是 socket 文件，请检查 %s 是否指错了",
+			s.cfg.SocketPath, config.EnvSocket)
+	}
 	if err := os.Remove(s.cfg.SocketPath); err != nil {
 		return fmt.Errorf("清理残留 socket 失败: %w", err)
 	}
@@ -282,6 +318,25 @@ func writeError(w http.ResponseWriter, err error) {
 // maxJSONBody 是请求体的上限。写文件接口也走它，所以给得宽一点。
 const maxJSONBody = 32 << 20
 
+// maxUploadBytes 是上传 / 导入单个请求的体积上限（用户要求 1G）。
+//
+// 以前只给了 ParseMultipartForm 一个「内存阈值」，总量不设限：请求体超出的部分会落到
+// 进程的 os.TempDir() 里，一直写下去能把盘灌满。这里用 http.MaxBytesReader 卡住总量。
+// 变量而不是常量：测试里把它调小，才能在没有 1G 数据的情况下验「超限回 413」。
+var maxUploadBytes int64 = 1 << 30
+
+// uploadMemoryLimit 是 multipart 在内存里保留的字节数，超出部分落临时文件。
+const uploadMemoryLimit = 32 << 20
+
+// tooLargeErr 判断错误是不是「请求体超过 MaxBytesReader 的上限」。
+func tooLargeErr(err error) bool {
+	var mbe *http.MaxBytesError
+	return errors.As(err, &mbe)
+}
+
+// extractTimeout 是一次解压的上限（外部命令可能被畸形归档拖住）。
+const extractTimeout = 10 * time.Minute
+
 func decodeJSON(r *http.Request, v any) error {
 	if r.Body == nil {
 		return badRequest("请求体为空")
@@ -303,6 +358,16 @@ func decodeJSON(r *http.Request, v any) error {
 	return nil
 }
 
+// logWriter 把 net/http 内部的错误转进日志器（见 srv.ErrorLog）。
+type logWriter struct{ log *logging.Logger }
+
+func (w logWriter) Write(p []byte) (int, error) {
+	if msg := strings.TrimSpace(string(p)); msg != "" {
+		w.log.Warnf("http: %s", msg)
+	}
+	return len(p), nil
+}
+
 func errText(err error) string {
 	if err == nil {
 		return "ok"
@@ -320,6 +385,11 @@ func queryRel(r *http.Request) (string, error) {
 	}
 	// 路径一律以 projects 根为基准，例如 "myapp/config/privilege"。
 	p = strings.TrimPrefix(path.Clean("/"+p), "/")
+	if p == "" {
+		// 空串是「项目根」：以前 `?path=../../` 会归一成 ""，而前端拿它当目录缓存的键，
+		// 于是同一个根目录出现 "" 和 "." 两种写法、缓存对不上。
+		p = "."
+	}
 	return p, nil
 }
 

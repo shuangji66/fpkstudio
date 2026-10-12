@@ -86,6 +86,9 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 		select {
 		case <-r.Context().Done():
 			return nil
+		case <-s.closing:
+			// 关服：Shutdown 不会取消请求的 context，挂着不动的 SSE 会让它等满超时。
+			return nil
 		case e, open := <-ch:
 			if !open {
 				return nil

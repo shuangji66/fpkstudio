@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"fpkstudio/internal/trimapi"
@@ -133,6 +134,11 @@ func Load(version string) (*Config, error) {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("创建目录 %s 失败: %w", d, err)
 		}
+		// 飞牛卷上 O_CREAT / mkdir 的 mode 会被忽略（新建项继承父目录模式，访问权由
+		// ACL 给），所以显式补一次——和 fsx 里的同一条约定。
+		if err := os.Chmod(d, 0o755); err != nil {
+			return nil, fmt.Errorf("设置目录 %s 的权限失败: %w", d, err)
+		}
 	}
 
 	if len(c.SocketPath) > maxSocketPath {
@@ -185,19 +191,22 @@ func cleanAbs(p string) string {
 	return filepath.Clean(a)
 }
 
+// atoiDefault 解析一个正整数配置，非法或超范围时回落到默认值。
+//
+// 以前是手写累加：`FPKSTUDIO_LOG_RING=99999999999999999999` 会溢出成一个巨大的正数，
+// 接着 logging.New 的 `make([]Entry, 0, n)` 直接把进程打死（配置写错不该让服务起不来，
+// 更不该以 panic 的形式）。
 func atoiDefault(s string, def int) int {
-	n := 0
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return def
 	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return def
-		}
-		n = n*10 + int(r-'0')
-	}
-	if n <= 0 {
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 || n > maxConfigInt {
 		return def
 	}
 	return n
 }
+
+// maxConfigInt 是数字型配置项的上限（防手滑写一个天文数字把内存吃光）。
+const maxConfigInt = 1 << 20

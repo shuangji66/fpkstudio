@@ -99,21 +99,39 @@ export async function requestText(path: string, options: RequestOptions = {}): P
   return res.text()
 }
 
-/** 带进度回调的上传。 */
+/**
+ * 带进度回调的上传。
+ *
+ * `signal` 用来取消：传进来的 AbortSignal 一 abort 就 xhr.abort()，请求体不再往上发、
+ * 后端那边的 ctx 也跟着取消（见 server 的 handleFsUpload），不会留下一个写了一半的文件。
+ */
 export function upload<T>(
   path: string,
   form: FormData,
   onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', apiURL(path))
+
+    const onAbort = () => xhr.abort()
+    const detach = () => signal?.removeEventListener('abort', onAbort)
+    if (signal) {
+      if (signal.aborted) {
+        reject(new ApiError(0, i18n.global.t('apiError.aborted')))
+        return
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
+
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable && onProgress) {
         onProgress(Math.round((e.loaded / e.total) * 100))
       }
     })
     xhr.addEventListener('load', () => {
+      detach()
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           resolve(JSON.parse(xhr.responseText) as T)
@@ -131,8 +149,14 @@ export function upload<T>(
       }
       reject(new ApiError(xhr.status, message))
     })
-    xhr.addEventListener('error', () => reject(new ApiError(0, i18n.global.t('apiError.network'))))
-    xhr.addEventListener('abort', () => reject(new ApiError(0, i18n.global.t('apiError.aborted'))))
+    xhr.addEventListener('error', () => {
+      detach()
+      reject(new ApiError(0, i18n.global.t('apiError.network')))
+    })
+    xhr.addEventListener('abort', () => {
+      detach()
+      reject(new ApiError(0, i18n.global.t('apiError.aborted')))
+    })
     xhr.send(form)
   })
 }

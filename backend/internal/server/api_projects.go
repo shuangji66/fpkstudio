@@ -1,14 +1,19 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 
+	"fpkstudio/internal/fsx"
 	"fpkstudio/internal/projects"
 )
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodGet); err != nil {
+		return err
+	}
 	list, err := s.prj.List()
 	if err != nil {
 		return internal("列出项目失败: %v", err)
@@ -17,6 +22,9 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleProjectExists(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodGet); err != nil {
+		return err
+	}
 	info, err := s.prj.Exists(r.URL.Query().Get("name"))
 	if err != nil {
 		return badRequest("%v", err)
@@ -31,6 +39,9 @@ type createReq struct {
 }
 
 func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
 	var req createReq
 	if err := decodeJSON(r, &req); err != nil {
 		return err
@@ -43,6 +54,9 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) err
 	}
 	info, err := s.prj.Info(strings.TrimSpace(req.Name))
 	if err != nil {
+		// 项目已经建好了，只是信息读不出来（manifest 不完整之类）。照旧回 ok，
+		// 但要留一条日志——以前这里是静默的，出问题时无从查起。
+		s.log.Warnf("项目 %s 已创建，但读取信息失败: %v", req.Name, err)
 		return writeJSON(w, map[string]any{"ok": true})
 	}
 	s.log.Infof("创建项目 %s（%s）", info.Name, kindOf(info))
@@ -50,6 +64,9 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -64,6 +81,9 @@ func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) handleProjectPlatforms(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodGet); err != nil {
+		return err
+	}
 	list, err := s.prj.Platforms(r.URL.Query().Get("name"))
 	if err != nil {
 		return badRequest("%v", err)
@@ -101,6 +121,9 @@ func (s *Server) handleProjectSettings(w http.ResponseWriter, r *http.Request) e
 }
 
 func (s *Server) handleProjectArtifacts(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodGet); err != nil {
+		return err
+	}
 	name := r.URL.Query().Get("name")
 	list, err := s.prj.Artifacts(name)
 	if err != nil {
@@ -111,7 +134,16 @@ func (s *Server) handleProjectArtifacts(w http.ResponseWriter, r *http.Request) 
 
 // handleProjectImport 接收上传的 fpk，解包成项目。
 func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request) error {
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
+	// 和上传同一条上限（1G）：总量不设限时，超出的部分会落到进程 TMPDIR 里，
+	// 而 Import 自己的体积预算管不到「body 还没进 Import」这一段。
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	if err := r.ParseMultipartForm(uploadMemoryLimit); err != nil {
+		if tooLargeErr(err) {
+			return fail(http.StatusRequestEntityTooLarge, "导入的包超过上限 %s", fsx.HumanSize(maxUploadBytes))
+		}
 		return badRequest("解析上传失败: %v", err)
 	}
 	file, hdr, err := r.FormFile("file")
@@ -122,12 +154,18 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request) err
 
 	info, err := s.prj.Import(r.Context(), file, hdr.Filename)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || r.Context().Err() != nil {
+			return fail(http.StatusRequestTimeout, "导入已取消")
+		}
 		return internal("导入失败: %v", err)
 	}
 	return writeJSON(w, map[string]any{"ok": true, "project": info})
 }
 
 func (s *Server) handleProjectPack(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
 	var req projects.PackRequest
 	if err := decodeJSON(r, &req); err != nil {
 		return err
@@ -137,7 +175,8 @@ func (s *Server) handleProjectPack(w http.ResponseWriter, r *http.Request) error
 	}
 	results, err := s.prj.Pack(r.Context(), req)
 	if err != nil {
-		return internal("%v", err)
+		// manifest 字段 / 架构名 / server 目录不合法都是用户能自己改的，回 400。
+		return projectError(err)
 	}
 	ok := 0
 	for _, res := range results {
@@ -153,7 +192,8 @@ func (s *Server) handleProjectPack(w http.ResponseWriter, r *http.Request) error
 // 日志里分不清是「用户打错字」还是「真的坏了」。
 func projectError(err error) error {
 	switch {
-	case errors.Is(err, projects.ErrInvalidName), errors.Is(err, projects.ErrExists):
+	case errors.Is(err, projects.ErrInvalidName), errors.Is(err, projects.ErrExists),
+		errors.Is(err, projects.ErrInvalidInput):
 		return badRequest("%v", err)
 	case errors.Is(err, projects.ErrNotFound):
 		return notFound("%v", err)

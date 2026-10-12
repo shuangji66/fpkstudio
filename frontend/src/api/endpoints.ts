@@ -117,10 +117,14 @@ export const packProject = (
     json: { name, platforms, serverDir, copyOut },
   })
 
-export const importProject = (file: File, onProgress?: (percent: number) => void) => {
+export const importProject = (
+  file: File,
+  onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
+) => {
   const form = new FormData()
   form.append('file', file)
-  return upload<{ ok: boolean; project: ProjectInfo }>('/api/projects/import', form, onProgress)
+  return upload<{ ok: boolean; project: ProjectInfo }>('/api/projects/import', form, onProgress, signal)
 }
 
 // ---- 文件 ----
@@ -169,6 +173,7 @@ export const uploadFiles = (
   files: File[],
   overwrite: boolean,
   onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
 ) => {
   const form = new FormData()
   form.append('path', dir)
@@ -178,6 +183,7 @@ export const uploadFiles = (
     '/api/fs/upload',
     form,
     onProgress,
+    signal,
   )
 }
 

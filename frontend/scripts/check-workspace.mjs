@@ -242,5 +242,52 @@ const tabOf = (project, path) => workspace.state(project).files.find((f) => f.pa
   check('再打开读到的是磁盘上的新内容', after.origin, 'REPLACED OUTSIDE\n')
 }
 
+// ---- 7. 剪切 + 粘贴：跨目录要真的搬过去 ----
+//
+// 这条是回归：以前 pasteInto 的剪切走的是 renameEntryAt，而后者是「同目录改个名字」
+// （目标必须还在同一个目录里），于是同目录粘贴被判重名、跨目录直接报「名称不合法」
+// ——剪切功能整个用不了。移动现在走 moveEntryAt。
+{
+  files.set('demo/dirA/move-me.txt', 'MOVE\n')
+  workspace.copyToClipboard('demo', 'demo/dirA/move-me.txt', true)
+
+  const outcome = await workspace.pasteInto('demo', 'demo/dirB')
+  check('跨目录剪切粘贴返回 ok', outcome, 'ok')
+  check('源文件被移走', files.has('demo/dirA/move-me.txt'), false)
+  check('目标文件到位', files.get('demo/dirB/move-me.txt'), 'MOVE\n')
+  check('粘贴后剪贴板清空', workspace.state('demo').clipboard, null)
+  check('目标目录被展开', workspace.state('demo').expanded['demo/dirB'], true)
+
+  // 同目录：什么都不做，剪贴板留着（用户多半是点错了）
+  workspace.copyToClipboard('demo', 'demo/dirB/move-me.txt', true)
+  const same = await workspace.pasteInto('demo', 'demo/dirB')
+  check('同目录粘贴返回 same', same, 'same')
+  check('同目录粘贴不动文件', files.has('demo/dirB/move-me.txt'), true)
+  check('同目录粘贴后剪贴板还在', workspace.state('demo').clipboard?.path, 'demo/dirB/move-me.txt')
+
+  // 目标目录已有同名项：拒绝，两边都不动
+  files.set('demo/dirA/dup.txt', 'A\n')
+  files.set('demo/dirB/dup.txt', 'B\n')
+  workspace.copyToClipboard('demo', 'demo/dirA/dup.txt', true)
+  const dup = await workspace.pasteInto('demo', 'demo/dirB')
+  check('目标重名时拒绝移动', dup, 'exists')
+  check(
+    '重名时两边都还在',
+    [files.has('demo/dirA/dup.txt'), files.get('demo/dirB/dup.txt')],
+    [true, 'B\n'],
+  )
+
+  // 移动一个打开着的文件：标签路径要跟着走，内容基线不能丢
+  const opened = await workspace.openFile('demo', 'demo/dirA/dup.txt')
+  check('打开待移动的文件', opened.origin, 'A\n')
+  workspace.copyToClipboard('demo', 'demo/dirA/dup.txt', true)
+  files.delete('demo/dirB/dup.txt')
+  const moved = await workspace.pasteInto('demo', 'demo/dirB')
+  check('清掉重名后再移动', moved, 'ok')
+  const tab = workspace.state('demo').files.find((f) => f.path === 'dirB/dup.txt')
+  check('移动后标签换了路径', tab?.path, 'dirB/dup.txt')
+  check('移动后内容基线还在', tab?.origin, 'A\n')
+}
+
 console.log(failed ? `\n${failed} 项不通过` : '\n文件管理器 store 检查全部通过')
 process.exit(failed ? 1 : 0)

@@ -102,6 +102,18 @@ frontend/src/
   「在标签页里复制、切回文件树粘贴不了」。剪贴板粘一次就清空（复制和剪切都是），别把它
   当成「能反复粘」的剪贴板。同理，「关掉一个文件标签」的未保存提醒在
   `components/project/useCloseFile.ts`，桌面标签和移动端子页面都用它。
+- **`prepareStage` 不许预建目标目录**。它先 `Remove` 掉 `app/server` 再整份复制（这是
+  「替换」语义，不是合并），而复制走的是 `Root.Copy` / `fsx.CopyTree`——两者对**已存在的
+  目标**都返回 `ErrExists`。以前那里多了一句 `Mkdir`，于是默认部署（项目根在数据目录内，
+  走 `m.home.Copy`）下多架构打包 100% 失败，界面只看到一句「目标已存在」；项目根在数据
+  目录之外（走 `CopyTree`）时反而是好的，所以很容易漏掉。回归在
+  `internal/projects/pack_test.go`。
+- **日志环的裁剪判据踩过 `cap` 的坑**：`append` 之后 `len > cap(l.ring)` 永远不成立
+  （要么没超、要么 append 刚把 cap 翻倍），那段代码曾经是死代码、环从不封顶。上限要单独
+  存（`Logger.ringMax`），`ring_test.go` 钉住了。
+- **剪切粘贴不要复用 `renameEntryAt`**：它是「同目录改名」，加了「目标必须在同一目录」的
+  守卫；拿它当移动用会让同目录粘贴被判重名、跨目录直接报「名称不合法」——剪切功能整个
+  不可用。`check:workspace` 里有跨目录剪切粘贴的断言。
 - **「表单 / 源码」切换时该交哪份文本，规则在 `utils/handoff.ts`**（纯函数，`check:editor`
   钉住）：表单模型不可信（编辑器报了 `saveBlocked`）时交回**表单被加载时的那份文本**，
   不能交 `getContent()` 的回写结果——解析失败降级出来的是一份空配置，而 `[]` /
@@ -276,7 +288,7 @@ frontend/src/
 - 系统 `tar` 对越界成员（`/etc/passwd`、`../x`）**只给警告、退出码还是 0**，靠它挡不住；
   `unzip` 更省事——它把越界名字截断成一个安全名字照写不误，退出码给 1。所以
   `fsx.Extract` 解压前先列一遍成员名（tar 用 `tar -t`、zip 用 `unzip -Z1`）自己判，
-  要动这段的话别把成员校验去掉。归档里的**符号链接一律不还原**（`fsx.dropLinks`，
+  要动这段的话别把成员校验去掉。归档里的**符号链接一律不还原**（`fsx.sanitizeExtracted`，
   tar / zip 都一样）：链接可以指向归档外面，留在项目里会被后面的复制 / 打包顺着读出去。
 - **重命名不等于「改个名字」**，`stores/workspace.ts` 的 `renameEntryAt` 里三件事要一起做对：
   打开着的标签要跟着改路径（编辑器宿主是按 `file.path` 做 key 的，key 一变组件就重建，
@@ -356,6 +368,32 @@ frontend/src/
 - **归档后缀有两份判据，改一处必须改两处**：后端 `fsx.archiveKinds`（长的排前面，
   `.tar.gz` 必须在 `.gz` 之前）和前端 `utils/format.ts` 的 `isArchive`。少一边的表现是
   「菜单里没有解压」或者「点了报不支持的格式」；`check:format` 盯着前端那一半。
+- **解压结果里只留普通文件与目录**。交给外部 `tar` / `unzip` 的是**绝对路径**，`os.Root`
+  在那一步帮不上忙，所以：归档本身必须是沙箱里的普通文件（`fsx.requireRegularFile`，
+  指向外部的符号链接要拒绝）；解完之后 `fsx.sanitizeExtracted` 把符号链接与非普通文件
+  （FIFO、设备节点）都删掉再搬进项目——FIFO 没有写者时 `open(2)` 永久阻塞，留着它等于
+  留一个「点一下就挂死」的条目。删掉的数量要报给界面（`links` / `specials`）。
+- **外部命令都要带 ctx 与上限**。`Extract(ctx, rel)` 走 `exec.CommandContext`（客户端断开
+  就杀掉子进程），服务端再套一个 10 分钟上限；`ReadFile` / `OpenFile` 拒绝非普通文件
+  （同一个阻塞理由）。
+- **读、上传、导入都有体积上限**：`/api/fs/read` 超过 `maxReadBytes`（8MB）只回元信息 +
+  `tooLarge:true`；上传 / 导入单个请求 `maxUploadBytes`（1G，`http.MaxBytesReader`）。
+  这两个是**变量**，测试里调小用（`maxImportFileBytes` 同理，它管的是「走飞牛选择器
+  导入的那个包本身」，那条路没有请求体可卡）。上传 / 导入要支持取消：写入用 `ctxReader`
+  包一层，ctx 一取消就退出，半截文件删掉。
+- **HTTP 状态码按语义分**：目标不存在 404（前端按「还没创建」处理）、路径不合法 /
+  目标是目录 / 目标已存在 400 与 409、没权限 403、超限 413、方法不对 405，其余 500。
+  `fsx` 的 `ErrInvalidPath` / `ErrExists` / `ErrNotExist` 就是给这层判的；handler 里用
+  `fsError(...)` 或 `projectError(...)`，别再一律 `internal(...)`。
+- **产物文件名只由受校验的成分拼成**。`<appname>-<version>-<platform>.fpk` 的三个成分都
+  来自 manifest，拼之前过 `safeArtifactPart`（不含分隔符 / 控制字符、不是 `.` / `..`、
+  ≤64 字节），落地走 `Root.WriteReader`（`copyIntoRoot`）——绝对路径 + `filepath.Join`
+  会把 `..` 规整掉，等于把产物写到项目根之外。`serverDir` 也不许填 `.`。
+- **移动与重命名是两条路**：`renameEntryAt` 只负责「同目录改个名字」（目标必须在同一目录，
+  否则用户按「重命名」会被搬走）；跨目录搬文件走 `moveEntryAt`（`pasteInto` 的剪切分支）。
+  两者共用 `applyPathChange` 做内存里的迁移，别各写一份。
+- **日志环按 `ringMax` 裁，不要拿 `cap(l.ring)` 当上限**：`append` 会先把容量翻倍，
+  `len > cap` 在 append 之后永远不成立。
 - 编辑器的「解析失败」如果只是降级成空模型（`utils/wizard.ts` 的 `parseWizard` 就是
   这样：解析不了返回 `{steps: [], error}`），那 `getContent()` 交出去的就是一份空配置，
   点保存等于把用户的文件覆盖掉。这种编辑器必须实现 `EditorApi.saveBlocked()`，

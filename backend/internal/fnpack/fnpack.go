@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"fpkstudio/internal/config"
 	"fpkstudio/internal/logging"
@@ -44,11 +45,22 @@ type Client struct {
 	cfg *config.Config
 	log *logging.Logger
 
-	mu          sync.Mutex
-	binPath     string
-	version     string
-	probeResult string
+	mu      sync.Mutex
+	binPath string
+	version string
+	// probeMessage 是探测失败的原因（成功时为空）。probed 单独一个标志：
+	// 以前用「消息非空」当「探测过了」的判据，结果是**失败被永久缓存、成功每次都重探**
+	// （成功时消息为空）——每次打开界面都白起一个 fnpack 进程。
+	probeMessage string
+	probeAt      time.Time
+	probed       bool
 }
+
+// probeFailureTTL 是「探测失败」的缓存时长。
+//
+// 成功可以一直缓存（fnpack 不会自己换版本），失败不行：用户装好 fnpack 之后应当自己
+// 恢复，而不是必须重启应用。也不能不缓存——那样每次 /api/system/info 都会起一个进程。
+var probeFailureTTL = 30 * time.Second
 
 // New 创建客户端。
 func New(cfg *config.Config, log *logging.Logger) *Client {
@@ -68,8 +80,8 @@ func (c *Client) Bin() string {
 // Probe 探测 fnpack 是否可用并取版本号。结果会被缓存。
 func (c *Client) Probe(ctx context.Context) (bin, version, message string) {
 	c.mu.Lock()
-	if c.probeResult != "" {
-		bin, version, message = c.binPath, c.version, c.probeResult
+	if c.probed && (c.probeMessage == "" || time.Since(c.probeAt) < probeFailureTTL) {
+		bin, version, message = c.binPath, c.version, c.probeMessage
 		c.mu.Unlock()
 		return
 	}
@@ -94,7 +106,7 @@ func (c *Client) Probe(ctx context.Context) (bin, version, message string) {
 	}
 
 	c.mu.Lock()
-	c.binPath, c.version, c.probeResult = bin, version, message
+	c.binPath, c.version, c.probeMessage, c.probed, c.probeAt = bin, version, message, true, time.Now()
 	c.mu.Unlock()
 	return bin, version, message
 }
@@ -151,8 +163,11 @@ func (c *Client) Run(ctx context.Context, dir string, source string, args ...str
 	go collect(bufio.NewScanner(stdout))
 	go collect(bufio.NewScanner(stderr))
 
-	waitErr := cmd.Wait()
+	// 先等两个读管道的 goroutine 把输出读完，再 Wait：os/exec 的文档明确写了
+	// 「在读完管道之前调 Wait 是不对的」——Wait 会关掉父进程这侧的管道，
+	// 而 res.Log / FailureReason 就靠这段输出。
 	wg.Wait()
+	waitErr := cmd.Wait()
 
 	output := sb.String()
 	if waitErr != nil {
