@@ -387,8 +387,10 @@ async function run() {
     ElMessage.warning(t('pack.selectPlatform'))
     return
   }
-  await persist()
   try {
+    // persist() 必须在 try 里：它是一次真的写请求（保存打包偏好），失败时
+    // 以前什么都不发生——按钮不转、没有提示、也没有日志，看着就像「点了没反应」。
+    await persist()
     const results = await workspace.pack(props.project)
     const failed = results.filter((r) => !r.ok)
     if (failed.length) ElMessage.error(t('pack.failedTip'))

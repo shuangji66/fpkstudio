@@ -163,11 +163,19 @@ func (c *Client) Run(ctx context.Context, dir string, source string, args ...str
 	go collect(bufio.NewScanner(stdout))
 	go collect(bufio.NewScanner(stderr))
 
-	// 先等两个读管道的 goroutine 把输出读完，再 Wait：os/exec 的文档明确写了
-	// 「在读完管道之前调 Wait 是不对的」——Wait 会关掉父进程这侧的管道，
-	// 而 res.Log / FailureReason 就靠这段输出。
-	wg.Wait()
+	// **先 Wait，再等读协程**（顺序不能反）。
+	//
+	// 反过来的写法（先 wg.Wait()）看起来更「按文档」——os/exec 的文档确实写了「读完管道
+	// 之前调 Wait 是不对的」——但它会**永久挂住**：只要子进程留下一个继承了 stdout/stderr
+	// 的孙进程（后台进程、守护化的 helper…），管道的写端就一直开着，读协程永远等不到 EOF，
+	// 而 Wait 才是负责收尸的那个。实测（/bin/sh 里 `(sleep 20) &`）：先 wg.Wait() 5 秒
+	// 都不返回，先 cmd.Wait() 1ms 返回。
+	//
+	// 这个顺序的代价是：Wait 关掉父侧管道时，读协程可能还没把缓冲里最后一点数据取完
+	// （文档里的那句警告）。相比之下「打包请求永远挂着、界面一直转圈」严重得多，所以选它；
+	// 读协程的 `r.Err()` 会把这种情况记一条 warn。
 	waitErr := cmd.Wait()
+	wg.Wait()
 
 	output := sb.String()
 	if waitErr != nil {
