@@ -35,6 +35,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, map[string]any{
 		"list":    entries,
 		"lastSeq": s.log.LastSeq(),
+		// 进程标识：seq 重启后会从 1 开始，前端要靠它把游标归零（见 logging.Logger.boot）。
+		"boot": s.log.Boot(),
 	})
 }
 
@@ -57,6 +59,18 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 
 	id, ch := s.log.Subscribe()
 	defer s.log.Unsubscribe(id)
+
+	// 第一帧先报「这是哪个进程」。前端的 seq 去重全靠它：后端重启后 seq 从 1 重新
+	// 开始（EventSource 自带重连，用的还是旧的 after），不告诉它，新日志会被整片
+	// 当成旧的丢掉——表现是「日志弹窗从此不再更新」。
+	boot, err := json.Marshal(map[string]any{"boot": s.log.Boot(), "lastSeq": s.log.LastSeq()})
+	if err != nil {
+		return internal("序列化进程标识失败: %v", err)
+	}
+	if _, err := fmt.Fprintf(w, "event: boot\ndata: %s\n\n", boot); err != nil {
+		return nil
+	}
+	flusher.Flush()
 
 	for _, e := range s.log.Snapshot(lq.after, 0, lq.source) {
 		if err := writeSSE(w, e); err != nil {

@@ -111,11 +111,22 @@ func (s *Server) handleFsCreate(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeJSON(r, &req); err != nil {
 		return err
 	}
+	if strings.TrimSpace(req.Path) == "" {
+		return badRequest("缺少 path")
+	}
 	root := s.prj.Root()
 	var err error
 	if req.Dir {
+		// 目录保持 mkdir -p 的语义：重复创建没有破坏性，而「补架构目录」
+		// （building/platform/arm|x86）那条路本来就依赖它的幂等性。
 		err = root.Mkdir(req.Path, 0o755, true)
 	} else {
+		// 已存在的文件一律拒绝。WriteFile 走的是 O_CREATE|O_TRUNC，同名时会把用户那份
+		// **清成 0 字节**再回一个 ok——「新建文件」时手滑打了个已有文件名，内容就没了，
+		// 还没有确认、没有提示。判据与 fsx.Rename 一致（ErrExists）。
+		if _, statErr := root.Stat(req.Path); statErr == nil {
+			return badRequest("%v：%s（新建文件不会覆盖已有文件）", fsx.ErrExists, req.Path)
+		}
 		err = root.WriteFile(req.Path, nil, 0o644)
 	}
 	if err != nil {
@@ -168,6 +179,10 @@ func (s *Server) handleFsCopy(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("缺少目标路径")
 	}
 	if err := s.prj.Root().Copy(req.Path, req.To); err != nil {
+		// 「目标已存在」是用户能自己解决的事（换个名字），不报成服务端错误。
+		if errors.Is(err, fsx.ErrExists) {
+			return badRequest("%v", err)
+		}
 		return internal("复制失败: %v", err)
 	}
 	return writeJSON(w, map[string]any{"ok": true, "path": req.To})
@@ -183,6 +198,7 @@ func (s *Server) handleFsUpload(w http.ResponseWriter, r *http.Request) error {
 	root := s.prj.Root()
 
 	written := make([]map[string]any, 0, 4)
+	skipped := 0
 	for _, headers := range r.MultipartForm.File {
 		for _, hdr := range headers {
 			name := path.Base(strings.ReplaceAll(hdr.Filename, "\\", "/"))
@@ -193,8 +209,14 @@ func (s *Server) handleFsUpload(w http.ResponseWriter, r *http.Request) error {
 			if target != "" && target != "." {
 				dst = strings.TrimSuffix(target, "/") + "/" + name
 			}
-			if overwrite {
-				_ = root.Remove(dst, false)
+			// overwrite=false 的语义是「别动已有的文件」。以前这里只省掉了下面那次
+			// Remove，而 WriteReader 本身就是 O_TRUNC——开关等于没接上，接口说「跳过」
+			// 实际照样覆盖。存在就整份跳过，数量回给调用方。
+			if !overwrite {
+				if _, statErr := root.Stat(dst); statErr == nil {
+					skipped++
+					continue
+				}
 			}
 			f, err := hdr.Open()
 			if err != nil {
@@ -214,10 +236,10 @@ func (s *Server) handleFsUpload(w http.ResponseWriter, r *http.Request) error {
 			s.log.Infof("上传 %s（%s）", dst, fsx.HumanSize(size))
 		}
 	}
-	if len(written) == 0 {
+	if len(written) == 0 && skipped == 0 {
 		return badRequest("没有收到文件")
 	}
-	return writeJSON(w, map[string]any{"ok": true, "files": written})
+	return writeJSON(w, map[string]any{"ok": true, "files": written, "skipped": skipped})
 }
 
 // handleFsExtract 把压缩包解压到它自己所在的目录。

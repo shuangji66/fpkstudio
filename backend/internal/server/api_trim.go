@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"fpkstudio/internal/state"
 	"fpkstudio/internal/trimapi"
 )
 
@@ -149,6 +152,18 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) error {
 			next.OutputDir = strings.TrimSpace(*req.OutputDir)
 		}
 
+		// 改目录等于把这个应用的读写范围挪过去，所以先判一次权限：经过网关时只有管理员
+		// 能改，且新目录必须在「本应用被授权的目录」里（界面上的路径都是选择器授权出来
+		// 的）。没跑在飞牛里时（直接调 socket / 开发）这两条都不适用——那种部署下
+		// socket 文件权限就是唯一的边界，见 README 的「访问方式」。
+		u := gatewayUserOf(r)
+		if u.FromGateway && !u.IsAdmin {
+			return fail(http.StatusForbidden, "只有管理员能修改项目根目录 / 输出目录")
+		}
+		if err := s.checkDirsAuthorized(r.Context(), u.UID, next); err != nil {
+			return err
+		}
+
 		// 先真正换一遍（校验 + 打开沙箱），成功了再落盘——反过来的话，一次
 		// 打不开的路径会被持久化，下次启动还得靠人去删 state.json。
 		if err := s.prj.SetRoots(next.ProjectRoot, next.OutputDir); err != nil {
@@ -163,6 +178,57 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) error {
 	default:
 		return fail(http.StatusMethodNotAllowed, "不支持的方法")
 	}
+}
+
+// checkDirsAuthorized 检查要生效的目录是不是「本应用被授权的目录」。
+//
+// 只在飞牛开放 API 可用时判：不跑在飞牛里时没有这套授权，靠 socket 权限兜底。
+// 授权列表查询失败也放行——权限服务抖一下不该把目录设置整个锁死，而且这一层是纵深
+// 防御，真正的边界仍然是应用用户在文件系统上的 ACL。
+func (s *Server) checkDirsAuthorized(ctx context.Context, uid int, next state.Dirs) error {
+	if !s.trim.Probe(ctx).Available {
+		return nil
+	}
+	want := make([]string, 0, 2)
+	for _, p := range []string{next.ProjectRoot, next.OutputDir} {
+		if strings.TrimSpace(p) != "" {
+			want = append(want, p)
+		}
+	}
+	// 空字符串 = 恢复环境变量给的默认目录（我们自己的数据目录），不需要授权。
+	if len(want) == 0 {
+		return nil
+	}
+
+	allowed, err := s.trim.GetUserAccessibleFolders(ctx, uid)
+	if err != nil {
+		s.log.Warnf("查询授权目录失败，跳过目录授权校验: %v", err)
+		return nil
+	}
+	for _, p := range want {
+		ok := false
+		for _, a := range allowed {
+			if sameOrInside(p, a) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fail(http.StatusForbidden,
+				"%s 不在本应用被授权的目录里：请先用「选择飞牛目录」授权它", p)
+		}
+	}
+	return nil
+}
+
+// sameOrInside 判断 want 是不是 allowed 本身、或者它下面的一层（都按清理后的绝对路径比）。
+//
+// 允许「在授权目录里面」是刻意的：用户可能授权了 /vol1/apps，然后把项目根指到
+// /vol1/apps/fpk——那仍然在他授权的范围里。
+func sameOrInside(want, allowed string) bool {
+	w := filepath.Clean(want)
+	a := filepath.Clean(allowed)
+	return w == a || strings.HasPrefix(w, a+string(filepath.Separator))
 }
 
 // ---- 飞牛开放 API 的转发 ----
@@ -186,8 +252,9 @@ func (s *Server) handleTrimFolders(w http.ResponseWriter, r *http.Request) error
 
 // handleTrimFolderDelete 删除一条目录授权。
 //
-// 「换目录要删旧授权」由前端串起来：先删旧的，再拉起选择器选新的，
-// 否则授权目录会一份份堆在系统里。
+// 「换目录要删旧授权」由前端串起来，顺序是**先拿到新目录并切换成功，再删旧的**：
+// 反过来的话，用户在选择器里取消、或者选择器直接报错，旧授权已经没了而配置里还写着它，
+// 应用会突然读不到自己的项目目录。授权目录会一份份堆在系统里这件事，靠删旧的解决。
 func (s *Server) handleTrimFolderDelete(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
 		Path string `json:"path"`

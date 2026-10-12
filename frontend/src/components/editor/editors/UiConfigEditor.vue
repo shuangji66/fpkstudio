@@ -94,7 +94,7 @@
           <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
             <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.protocol') }}</span>
             <el-select v-model="current.value.protocol" size="small" class="w-64">
-              <el-option label="（自适应）" value="" />
+              <el-option :label="t('uiConfig.autoAdaptive')" value="" />
               <el-option label="http" value="http" />
               <el-option label="https" value="https" />
             </el-select>
@@ -184,11 +184,42 @@ interface UiEntry {
   allUsersSet: boolean
   noDisplay: boolean
   control: { accessPerm: string }
+  /** 入口里表单不认识的键，保存时原样写回。 */
+  extra: Record<string, unknown>
+  /** `control` 里除了 accessPerm 之外的键，保存时原样写回。 */
+  controlExtra: Record<string, unknown>
   [key: string]: unknown
+}
+
+/** 表单认识的入口字段；之外的都归到 extra 里原样保留。 */
+const KNOWN_ENTRY_KEYS = [
+  'title',
+  'icon',
+  'type',
+  'protocol',
+  'port',
+  'url',
+  'gatewayPrefix',
+  'gatewaySocket',
+  'fileTypes',
+  'allUsers',
+  'noDisplay',
+  'control',
+]
+
+/** 挑出「表单不认识的键」，保存时原样写回。 */
+function pickExtra(raw: Record<string, unknown>, known: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (!known.includes(key)) out[key] = value
+  }
+  return out
 }
 
 interface Model {
   urls: Record<string, UiEntry>
+  /** `.url` 之外的顶层键，保存时原样写回。 */
+  rest: Record<string, unknown>
   error: string
 }
 
@@ -213,6 +244,10 @@ function normalizeEntry(raw: Record<string, unknown>): UiEntry {
     allUsersSet: 'allUsers' in raw,
     noDisplay: raw.noDisplay === true,
     control: { accessPerm: String(control.accessPerm ?? 'editable') },
+    // 不认识的键留着：这份 config 是 fnOS 读的，以后加字段不该被我们保存一次就丢掉
+    // （顶层注意别丢）。已知之外的一切都进 extra / controlExtra。
+    extra: pickExtra(raw, KNOWN_ENTRY_KEYS),
+    controlExtra: pickExtra(control, ['accessPerm']),
   }
 }
 
@@ -221,15 +256,28 @@ const { model, api } = useEditor<Model>(
   emit,
   (text) => {
     const parsed = parseJSON<Record<string, unknown>>(text, {})
-    const urls = ((parsed.value ?? {})['.url'] ?? {}) as Record<string, Record<string, unknown>>
+    const raw = parsed.value ?? {}
+    const rawUrls = raw['.url']
+    // `.url` 不是对象时不能当成「没有入口」继续：表单会是空的，一保存就把整份文件写成
+    // {".url": {}}。降级成空模型 + error，由 saveBlocked 拦住保存。
+    if (
+      rawUrls !== undefined &&
+      (rawUrls === null || typeof rawUrls !== 'object' || Array.isArray(rawUrls))
+    ) {
+      return { urls: {}, rest: pickExtra(raw, ['.url']), error: '".url" is not an object' }
+    }
+    const urls = (rawUrls ?? {}) as Record<string, Record<string, unknown>>
     const out: Record<string, UiEntry> = {}
-    for (const [id, raw] of Object.entries(urls)) out[id] = normalizeEntry(raw ?? {})
-    return { urls: out, error: parsed.error }
+    for (const [id, entry] of Object.entries(urls)) out[id] = normalizeEntry(entry ?? {})
+    // `.url` 之外的顶层键原样留着
+    return { urls: out, rest: pickExtra(raw, ['.url']), error: parsed.error }
   },
   (value) => {
     const urls: Record<string, unknown> = {}
     for (const [id, entry] of Object.entries(value.urls)) {
       const item: Record<string, unknown> = {
+        // 不认识的键原样写回（否则「改个标题保存」就把它们删了）
+        ...entry.extra,
         title: entry.title,
         icon: entry.icon,
         type: entry.type,
@@ -245,10 +293,14 @@ const { model, api } = useEditor<Model>(
       if (entry.allUsers === false || entry.allUsersSet) item.allUsers = entry.allUsers
       if (entry.noDisplay) item.noDisplay = true
       if (entry.fileTypes.length) item.fileTypes = [...entry.fileTypes]
-      if (entry.control.accessPerm !== 'editable') item.control = { ...entry.control }
+      // control：认识的只有 accessPerm，其余键（以后加的）一起写回；
+      // 默认值 editable 不写，免得给文件凭空加键。
+      const control: Record<string, unknown> = { ...entry.controlExtra }
+      if (entry.control.accessPerm !== 'editable') control.accessPerm = entry.control.accessPerm
+      if (Object.keys(control).length) item.control = control
       urls[id] = item
     }
-    return stringifyOrdered({ '.url': urls })
+    return stringifyOrdered({ ...value.rest, '.url': urls })
   },
 )
 

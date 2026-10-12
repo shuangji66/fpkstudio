@@ -177,5 +177,47 @@ const tabOf = (project, path) => workspace.state(project).files.find((f) => f.pa
   check('非法名字之后文件还在', files.has('demo/renamed.txt'), true)
 }
 
+// ---- 4. 新建文件不许覆盖已有文件 ----
+{
+  calls.length = 0
+  await rejects('同名文件要拒绝新建', () =>
+    workspace.createEntryAt('demo', 'demo', 'other.txt', false),
+  )
+  const writes = calls.filter((c) => !c.route.endsWith('/api/fs/list')).length
+  check('同名新建被拒时没有发写请求', writes, 0)
+  check('同名新建被拒时文件内容没变', files.get('demo/other.txt'), 'OTHER\n')
+}
+
+// ---- 5. 目录改名 / 删除之后：活动标签、目录缓存、剪贴板都要跟着走 ----
+{
+  await workspace.loadDir('demo', 'demo/dir2')
+  workspace.state('demo').expanded['demo/dir2'] = true
+
+  const inner = await workspace.openFile('demo', 'demo/dir2/inner.txt')
+  check('打开改名前的子文件', inner.path, 'dir2/inner.txt')
+  workspace.setActive('demo', 'dir2/inner.txt')
+
+  await workspace.renameEntryAt('demo', 'demo/dir2', 'demo/dir3')
+  // 活动的是「被改名目录里的子文件」：activeTab 不跟着换的话，ProjectTab 里所有
+  // v-show="activeTab === …" 都不成立，编辑区整片空白。
+  check('目录改名后 activeTab 跟着换', workspace.state('demo').activeTab, 'dir3/inner.txt')
+  check('目录改名后缓存键搬到新路径', workspace.state('demo').dirs['demo/dir3'] !== undefined, true)
+  check('目录改名后旧缓存键清掉', workspace.state('demo').dirs['demo/dir2'], undefined)
+  check('目录改名后展开状态跟着搬', workspace.state('demo').expanded['demo/dir3'], true)
+
+  // 剪贴板指向被改名的项：路径要跟着换，否则之后每次粘贴都用旧路径
+  workspace.copyToClipboard('demo', 'demo/dir3/inner.txt', true)
+  await workspace.renameEntryAt('demo', 'demo/dir3/inner.txt', 'demo/dir3/renamed.txt')
+  // 剪贴板里存的是「含项目名的完整路径」（和 FileTree / FileBrowser 传进来的一致）
+  check('重命名后剪贴板路径跟着换', workspace.state('demo').clipboard?.path, 'demo/dir3/renamed.txt')
+
+  // 删掉目录：缓存、展开状态、剪贴板里那条（在删除的子树里）都要清干净
+  await workspace.removeEntryAt('demo', 'demo/dir3', true)
+  check('删除目录后剪贴板被清掉', workspace.state('demo').clipboard, null)
+  check('删除目录后没有残留的缓存键', workspace.state('demo').dirs['demo/dir3'], undefined)
+  check('删除目录后没有残留的展开状态', workspace.state('demo').expanded['demo/dir3'], undefined)
+  check('删除目录后子标签被关掉', tabOf('demo', 'dir3/renamed.txt'), undefined)
+}
+
 console.log(failed ? `\n${failed} 项不通过` : '\n文件管理器 store 检查全部通过')
 process.exit(failed ? 1 : 0)

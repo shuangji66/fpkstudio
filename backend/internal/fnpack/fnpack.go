@@ -131,6 +131,10 @@ func (c *Client) Run(ctx context.Context, dir string, source string, args ...str
 	)
 	collect := func(r *bufio.Scanner) {
 		defer wg.Done()
+		// 默认行长上限是 64KB。fnpack（或它调用的工具）偶尔打印超长行时，Scanner 会直接
+		// 报错并停止扫描，而这里原本不查 Err()——日志与打包结论会静默截断，用户只能看到
+		// 「怎么少了一段」。放宽上限，真读不下去时留一条记录。
+		r.Buffer(make([]byte, 0, 64*1024), 1<<20)
 		for r.Scan() {
 			line := r.Text()
 			mu.Lock()
@@ -138,6 +142,9 @@ func (c *Client) Run(ctx context.Context, dir string, source string, args ...str
 			sb.WriteByte('\n')
 			mu.Unlock()
 			c.log.Line(source, logging.LevelInfo, line)
+		}
+		if err := r.Err(); err != nil {
+			c.log.Line(source, logging.LevelWarn, fmt.Sprintf("读取输出中断: %v", err))
 		}
 	}
 	wg.Add(2)

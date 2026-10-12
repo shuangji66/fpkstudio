@@ -224,7 +224,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       // 返回里没有 entries 说明中间有东西插了一脚（网关/反代的页面、空回包…）。
       // 这种情况必须报出来，否则文件树只会画成「空目录」，看不出是失败了。
       if (!root || !Array.isArray(root.entries)) {
-        throw new Error('列目录的返回里没有 entries，可能被中间的网关/反代改写了')
+        throw new Error(i18n.global.t('tree.listBroken', { name }))
       }
       s.dirs[name] = root.entries
       s.expanded[name] = true
@@ -251,7 +251,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (s.dirs[path] && !force) return
     const res = await listDir(path)
     if (!res || !Array.isArray(res.entries)) {
-      throw new Error(`${path} 的列目录返回里没有 entries`)
+      throw new Error(i18n.global.t('tree.listBroken', { name: path }))
     }
     s.dirs[path] = res.entries
   }
@@ -354,6 +354,38 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function fileTabPath(name: string, path: string) {
     return path.startsWith(`${name}/`) ? path.slice(name.length + 1) : path
+  }
+
+  /**
+   * 把目录列表缓存（`dirs`）与展开状态（`expanded`）从旧路径搬到新路径，含子树。
+   *
+   * 两边的键都是「含项目名的完整路径」（`demo/app/server`），所以按前缀搬即可。
+   * 目录改名时缓存必须一起走：留在旧键上的那份会在旧名字被重新建出来时冒充新目录的
+   * 内容（树上多出已经删掉的子项），而新路径没有展开状态则表现为「改完名就收起来了」。
+   */
+  function migrateDirKeys(name: string, from: string, to: string) {
+    const s = state(name)
+    for (const key of Object.keys(s.dirs)) {
+      if (key !== from && !key.startsWith(`${from}/`)) continue
+      s.dirs[to + key.slice(from.length)] = s.dirs[key]!
+      delete s.dirs[key]
+    }
+    for (const key of Object.keys(s.expanded)) {
+      if (key !== from && !key.startsWith(`${from}/`)) continue
+      s.expanded[to + key.slice(from.length)] = s.expanded[key]!
+      delete s.expanded[key]
+    }
+  }
+
+  /** 丢掉某个路径下的目录缓存与展开状态（含子树）：目录被删 / 移走之后它们就不成立了。 */
+  function dropDirKeys(name: string, path: string) {
+    const s = state(name)
+    for (const key of Object.keys(s.dirs)) {
+      if (key === path || key.startsWith(`${path}/`)) delete s.dirs[key]
+    }
+    for (const key of Object.keys(s.expanded)) {
+      if (key === path || key.startsWith(`${path}/`)) delete s.expanded[key]
+    }
   }
 
   async function openFile(name: string, fullPath: string) {
@@ -615,6 +647,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function createEntryAt(name: string, parent: string, fileName: string, dir: boolean) {
     const target = parent.endsWith('/') ? `${parent}${fileName}` : `${parent}/${fileName}`
+    // 建文件前必须先确认目标目录里没有同名项。后端 /api/fs/create 也挡了这一条
+    // （已存在的文件会被拒绝），但这里现拉一次目录能给出更清楚的提示，也省掉一趟注定
+    // 失败的写请求。缓存里那份可能是旧的，所以必须 force 现拉。
+    // 目录不查重：「新建目录」是幂等的，重复创建没有破坏性，补架构目录那条路也依赖它。
+    if (!dir) {
+      try {
+        await loadDir(name, parent, true)
+      } catch {
+        throw new Error(
+          i18n.global.t('tree.createListFailed', { name: parent.split('/').pop() ?? parent }),
+        )
+      }
+      if ((state(name).dirs[parent] ?? []).some((entry) => entry.name === fileName)) {
+        throw new Error(i18n.global.t('tree.createExists', { name: fileName }))
+      }
+    }
     await createEntry(target, dir)
     await refreshDir(name, parent)
     if (dir) await refreshDir(name, target)
@@ -631,6 +679,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       s.browserBack = []
       s.browserForward = []
       s.browserDir = parent
+    }
+    // 缓存与展开状态跟着失效：留着它们的表现是「删掉一个目录再建一个同名的，树上
+    // 直接显示上一个目录的子项」。
+    dropDirKeys(name, path)
+    // 剪贴板里那条（或它里面的东西）已经不存在了，清掉——留着它之后每次粘贴都会失败。
+    if (s.clipboard && (s.clipboard.path === path || s.clipboard.path.startsWith(`${path}/`))) {
+      s.clipboard = null
     }
     // 关掉被删掉的文件标签
     const rel = fileTabPath(name, path)
@@ -685,11 +740,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (s.browserDir === path || s.browserDir.startsWith(`${path}/`)) {
       s.browserDir = to + s.browserDir.slice(path.length)
     }
+    // 目录列表缓存与展开状态也要一起搬。不搬的表现有两个：展开着的目录改完名变回收起
+    // （新路径没有 expanded），以及旧路径那份缓存变成孤儿——旧名字一旦被重新建出来
+    // （粘贴 / 解压都可能），树上会画出已被删掉的那批子项。
+    migrateDirKeys(name, path, to)
+    // 剪贴板里如果是这一项（或它里面的东西），路径要跟着改。不改的话下一次粘贴会拿一个
+    // 已经不存在的路径去改名 / 复制，后端报「没有那个文件」；而 pasteInto 只在成功之后
+    // 才清剪贴板，于是这个坏路径会一直留着，之后每次粘贴都失败。
+    if (s.clipboard) {
+      const clip = s.clipboard.path
+      if (clip === path) s.clipboard = { ...s.clipboard, path: to }
+      else if (clip.startsWith(`${path}/`)) {
+        s.clipboard = { ...s.clipboard, path: to + clip.slice(path.length) }
+      }
+    }
 
     const rel = fileTabPath(name, path)
     const nextRel = fileTabPath(name, to)
     for (const f of [...s.files]) {
       // 自己，或者自己所在的目录被改名：路径跟着换，内容 / 脏标记 / 草稿原样留着。
+      const wasPath = f.path
       if (f.path === rel) {
         f.path = nextRel
       } else if (f.path.startsWith(`${rel}/`)) {
@@ -698,7 +768,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         continue
       }
       f.name = f.path.split('/').pop() ?? f.path
-      if (s.activeTab === rel) s.activeTab = nextRel
+      // 活动标签也要跟着换，**包括「活动的是被改名目录里的子文件」这一种**：
+      // activeTab 是「哪个面板可见」的唯一判据（ProjectTab 里全是
+      // v-show="activeTab === …"），只改子标签的 path 会把它留在一个没有任何标签
+      // 使用的路径上——表现是「改一下目录名，编辑区整片空白、标签栏也不高亮」。
+      if (s.activeTab === wasPath) s.activeTab = f.path
     }
   }
 

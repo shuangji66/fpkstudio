@@ -268,10 +268,20 @@ async function pick(slot: Slot) {
   try {
     if (fromUser && current && !(await confirmReplace(current))) return
 
-    // 目录授权只支持单选，但返回的是「当前用户授权给应用的目录」全集，所以拿选
-    // 之前的那一份 diff 出新增的那个；diff 不出来时退回最后一个。列表现拉一次：
-    // 弹窗打开之后用户可能已经删过授权，缓存里那份就不准了。
-    const before = new Set(await getAuthorizedFolders().catch(() => []))
+    // 目录授权只支持单选，但返回的是「当前用户授权给应用的目录」全集，所以拿选之前
+    // 的那一份 diff 出新增的那个。列表现拉一次：弹窗打开之后用户可能已经删过授权，
+    // 缓存里那份就不准了。
+    //
+    // 这份列表读不到时必须**中止**，不能拿一个空集合去 diff：那样 added 会等于 picked，
+    // target 就落到 picked[0]——一个与本次操作毫无关系的旧授权目录上，接着 save 会把
+    // 项目根切过去、还会把原目录的授权删掉。宁可让用户重按一次。
+    let before: Set<string>
+    try {
+      before = new Set(await getAuthorizedFolders())
+    } catch (e) {
+      ElMessage.error(fail(e))
+      return
+    }
     const picked = await pickUserDirectory(
       t('settings.dirs.pickerTitle'),
       t('settings.dirs.pickerOk'),
@@ -282,10 +292,13 @@ async function pick(slot: Slot) {
       return
     }
 
+    // 只有「恰好新增了一个授权目录」才能确定用户选的是哪个。diff 不出来（用户重选了
+    // 一个已经授权过的目录）时不猜：猜错的代价是项目根整个换地方、旧目录的授权被删掉，
+    // 而让用户重选一次只要几秒。
     const added = picked.filter((p) => !before.has(p))
-    const target = added[0] ?? picked[picked.length - 1]
+    const target = added.length === 1 ? added[0]! : ''
     if (!target) {
-      ElMessage.info(t('settings.dirs.canceled'))
+      ElMessage.warning(t('settings.dirs.pickerAmbiguous'))
       return
     }
     if (target === current) {

@@ -1,6 +1,47 @@
 package fsx
 
-import "testing"
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// 复制到已存在的目标上必须拒绝：copy 内部用 O_TRUNC，静默覆盖会让「复制到这里」
+// 变成「把那个文件换掉」，而且不可逆（和 Rename 同一条规矩）。
+func TestCopyRefusesExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	r, err := Open(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if err := r.WriteFile("src.txt", []byte("SRC\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteFile("dst.txt", []byte("KEEP\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Copy("src.txt", "dst.txt"); !errors.Is(err, ErrExists) {
+		t.Fatalf("复制到已存在文件：err = %v，期望 ErrExists", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "dst.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "KEEP\n" {
+		t.Fatalf("目标被覆盖了：%q", data)
+	}
+
+	// 目标不存在时照常复制
+	if err := r.Copy("src.txt", "new.txt"); err != nil {
+		t.Fatalf("复制到新路径失败: %v", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "new.txt")); string(data) != "SRC\n" {
+		t.Fatalf("新文件内容不对：%q", data)
+	}
+}
 
 func TestRelNormalization(t *testing.T) {
 	cases := []struct {

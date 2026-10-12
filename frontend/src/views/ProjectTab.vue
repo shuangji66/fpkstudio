@@ -116,10 +116,14 @@ function startResize(event: PointerEvent) {
   const up = () => {
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
+    // pointercancel 也要摘：触屏手势被系统接管、或者拖拽被取消时不会再来 pointerup，
+    // 这两个监听就留在窗口上了——之后鼠标一动树就跟着缩，直到下一次松手。
+    window.removeEventListener('pointercancel', up)
     window.localStorage.setItem('fpkstudio.treeWidth', String(treeWidth.value))
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)
+  window.addEventListener('pointercancel', up)
 }
 
 onMounted(async () => {

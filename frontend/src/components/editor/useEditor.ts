@@ -16,7 +16,6 @@ export interface EditorContent {
 export interface EditorApi {
   isDirty(): boolean
   getContent(): EditorContent | null
-  reset(): void
   /** 可选：外部整体写入内容（「插入模板」这类按钮用）。 */
   setContent?(text: string): void
   /**
@@ -93,9 +92,6 @@ export function useEditor<M>(
   const api: EditorApi = {
     isDirty: () => serialize() !== baseline.value,
     getContent: () => ({ path: props.path, content: serialize() }),
-    reset: () => {
-      model.value = load(props.origin)
-    },
     // 「从别的向导复制」这类整体替换。解析失败由各自的 load 兜住（返回空模型 + error），
     // 所以这里不需要再判断。
     setContent: (text: string) => {
@@ -103,7 +99,7 @@ export function useEditor<M>(
     },
   }
 
-  return { model, serialize, api }
+  return { model, api }
 }
 
 // 这两个是「JSON 配置怎么写回磁盘」的约定，放在 utils 里，表单编辑器和

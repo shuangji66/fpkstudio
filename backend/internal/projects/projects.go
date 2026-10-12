@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"fpkstudio/internal/config"
@@ -91,12 +93,14 @@ type PackResult struct {
 	Log      string `json:"log"`
 }
 
-// Manager 是项目层的全部业务逻辑。
-type Manager struct {
-	cfg    *config.Config
-	log    *logging.Logger
-	fn     *fnpack.Client
-	home   *fsx.Root // 数据根目录，用于暂存
+// rootsSnapshot 是「当前生效的一整套目录」，只读。
+//
+// 为什么要做成快照：这些值会被打包、列目录、列产物这些并发请求读取，而
+// SetRoots（设置弹窗里换目录）会整套改写它们。以前它们是几个裸字段，`go test -race`
+// 直接报数据竞争；更实际的问题是读方可能在两次读取之间被换掉，拿到「新的项目根 +
+// 旧的项目根在数据目录里的相对路径」这种混搭——打包会照着旧位置去复制内容。
+// 换成一个不可变快照 + 原子指针，读方一次拿到一整套一致的值。
+type rootsSnapshot struct {
 	prj    *fsx.Root // 项目根目录沙箱
 	output *fsx.Root // 打包输出目录（可能在数据根之外）
 
@@ -108,12 +112,88 @@ type Manager struct {
 	// 跨目录复制；项目根目录被设置成数据目录之外的授权目录时为空，改走
 	// fsx.CopyTree 的绝对路径复制。
 	prjInHome string
+}
 
-	// roots 是所有开过的沙箱，Close 时统一释放。SetRoots 换目录时旧的不立刻
+// 让 HTTP 层能把「用户输入错」和「服务端故障」分开回（400/404 vs 500）。以前全归到
+// 500：日志里分不出是不是故障，前端也拿不到可行动的状态码。
+var (
+	// ErrInvalidName 表示项目名不合法（空、带路径分隔符、..）。
+	ErrInvalidName = errors.New("项目名不合法")
+	// ErrNotFound 表示项目（或它的目录）不存在。
+	ErrNotFound = errors.New("项目不存在")
+	// ErrExists 表示同名项目已经存在。
+	ErrExists = errors.New("项目已存在")
+)
+
+// cachedModTime / rememberModTime / forgetModTime 是「最后修改时间」的小缓存（见
+// Manager.modTimeCache）。
+func (m *Manager) cachedModTime(rel string) (string, bool) {
+	m.modTimeMu.Lock()
+	defer m.modTimeMu.Unlock()
+	e, ok := m.modTimeCache[rel]
+	if !ok || time.Since(e.at) > modTimeCacheTTL {
+		return "", false
+	}
+	return e.mod, true
+}
+
+func (m *Manager) rememberModTime(rel, mod string) {
+	m.modTimeMu.Lock()
+	defer m.modTimeMu.Unlock()
+	if m.modTimeCache == nil {
+		m.modTimeCache = make(map[string]modTimeEntry)
+	}
+	m.modTimeCache[rel] = modTimeEntry{at: time.Now(), mod: mod}
+}
+
+func (m *Manager) forgetModTime(rel string) {
+	m.modTimeMu.Lock()
+	defer m.modTimeMu.Unlock()
+	delete(m.modTimeCache, rel)
+}
+
+// Manager 是项目层的全部业务逻辑。
+type Manager struct {
+	cfg *config.Config
+	log *logging.Logger
+	fn  *fnpack.Client
+	// home 是数据根目录（暂存区），启动时定下、之后不变，所以不进快照。
+	home *fsx.Root
+
+	// current 是当前生效的目录快照。读方只走 snap()，不要缓存它。
+	current atomic.Pointer[rootsSnapshot]
+
+	// handles 是所有开过的沙箱，Close 时统一释放。SetRoots 换目录时旧的不立刻
 	// 关：打包是并发进行的（同一个进程里另一个 HTTP 请求正在用旧句柄），
 	// 关掉会让那次打包半路 EBADF。换目录是用户手动操作，频率极低。
-	roots []*fsx.Root
+	handlesMu sync.Mutex
+	handles   []*fsx.Root
+
+	// modTimeCache 缓存「项目的最后修改时间」。
+	//
+	// 算一次要扫整个项目树（上限 maxModTimeScan 项），而首页每次刷新 / 新建项目都会把
+	// 每个项目扫一遍——项目一多，/api/projects 就是「项目数 × 最多两万次 stat」。这里
+	// 做很短的 TTL 复用：连续刷新不会重复扫，代价是最多 modTimeCacheTTL 的显示延迟。
+	// 会改项目内容的操作（打包、新建、删除）顺手把对应键丢掉。
+	modTimeMu    sync.Mutex
+	modTimeCache map[string]modTimeEntry
 }
+
+// modTimeEntry 是一条「最后修改时间」缓存。
+type modTimeEntry struct {
+	at  time.Time
+	mod string
+}
+
+// modTimeCacheTTL 见 Manager.modTimeCache 的说明。
+const modTimeCacheTTL = 2 * time.Second
+
+// snap 返回当前生效的目录快照（一次原子读，拿到的一定是同一套值）。
+func (m *Manager) snap() *rootsSnapshot { return m.current.Load() }
+
+// prjRoot / outputRoot 是给内部读写用的便捷入口（每个调用点各拿一次快照）。
+func (m *Manager) prjRoot() *fsx.Root    { return m.snap().prj }
+func (m *Manager) outputRoot() *fsx.Root { return m.snap().output }
 
 // New 创建 Manager，先按环境变量给的默认目录打开沙箱。
 // 用户设置过的目录由 SetRoots 在启动时补一次。
@@ -122,34 +202,31 @@ func New(cfg *config.Config, log *logging.Logger, fn *fnpack.Client) (*Manager, 
 	if err != nil {
 		return nil, fmt.Errorf("打开数据目录失败: %w", err)
 	}
-	m := &Manager{
-		cfg:   cfg,
-		log:   log,
-		fn:    fn,
-		home:  home,
-		roots: []*fsx.Root{home},
-	}
+	m := &Manager{cfg: cfg, log: log, fn: fn, home: home}
+	m.handles = []*fsx.Root{home}
 	if err := m.SetRoots("", ""); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-// Close 释放句柄。
+// Close 释放句柄。要在服务退出时调（此时不会再有请求进来）。
 func (m *Manager) Close() {
-	for _, r := range m.roots {
+	m.handlesMu.Lock()
+	defer m.handlesMu.Unlock()
+	for _, r := range m.handles {
 		if r != nil {
 			_ = r.Close()
 		}
 	}
-	m.roots = nil
+	m.handles = nil
 }
 
 // ProjectRoot 返回当前生效的项目根目录。
-func (m *Manager) ProjectRoot() string { return m.projectRoot }
+func (m *Manager) ProjectRoot() string { return m.snap().projectRoot }
 
 // OutputDir 返回当前生效的打包输出目录。
-func (m *Manager) OutputDir() string { return m.outputDir }
+func (m *Manager) OutputDir() string { return m.snap().outputDir }
 
 // SetRoots 切换项目根目录与打包输出目录，空字符串表示用环境变量给的默认值。
 //
@@ -234,10 +311,19 @@ func (m *Manager) SetRoots(projectRoot, outputDir string) error {
 		m.log.Debugf("项目根目录在数据目录之外（%s），暂存复制改走绝对路径", prjDir)
 	}
 
-	m.roots = append(m.roots, prj, out)
-	m.prj, m.output = prj, out
-	m.projectRoot, m.outputDir = prjDir, outDir
-	m.prjInHome = inHome
+	m.handlesMu.Lock()
+	m.handles = append(m.handles, prj, out)
+	m.handlesMu.Unlock()
+
+	// 一次性换掉整套目录：读方（打包 / 列目录 / 列产物）拿到的永远是一整套一致的
+	// 值。校验失败的分支都在上面 return 了，走到这里就一定可以换。
+	m.current.Store(&rootsSnapshot{
+		prj:         prj,
+		output:      out,
+		projectRoot: prjDir,
+		outputDir:   outDir,
+		prjInHome:   inHome,
+	})
 	return nil
 }
 
@@ -252,26 +338,30 @@ func samePath(a, b string) bool {
 // 一个目录），但默认值仍可能撞上：项目目录可以被指到数据目录下的任何位置，包括
 // $DATA_DIR/output。那时复制到输出目录等于复制到自己身上，列产物也会列两遍。
 func (m *Manager) outputIsProject() bool {
-	return filepath.Clean(m.outputDir) == filepath.Clean(m.projectRoot)
+	s := m.snap()
+	return filepath.Clean(s.outputDir) == filepath.Clean(s.projectRoot)
 }
 
 // copyIntoStage 把项目目录复制到 home 沙箱里的暂存位置。
 //
 // 项目根目录在数据目录内时走 home 沙箱的相对路径复制；被设置成数据目录之外的
 // 授权目录时，源和目标分属两个沙箱，只能按绝对路径复制。
-func (m *Manager) copyIntoStage(prjRel, stageRel string) error {
-	if m.prjInHome != "" {
-		return m.home.Copy(m.prjInHome+"/"+prjRel, stageRel)
+//
+// 快照由调用方给（s）：这个操作要读两个目录字段，自己各读一次的话，正好在两次读之间
+// 换过目录就会拿到混搭的值。
+func (m *Manager) copyIntoStage(s *rootsSnapshot, prjRel, stageRel string) error {
+	if s.prjInHome != "" {
+		return m.home.Copy(s.prjInHome+"/"+prjRel, stageRel)
 	}
-	return fsx.CopyTree(m.prj.Abs(prjRel), m.home.Abs(stageRel))
+	return fsx.CopyTree(s.prj.Abs(prjRel), m.home.Abs(stageRel))
 }
 
 // Root 暴露项目目录沙箱，供文件管理器复用。
-func (m *Manager) Root() *fsx.Root { return m.prj }
+func (m *Manager) Root() *fsx.Root { return m.prjRoot() }
 
 // List 列出全部项目。
 func (m *Manager) List() ([]ProjectInfo, error) {
-	entries, err := m.prj.List(".")
+	entries, err := m.prjRoot().List(".")
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +373,7 @@ func (m *Manager) List() ([]ProjectInfo, error) {
 		info, err := m.Info(e.Name)
 		if err != nil {
 			// 单个项目目录损坏不应该让整个列表挂掉。
-			out = append(out, ProjectInfo{Name: e.Name, ModTime: e.ModTime, AbsPath: m.prj.Abs(e.Name)})
+			out = append(out, ProjectInfo{Name: e.Name, ModTime: e.ModTime, AbsPath: m.prjRoot().Abs(e.Name)})
 			continue
 		}
 		out = append(out, info)
@@ -297,22 +387,25 @@ func (m *Manager) Info(name string) (ProjectInfo, error) {
 	if err != nil {
 		return ProjectInfo{}, err
 	}
-	st, err := m.prj.Stat(rel)
+	st, err := m.prjRoot().Stat(rel)
 	if err != nil {
 		return ProjectInfo{}, err
 	}
 	if !st.Dir {
-		return ProjectInfo{}, fmt.Errorf("%s 不是目录", name)
+		return ProjectInfo{}, fmt.Errorf("%w：%s 不是目录", ErrNotFound, name)
 	}
 
-	info := ProjectInfo{Name: name, ModTime: st.ModTime, AbsPath: m.prj.Abs(rel)}
+	info := ProjectInfo{Name: name, ModTime: st.ModTime, AbsPath: m.prjRoot().Abs(rel)}
 	// 列表里显示的是「最后修改时间」：目录自身的 mtime 只在增删条目时变，
 	// 改 manifest、换 building 里的产物都看不出来，所以取整棵树里最新的。
-	// 限制扫描条目数，避免大项目把一个时间扫穿。
-	if newest, err := m.prj.LatestModTime(rel, maxModTimeScan); err == nil && !newest.IsZero() {
+	// 限制扫描条目数，避免大项目把一个时间扫穿；结果再放 2 秒缓存（见 modTimeCache）。
+	if cached, ok := m.cachedModTime(rel); ok {
+		info.ModTime = cached
+	} else if newest, err := m.prjRoot().LatestModTime(rel, maxModTimeScan); err == nil && !newest.IsZero() {
 		info.ModTime = newest.Format("2006-01-02 15:04:05")
+		m.rememberModTime(rel, info.ModTime)
 	}
-	if data, err := m.prj.ReadFile(rel + "/manifest"); err == nil {
+	if data, err := m.prjRoot().ReadFile(rel + "/manifest"); err == nil {
 		kv := parseManifest(string(data))
 		info.AppName = kv["appname"]
 		info.Version = kv["version"]
@@ -331,7 +424,7 @@ func (m *Manager) Exists(name string) (ExistsInfo, error) {
 	if err != nil {
 		return ExistsInfo{}, err
 	}
-	st, err := m.prj.Stat(rel)
+	st, err := m.prjRoot().Stat(rel)
 	if err != nil {
 		return ExistsInfo{Exists: false}, nil
 	}
@@ -348,11 +441,11 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 	if err != nil {
 		return err
 	}
-	if _, err := m.prj.Stat(rel); err == nil {
-		return fmt.Errorf("项目 %s 已存在", name)
+	if _, err := m.prjRoot().Stat(rel); err == nil {
+		return fmt.Errorf("%w：%s", ErrExists, name)
 	}
 
-	out, err := m.fn.Create(ctx, m.projectRoot, name, docker, withUI)
+	out, err := m.fn.Create(ctx, m.snap().projectRoot, name, docker, withUI)
 	if err != nil {
 		return fmt.Errorf("fnpack create 失败: %w", err)
 	}
@@ -360,7 +453,7 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 	// 「目录 / manifest 有没有真的落地」为判据，并把 fnpack 的原话带出来——
 	// 否则用户只会看到一句没头没脑的「报告成功但目录没生成」，不知道是自己
 	// 项目名不合规。
-	if _, err := m.prj.Stat(rel); err != nil {
+	if _, err := m.prjRoot().Stat(rel); err != nil {
 		if reason := fnpack.FailureReason(out); reason != "" {
 			return fmt.Errorf("fnpack create 失败: %s", reason)
 		}
@@ -371,7 +464,7 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 	}
 
 	// fnpack 模板里带了 .DS_Store，在部分文件系统上会让后续 build 直接失败。
-	if n := stripJunk(m.prj, rel); n > 0 {
+	if n := stripJunk(m.prjRoot(), rel); n > 0 {
 		m.log.Infof("清理模板里的冗余文件 %d 个", n)
 	}
 	// 这里刻意不修模式位（打包时会修暂存副本）：fnpack 新建的文件在飞牛卷上
@@ -381,7 +474,7 @@ func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) 
 	// （架构目录名就是 fpk 的 platform 值，内容会被复制到 app/server 再打包）。
 	dirs := append([]string{rel + "/building", rel + "/building/platform"}, platformDirs(rel)...)
 	for _, d := range dirs {
-		if err := m.prj.Mkdir(d, 0o755, true); err != nil {
+		if err := m.prjRoot().Mkdir(d, 0o755, true); err != nil {
 			return err
 		}
 	}
@@ -394,10 +487,11 @@ func (m *Manager) Delete(name string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := m.prj.Stat(rel); err != nil {
-		return fmt.Errorf("项目 %s 不存在", name)
+	if _, err := m.prjRoot().Stat(rel); err != nil {
+		return fmt.Errorf("%w：%s", ErrNotFound, name)
 	}
-	return m.prj.Remove(rel, true)
+	defer m.forgetModTime(rel)
+	return m.prjRoot().Remove(rel, true)
 }
 
 // Platforms 列出 building/platform 下的架构目录。
@@ -406,7 +500,7 @@ func (m *Manager) Platforms(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	entries, err := m.prj.List(rel + "/building/platform")
+	entries, err := m.prjRoot().List(rel + "/building/platform")
 	if err != nil {
 		return []string{}, nil
 	}
@@ -437,7 +531,7 @@ func (m *Manager) Artifacts(name string) ([]Artifact, error) {
 		return nil, err
 	}
 	appname := name
-	if data, err := m.prj.ReadFile(rel + "/manifest"); err == nil {
+	if data, err := m.prjRoot().ReadFile(rel + "/manifest"); err == nil {
 		if a := strings.TrimSpace(parseManifest(string(data))["appname"]); a != "" {
 			appname = a
 		}
@@ -470,11 +564,12 @@ func (m *Manager) Artifacts(name string) ([]Artifact, error) {
 			})
 		}
 	}
-	collect(m.prj, rel, "project", nil)
+	s := m.snap()
+	collect(s.prj, rel, "project", nil)
 	// 两个目录是同一个位置时只列项目那一份：否则同一份产物会以两种 scope 出现，
 	// 用户看到的是「列表里有一个文件出现两次，路径一模一样」。
 	if !m.outputIsProject() {
-		collect(m.output, ".", "output", func(n string) bool {
+		collect(s.output, ".", "output", func(n string) bool {
 			return strings.HasPrefix(n, appname+"-") || n == appname+".fpk"
 		})
 	}
@@ -490,7 +585,7 @@ func (m *Manager) GetSettings(name string) (Settings, error) {
 		return Settings{}, err
 	}
 	s := Settings{ServerDir: defaultServerDir, CopyToOutput: true, Platforms: []string{}}
-	data, err := m.prj.ReadFile(rel + "/" + settingsFile)
+	data, err := m.prjRoot().ReadFile(rel + "/" + settingsFile)
 	if err != nil {
 		return s, nil
 	}
@@ -527,7 +622,7 @@ func (m *Manager) SaveSettings(name string, s Settings) error {
 	if err != nil {
 		return err
 	}
-	return m.prj.WriteFile(rel+"/"+settingsFile, data, 0o644)
+	return m.prjRoot().WriteFile(rel+"/"+settingsFile, data, 0o644)
 }
 
 // Pack 执行打包。
@@ -540,7 +635,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 	if err != nil {
 		return nil, err
 	}
-	manifestBytes, err := m.prj.ReadFile(rel + "/manifest")
+	manifestBytes, err := m.prjRoot().ReadFile(rel + "/manifest")
 	if err != nil {
 		return nil, fmt.Errorf("读取 manifest 失败: %w", err)
 	}
@@ -574,6 +669,9 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 	}
 	single := len(targets) == 0
 
+	// 这一次打包全程用同一套目录（见 rootsSnapshot 的说明）。
+	s := m.snap()
+
 	stageName := fmt.Sprintf("build-%s-%d", sanitize(req.Name), time.Now().UnixNano())
 	stage := "tmp/" + stageName
 	if err := m.home.Mkdir(stage, 0o755, true); err != nil {
@@ -585,7 +683,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 		}
 	}()
 
-	if err := m.copyIntoStage(rel, stage+"/project"); err != nil {
+	if err := m.copyIntoStage(s, rel, stage+"/project"); err != nil {
 		return nil, fmt.Errorf("复制项目到暂存区失败: %w", err)
 	}
 	// 修复不可用的权限（见 fsx.RepairModes 的说明），保证 fnpack 读得到、
@@ -600,7 +698,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 	}
 	stagePrj := m.home.Abs(stage + "/project")
 
-	m.log.Infof("开始打包 %s (%s)，输出目录 %s", req.Name, version, m.outputDir)
+	m.log.Infof("开始打包 %s (%s)，输出目录 %s", req.Name, version, s.outputDir)
 
 	rounds := targets
 	if single {
@@ -615,7 +713,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 		}
 
 		if platform != "" {
-			if err := m.prepareStage(stage, rel, serverRel, platform); err != nil {
+			if err := m.prepareStage(s, stage, rel, serverRel, platform); err != nil {
 				res.OK = false
 				res.Log = err.Error()
 				m.log.Errorf("准备 %s 的 %s 内容失败: %v", req.Name, platform, err)
@@ -660,7 +758,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 		}
 
 		fileName := fmt.Sprintf("%s-%s-%s.fpk", appname, version, res.Platform)
-		inProject := m.prj.Abs(rel + "/" + fileName)
+		inProject := m.prjRoot().Abs(rel + "/" + fileName)
 		if err := copyFile(src, inProject); err != nil {
 			res.OK = false
 			res.Log = fmt.Sprintf("写入项目目录失败: %v", err)
@@ -672,7 +770,7 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 		res.Size = st.Size()
 
 		if req.CopyOut && !m.outputIsProject() {
-			dst := m.output.Abs(fileName)
+			dst := m.outputRoot().Abs(fileName)
 			if err := copyFile(src, dst); err != nil {
 				res.OK = false
 				res.Log = fmt.Sprintf("复制到输出目录失败: %v", err)
@@ -683,6 +781,8 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 		}
 
 		res.OK = true
+		// 产物写进了项目目录，列表上的「最后修改时间」要跟着变（缓存里那份作废）
+		m.forgetModTime(rel)
 		m.log.Infof("打包成功 %s（%s）", fileName, fsx.HumanSize(st.Size()))
 		results = append(results, res)
 	}
@@ -692,17 +792,17 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 // prepareStage 把 building/platform/<platform>/ 的内容覆盖到暂存区的 server 目录。
 //
 // 约定与 fnpackup 一致：架构目录里放的是「该架构下 app/<serverDir> 应有的全部内容」。
-func (m *Manager) prepareStage(stage string, prjRel string, serverRel string, platform string) error {
+func (m *Manager) prepareStage(s *rootsSnapshot, stage string, prjRel string, serverRel string, platform string) error {
 	srcInPrj := prjRel + "/building/platform/" + platform
 
-	srcStat, err := m.prj.Stat(srcInPrj)
+	srcStat, err := m.prjRoot().Stat(srcInPrj)
 	if err != nil {
 		return fmt.Errorf("找不到架构目录 building/platform/%s", platform)
 	}
 	if !srcStat.Dir {
 		return fmt.Errorf("building/platform/%s 不是目录", platform)
 	}
-	children, err := m.prj.List(srcInPrj)
+	children, err := m.prjRoot().List(srcInPrj)
 	if err != nil {
 		return err
 	}
@@ -716,7 +816,7 @@ func (m *Manager) prepareStage(stage string, prjRel string, serverRel string, pl
 	if err := m.home.Mkdir(dstRel, 0o755, true); err != nil {
 		return err
 	}
-	return m.copyIntoStage(srcInPrj, dstRel)
+	return m.copyIntoStage(s, srcInPrj, dstRel)
 }
 
 // Import 把上传的 .fpk 解成一个项目目录。
@@ -754,7 +854,7 @@ func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (Pro
 	if err != nil {
 		return ProjectInfo{}, err
 	}
-	if _, err := m.prj.Stat(rel); err == nil {
+	if _, err := m.prjRoot().Stat(rel); err == nil {
 		name = fmt.Sprintf("%s-%d", name, time.Now().Unix())
 		rel, err = projectPath(name)
 		if err != nil {
@@ -769,7 +869,7 @@ func (m *Manager) Import(ctx context.Context, r io.Reader, fileName string) (Pro
 	// 与 Create 保持一致，多架构发布勾一下就能用。失败只记日志——项目已经落地了，
 	// 而且前端的「打开多架构发布」还会再补一次。
 	for _, dir := range platformDirs(rel) {
-		if err := m.prj.Mkdir(dir, 0o755, true); err != nil {
+		if err := m.prjRoot().Mkdir(dir, 0o755, true); err != nil {
 			m.log.Warnf("创建架构目录 %s 失败: %v", dir, err)
 		}
 	}
@@ -822,7 +922,7 @@ func (m *Manager) ImportPath(ctx context.Context, absPath string) (ProjectInfo, 
 // 目录，跨设备 rename 会 EXDEV，那时退回复制 + 删源。
 func (m *Manager) moveIntoProjects(stage, rel string) error {
 	src := m.home.Abs(stage)
-	dst := m.prj.Abs(rel)
+	dst := m.prjRoot().Abs(rel)
 
 	err := os.Rename(src, dst)
 	if err == nil {
@@ -849,7 +949,7 @@ func platformDirs(rel string) []string {
 // ---- 内部工具 ----
 
 func (m *Manager) exists(rel string) bool {
-	_, err := m.prj.Stat(rel)
+	_, err := m.prjRoot().Stat(rel)
 	return err == nil
 }
 
@@ -888,10 +988,10 @@ func (m *Manager) dumpModes(stage string) {
 func projectPath(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", errors.New("项目名不能为空")
+		return "", fmt.Errorf("%w：项目名不能为空", ErrInvalidName)
 	}
 	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
-		return "", errors.New("项目名不能包含路径分隔符")
+		return "", fmt.Errorf("%w：项目名不能包含路径分隔符", ErrInvalidName)
 	}
 	return fsx.Rel(name)
 }
@@ -1124,6 +1224,12 @@ func unpackFPK(root *fsx.Root, stage string, r io.Reader) error {
 				return err
 			}
 			continue
+		}
+		// 文件数也要算上 app.tgz 里那些：体积预算对**空文件**不起作用，只按字节数拦的话，
+		// 一个塞满几百万个 0 字节成员的 app.tgz 能把数据目录的 inode 吃光。
+		files++
+		if files > maxImportFiles {
+			return errors.New("包内文件过多，已中止")
 		}
 		if err := writeEntry(root, stage+"/app/"+name, itr, &total); err != nil {
 			return err

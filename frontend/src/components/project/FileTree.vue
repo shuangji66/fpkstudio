@@ -187,6 +187,7 @@ import {
   Switch,
 } from '@element-plus/icons-vue'
 import { useUpload } from './useUpload'
+import { useDownload } from './useDownload'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { isArchive } from '@/utils/format'
 
@@ -195,6 +196,7 @@ const props = defineProps<{ project: string }>()
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const { upload } = useUpload()
+const { download } = useDownload()
 
 const state = computed(() => workspace.state(props.project))
 
@@ -475,7 +477,7 @@ const menuItems = computed<MenuItem[]>(() => {
     label: t('tree.cut'),
     run: () => workspace.copyToClipboard(props.project, path, true),
   })
-  items.push({ label: t('common.download'), run: () => workspace.downloadAt(path) })
+  items.push({ label: t('common.download'), run: () => void download(path) })
   if (!menu.dir && isArchive(name)) {
     items.push({ label: t('tree.extract'), run: () => void extract(path) })
   }

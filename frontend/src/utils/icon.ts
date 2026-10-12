@@ -12,6 +12,22 @@
 /** 处理链里的中间结果，都是一个正方 canvas。 */
 export type Raster = HTMLCanvasElement
 
+/**
+ * 图像处理失败。
+ *
+ * 错误里带的是 **i18n 键**而不是一句话：这个模块是纯逻辑（`check:icon` 直接跑它，
+ * 不把 vue-i18n 拖进来），文案由界面层翻译——见 IconPanel 里的 errText。
+ */
+export class IconError extends Error {
+  readonly key: string
+
+  constructor(key: string) {
+    super(key)
+    this.name = 'IconError'
+    this.key = key
+  }
+}
+
 type Source = HTMLImageElement | Raster
 
 /** 入口图标的落地目录：默认入口是 icon_256 / icon_64，副入口是 <前缀>_256 / <前缀>_64。 */
@@ -87,7 +103,7 @@ export function imageFromFile(file: File): Promise<{ image: HTMLImageElement; ur
     image.onload = () => resolve({ image, url })
     image.onerror = () => {
       URL.revokeObjectURL(url)
-      reject(new Error('图片解码失败'))
+      reject(new IconError('iconTab.errorDecode'))
     }
     image.src = url
   })
@@ -104,7 +120,7 @@ export function imageFromURL(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image()
     image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('图片解码失败'))
+    image.onerror = () => reject(new IconError('iconTab.errorDecode'))
     image.src = url
   })
 }
@@ -258,7 +274,7 @@ export function rasterToPngFile(source: Source, side: number, name: string): Pro
     const canvas = resizeSquare(source, side)
     canvas.toBlob((blob) => {
       if (!blob) {
-        reject(new Error('导出 PNG 失败'))
+        reject(new IconError('iconTab.errorExport'))
         return
       }
       resolve(new File([blob], name, { type: 'image/png', lastModified: Date.now() }))

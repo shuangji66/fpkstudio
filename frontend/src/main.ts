@@ -5,10 +5,14 @@ import * as ElementPlusIcons from '@element-plus/icons-vue'
 
 import App from './App.vue'
 import { router } from './router'
-import { i18n, elementLocale } from './i18n'
+import { currentLocale, i18n, elementLocale } from './i18n'
 import { useThemeStore } from './stores/theme'
 import { initViewportAdaptation } from './utils/viewport'
 import './style.css'
+
+// index.html 里写死了 lang="zh-CN"，而界面语言是按浏览器选的：不同步的话，英文界面
+// 的页面在屏幕阅读器 / 翻译插件看来仍然是中文文档。
+document.documentElement.lang = currentLocale
 
 const app = createApp(App)
 

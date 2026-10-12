@@ -29,7 +29,9 @@
           :placeholder="t('log.filterText')"
         />
 
-        <span class="text-[11px] text-slate-500 dark:text-slate-400">{{ logs.visible.length }} 条</span>
+        <span class="text-[11px] text-slate-500 dark:text-slate-400">
+          {{ t('log.count', { count: logs.visible.length }) }}
+        </span>
 
         <span class="flex-1" />
 
@@ -132,7 +134,10 @@ async function onOpen() {
 }
 
 watch(
-  () => logs.visible.length,
+  // 盯「最后一条的 seq」而不是长度：条目到上限（MAX_ENTRIES）之后 push + splice 让长度
+  // 恒定，长度不变这个 watch 就再也不触发——终端不再画新行、右上角的条数也卡住（跑一次
+  // 多架构打包很容易攒够几千行）。seq 一直在涨，永远能感知到新内容。
+  () => logs.visible[logs.visible.length - 1]?.seq ?? 0,
   () => {
     if (logs.dialogOpen) flush()
   },

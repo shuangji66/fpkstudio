@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -38,7 +39,7 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) err
 		return badRequest("项目名不能为空")
 	}
 	if err := s.prj.Create(r.Context(), req.Name, req.Docker, req.UI); err != nil {
-		return internal("%v", err)
+		return projectError(err)
 	}
 	info, err := s.prj.Info(strings.TrimSpace(req.Name))
 	if err != nil {
@@ -56,7 +57,7 @@ func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	if err := s.prj.Delete(req.Name); err != nil {
-		return internal("%v", err)
+		return projectError(err)
 	}
 	s.log.Infof("删除项目 %s", req.Name)
 	return writeJSON(w, map[string]any{"ok": true})
@@ -145,6 +146,20 @@ func (s *Server) handleProjectPack(w http.ResponseWriter, r *http.Request) error
 		}
 	}
 	return writeJSON(w, map[string]any{"ok": ok == len(results) && ok > 0, "results": results})
+}
+
+// projectError 把 projects 包的语义化错误翻译成状态码：项目名不合法 / 已存在 = 用户能
+// 自己解决（400），项目不存在 = 404，其余才是服务端故障（500）。以前一律 500，
+// 日志里分不清是「用户打错字」还是「真的坏了」。
+func projectError(err error) error {
+	switch {
+	case errors.Is(err, projects.ErrInvalidName), errors.Is(err, projects.ErrExists):
+		return badRequest("%v", err)
+	case errors.Is(err, projects.ErrNotFound):
+		return notFound("%v", err)
+	default:
+		return internal("%v", err)
+	}
 }
 
 func kindOf(p projects.ProjectInfo) string {

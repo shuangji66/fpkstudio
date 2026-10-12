@@ -242,6 +242,7 @@ import {
 } from '@element-plus/icons-vue'
 import type { FsEntry } from '@/api/types'
 import { useUpload } from './useUpload'
+import { useDownload } from './useDownload'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { formatTime, humanSize, isArchive } from '@/utils/format'
 
@@ -250,6 +251,7 @@ const props = defineProps<{ project: string; mobile?: boolean }>()
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const { upload } = useUpload()
+const { download } = useDownload()
 
 const state = computed(() => workspace.state(props.project))
 
@@ -513,7 +515,7 @@ const menuItems = computed<MenuItem[]>(() => {
     danger: true,
     run: () => void remove(),
   })
-  items.push({ label: t('common.download'), run: () => workspace.downloadAt(path) })
+  items.push({ label: t('common.download'), run: () => void download(path) })
   if (!menu.dir && isArchive(name)) {
     items.push({ label: t('tree.extract'), run: () => void extract() })
   }

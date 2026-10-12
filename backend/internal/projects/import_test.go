@@ -44,7 +44,7 @@ func TestImportCreatesDefaultPlatformDirs(t *testing.T) {
 
 	for _, arch := range defaultPlatforms {
 		rel := info.Name + "/building/platform/" + arch
-		st, err := m.prj.Stat(rel)
+		st, err := m.prjRoot().Stat(rel)
 		if err != nil {
 			t.Errorf("缺少 %s: %v", rel, err)
 			continue

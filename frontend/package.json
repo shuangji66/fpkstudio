@@ -14,8 +14,9 @@
     "check:format": "node --import ./scripts/ts-hook.mjs scripts/check-format.mjs",
     "check:editor": "node --import ./scripts/ts-hook.mjs scripts/check-editor.mjs",
     "check:workspace": "node --import ./scripts/ts-hook.mjs scripts/check-workspace.mjs",
-    "check": "npm run check:i18n && npm run check:wizard && npm run check:icon && npm run check:format && npm run check:editor && npm run check:semantic && npm run check:workspace",
-    "check:semantic": "node --import ./scripts/ts-hook.mjs scripts/check-semantic.mjs"
+    "check": "npm run check:i18n && npm run check:wizard && npm run check:icon && npm run check:format && npm run check:editor && npm run check:semantic && npm run check:workspace && npm run check:logs",
+    "check:semantic": "node --import ./scripts/ts-hook.mjs scripts/check-semantic.mjs",
+    "check:logs": "node --import ./scripts/ts-hook.mjs scripts/check-logs.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "6.2.5",

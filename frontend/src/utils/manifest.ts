@@ -33,6 +33,16 @@ export class Manifest {
   entries: ManifestEntry[] = []
   private index = new Map<string, number>()
 
+  /**
+   * 多行值（`"""`）一直没闭合的键。
+   *
+   * 未闭合时解析器只能一路读到文件结尾——不能因为一个没写完的引号就把整份文件判成
+   * 「解析失败」，它明明还能显示、还能改。代价是**后面的键全被吞进这个值里**：`version`
+   * / `platform` 会从模型里消失，保存时被埋进 `desc` 或另起一行空值。所以这里把「谁
+   * 没闭合」记下来，交给 `ManifestEditor.saveBlocked` 和 `utils/validate.ts` 拦保存。
+   */
+  unterminated: string[] = []
+
   static parse(text: string): Manifest {
     const m = new Manifest()
     const lines = splitLines(text)
@@ -75,16 +85,19 @@ export class Manifest {
           continue
         }
         const buffer = [stripped]
+        let closed = false
         while (i + 1 < lines.length) {
           i += 1
           const next = lines[i]!
           const at = next.indexOf('"""')
           if (at >= 0) {
             buffer.push(next.slice(0, at))
+            closed = true
             break
           }
           buffer.push(next)
         }
+        if (!closed) m.unterminated.push(key)
         m.push({
           kind: 'kv',
           raw: line,
@@ -157,10 +170,6 @@ export class Manifest {
     this.entries.forEach((e, i) => {
       if (e.kind === 'kv') this.index.set(e.key, i)
     })
-  }
-
-  keys(): string[] {
-    return this.entries.filter((e) => e.kind === 'kv').map((e) => e.key)
   }
 
   toText(): string {

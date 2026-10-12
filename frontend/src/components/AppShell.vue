@@ -6,7 +6,17 @@
       <TabBar class="min-w-0 flex-1" />
 
       <div class="flex items-center gap-1 pb-1.5">
-        <el-tag v-if="system.info && !system.fnpackReady" type="danger" size="small" effect="dark">
+        <!-- 运行信息读不到也要说：以前它只是「fnpack 缺失」的标签不出现，看不出区别 -->
+        <el-tag
+          v-if="system.error"
+          type="danger"
+          size="small"
+          effect="dark"
+          :title="system.error"
+        >
+          {{ t('system.loadFailed') }}
+        </el-tag>
+        <el-tag v-else-if="system.info && !system.fnpackReady" type="danger" size="small" effect="dark">
           {{ t('system.fnpackMissing') }}
         </el-tag>
         <el-button text size="small" :icon="Tickets" @click="logs.dialogOpen = true">

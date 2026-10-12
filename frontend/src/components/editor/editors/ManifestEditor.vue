@@ -253,5 +253,20 @@ const platformWarning = computed(() => {
   return platforms.length ? t('fieldsHelp.platform') : ''
 })
 
-defineExpose(api)
+/**
+ * 保存前的拦截：多行值（`"""`）没闭合时不许存。
+ *
+ * 这是「解析降级了却没报错」的那一类——`Manifest.parse` 对残缺文件不会失败，它把后面的
+ * 键吞进多行值里，所以脏判据和 `checkFormat` 都看不出问题。不许存之后，用户能在源码
+ * 视图里把引号补上（那时校验就通过了）。
+ */
+defineExpose({
+  ...api,
+  saveBlocked: () =>
+    model.value.manifest.unterminated.length
+      ? t('editor.formatManifestMultiline', {
+          keys: model.value.manifest.unterminated.join(', '),
+        })
+      : '',
+})
 </script>

@@ -56,12 +56,17 @@ export const useThemeStore = defineStore('theme', () => {
       apply()
     })
 
+    // 先按「本地设置 + 系统偏好」应用一次：宿主主题是异步读的，读得慢、或者压根读
+    // 不到（宿主桥没就绪时 hostTheme 会等到超时）都不该让首屏停在「没有主题」上。
+    apply()
+
     hostThemeValue.value = (await hostTheme()) ?? ''
     void onHostThemeChange((theme) => {
       hostThemeValue.value = theme
       apply()
     })
 
+    // 宿主主题拿到之后（可能是空）再应用一次，这样「跟随系统」那一档才真的生效。
     apply()
   }
 

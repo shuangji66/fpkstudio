@@ -63,6 +63,10 @@ type Logger struct {
 	minRank int
 	subs    map[int]chan Entry
 	nextSub int
+	// boot 是这一次进程的标识。seq 是**进程内**计数，重启后从 1 开始，而前端按 seq
+	// 去重——不带标识的话，重启之后的新日志会被前端当成「比游标旧」整片丢掉，表现是
+	// 日志弹窗从此不再更新（要等新进程写到超过旧的最大值）。启动之后不再变，不用锁。
+	boot string
 }
 
 // New 创建日志器。logFile 为空时只写内存。
@@ -74,6 +78,7 @@ func New(logFile, level string, ringSize int) (*Logger, error) {
 		ring:    make([]Entry, 0, ringSize),
 		minRank: rankOf(level),
 		subs:    make(map[int]chan Entry),
+		boot:    fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
 	if logFile != "" {
 		if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
@@ -235,6 +240,10 @@ func (l *Logger) LastSeq() int64 {
 	defer l.mu.Unlock()
 	return l.seq
 }
+
+// Boot 返回本次进程的标识（见 Logger.boot）。前端的 seq 去重靠它判断「后端换进程了」，
+// 那时要把游标归零，否则新进程从 1 开始的日志会被全部丢掉。
+func (l *Logger) Boot() string { return l.boot }
 
 // Subscribe 订阅实时日志。返回订阅 id 与只读通道。
 func (l *Logger) Subscribe() (int, <-chan Entry) {

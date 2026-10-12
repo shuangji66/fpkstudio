@@ -18,12 +18,22 @@
 
       <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
         <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.username') }}</span>
-        <el-input v-model="model.root.username" size="small" class="w-64" placeholder="（按 appname 生成）" />
+        <el-input
+          v-model="model.root.username"
+          size="small"
+          class="w-64"
+          :placeholder="t('privilege.usernamePlaceholder')"
+        />
       </div>
 
       <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
         <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.groupname') }}</span>
-        <el-input v-model="model.root.groupname" size="small" class="w-64" placeholder="（按 appname 生成）" />
+        <el-input
+          v-model="model.root.groupname"
+          size="small"
+          class="w-64"
+          :placeholder="t('privilege.groupnamePlaceholder')"
+        />
       </div>
 
       <div class="form-row grid grid-cols-[10rem_1fr] items-start gap-x-3 py-2">
@@ -98,8 +108,8 @@ const { model, api } = useEditor<Model>(
   (value) => {
     const root = value.root
     const out: Record<string, unknown> = { defaults: { ...root.defaults } }
-    // 键顺序固定成 defaults → username → groupname → join-groups → 其它，
-    // 避免每次保存都产生无意义的 diff。
+    // 键序最终由 stringifyOrdered 统一按**字母序**输出（不是这里的插入顺序），
+    // 目的同样是「每次保存都产出同一份文本」，避免无意义的 diff。
     if (root.username) out.username = root.username
     if (root.groupname) out.groupname = root.groupname
     if (root['join-groups']?.length) out['join-groups'] = [...root['join-groups']]

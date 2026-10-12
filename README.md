@@ -148,7 +148,7 @@ make clean    # 清产物
 ```bash
 cd backend  && go vet ./...          # 后端静态检查（需要 GOCACHE/TMPDIR，见下）
 cd frontend && npm run typecheck     # 前端类型检查
-cd frontend && npm run check         # 语言包 + 向导回写 + 取景框几何 + 命名与文本格式 + 语义路径 + 文件管理器 store
+cd frontend && npm run check         # 语言包 + 向导回写 + 取景框几何 + 命名与文本格式 + 语义路径 + 文件管理器 store + 日志 store
 cd frontend && npm run dev           # 只起 Vite 开发服务器
 ```
 
@@ -524,14 +524,14 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
 | GET | `/api/projects/artifacts?name=` | 产物列表（项目内 + 输出目录） |
 | GET/POST | `/api/fs/list?path=` | 目录列表，`path` 也可以放在 JSON body 里（前端就是这么调的） |
 | GET/POST | `/api/fs/read?path=` | 读文件（二进制会返回 `text:false`，不带内容） |
-| PUT | `/api/fs/write` | `{path, content}` |
-| POST | `/api/fs/create` \| `delete` \| `rename` \| `copy` | 文件操作 |
-| POST | `/api/fs/upload` | multipart，`app/server/` 下的文件按 0755 落地 |
+| POST | `/api/fs/write` | `{path, content}`（`GET`/`PUT` 也收，前端用 POST） |
+| POST | `/api/fs/create` \| `delete` \| `rename` \| `copy` | 文件操作；`create` **文件已存在时拒绝**（不会把已有文件清空），目录仍是幂等的 `mkdir -p`；`rename` / `copy` 目标已存在时也拒绝 |
+| POST | `/api/fs/upload` | multipart（`path` / `overwrite` / `file`）；`overwrite=false` 时**跳过**已存在的文件（响应里给 `skipped`），`true` 才覆盖。`app/server/` 下的文件按 0755 落地 |
 | POST | `/api/fs/extract` | `{path}` → 解压到压缩包所在目录（系统 tar / unzip / gzip），返回 `{kind, dir, files, skipped, links}`；同名文件跳过不覆盖，符号链接不还原 |
 | GET | `/api/fs/download?path=` | 下载文件，目录会打成 zip |
-| GET | `/api/logs?after=&limit=&source=` | 增量拉日志 |
-| GET | `/api/logs/stream?after=` | SSE 实时日志 |
-| GET/PUT | `/api/settings` | 目录设置（`{projectRoot, outputDir}`，空字符串 = 回默认）；GET 还会带上当前用户与飞牛接口可用状态 |
+| GET | `/api/logs?after=&limit=&source=` | 增量拉日志；响应里的 `boot` 是后端进程标识 |
+| GET | `/api/logs/stream?after=` | SSE 实时日志；第一帧是 `event: boot`（带进程标识与 `lastSeq`），前端靠它判断「后端换进程了、去重游标要归零」 |
+| GET/PUT | `/api/settings` | 目录设置（`{projectRoot, outputDir}`，空字符串 = 回默认）；GET 还会带上当前用户与飞牛接口可用状态。**PUT 的权限判据**：经过统一网关时要求管理员（`X-Trim-Isadmin`），且新目录必须在本应用被授权的目录里（开放 API 可用时判）；直接调 socket（没有网关）时保持原行为——那种部署下 socket 权限就是边界 |
 | GET | `/api/trim/status` | 飞牛开放 API 的可用状态 + 当前用户 |
 | GET | `/api/trim/folders` | 当前用户授权给本应用的目录 |
 | POST | `/api/trim/folders/delete` | `{path}` → 删除一条目录授权 |
@@ -618,7 +618,13 @@ Makefile 用的本地缓存目录都在 `.gitignore` 里，仓库里只留源码
 
 ## 已知限制
 
-- 没有鉴权（按需求）。请依赖 socket 文件权限，以及你自己套在外面的反代。
+- 没有鉴权（按需求）。请依赖 socket 文件权限，以及你自己套在外面的反代。**注意**：这套 API
+  的读写范围 = 「应用用户在文件系统上的权限」，不是「当前登录用户的权限」；改目录设置这一条
+  已经加了管理员 + 授权目录两道判据（见上面的 API 表），其余的接口只认 socket / 你套的反代。
+- 后端的错误文案是中文的（界面文案才有中英双语）：英文界面下，来自后端的错误（读写失败、
+  fnpack 的输出等）会以中文显示。要做完整本地化得给每个请求带语言、给所有文案加键。
+- 图标页的「小图」默认按工作尺寸导出（默认 256×256），文件名仍是 `ICON.PNG` /
+  `<前缀>_64.png`；想跟文件名对上，把「小图缩放」改成 1/4（64px）。
 - 打包是同步请求，超大项目会让这个 HTTP 请求长时间不返回；日志通过 SSE 实时输出，
   前端不会卡住，但请求本身没有超时控制。
 - 没有项目级别的并发保护：同一个项目同时触发两次打包，第二次会等在暂存区复制之后，
@@ -644,6 +650,11 @@ Makefile 用的本地缓存目录都在 `.gitignore` 里，仓库里只留源码
   网关下。
 - 目录设置改到授权目录之后，已有项目**不会自动迁移**：改回默认目录就是换一个地方找项目，
   文件还留在原来的位置。
+- 换目录时靠「选之前 / 选之后的授权列表做 diff」确定用户选了哪个目录。diff 不出唯一的新增项
+  （例如重选了一个已经授权过的目录）时会拒绝这次变更并提示——猜错的代价是项目根整个换地方、
+  旧授权被删掉，不值得赌。
+- 后端重启之后日志弹窗会继续工作（靠 SSE 的 `event: boot` 把去重游标归零），但重启期间
+  （日志环形缓冲之外）的输出看不到。
 
 ## 构建环境说明
 

@@ -61,7 +61,16 @@ function isJSONConfig(rel: string): boolean {
  * 值里，逐行看会把它们全判成错误。
  */
 function checkManifest(text: string): FormatIssue | null {
-  for (const entry of Manifest.parse(text).entries) {
+  const parsed = Manifest.parse(text)
+  // 多行值没闭合：解析器一路读到了文件结尾，它后面的键都进了这个值里，保存一次就会
+  // 丢键（见 Manifest.unterminated）。源码视图这一侧靠这条拦。
+  if (parsed.unterminated.length) {
+    return {
+      key: 'editor.formatManifestMultiline',
+      params: { keys: parsed.unterminated.join(', ') },
+    }
+  }
+  for (const entry of parsed.entries) {
     if (entry.kind !== 'raw') continue
     const line = entry.raw.trim()
     if (line === '' || line.startsWith('#')) continue

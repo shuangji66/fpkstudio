@@ -19,6 +19,7 @@
  * 不在这里调：它们只能由服务端经 unix socket 调，前端走 /api/trim/*。
  */
 import { TrimApp } from '@trimjs/web-app'
+import { i18n } from '@/i18n'
 
 /** 文件选择器左侧的分组（官方枚举）。 */
 export type SidebarGroup = 'myFiles' | 'otherShare' | 'external' | 'remote' | 'favorites' | 'team'
@@ -132,7 +133,7 @@ async function pickUserPaths(params: PickParams): Promise<string[]> {
     okText: params.okText,
   })
 
-  if (!res) throw new TrimError(-1, '宿主没有返回选择结果')
+  if (!res) throw new TrimError(-1, i18n.global.t('trim.error.noSelection'))
   if (res.code === 1) return []
   if (res.code !== 0) throw new TrimError(res.code, res.msg || `code ${res.code}`)
   return res.data ?? []
@@ -169,6 +170,11 @@ export async function openInFileManager(path: string): Promise<void> {
 export async function hostTheme(): Promise<'light' | 'dark' | null> {
   if (!isHostAvailable()) return null
   try {
+    // 必须先等宿主桥就绪（有 10 秒上限）。只判 isStandaloneWeb 是不够的：页面被塞进
+    // 一个普通 iframe 时它是 false，而对面的握手永远不回应，`getPlatformConfig()`
+    // 会一直挂着——主题初始化就停在这一步，`apply()` 永远轮不到，表现是「本地存着
+    // 深色，刷新之后页面还是浅色的」。
+    await ensureHostReady()
     const config = await sdk.getPlatformConfig()
     return config.theme === 'dark' ? 'dark' : 'light'
   } catch {

@@ -93,7 +93,9 @@ export function parseWizard(text: string): WizardModel {
   if (!trimmed || trimmed === '[]') return { steps: [], error: '' }
   try {
     const raw = JSON.parse(trimmed) as unknown
-    if (!Array.isArray(raw)) return { steps: [], error: '顶层不是数组' }
+    // 这句会被插进 editor.formatWizard 的 {detail} 里，和技术性报错（JSON.parse 的
+    // 英文原话）同一性质，所以写英文：硬编码中文在英文界面里是「中文夹在英文句子里」。
+    if (!Array.isArray(raw)) return { steps: [], error: 'top level is not an array' }
 
     const steps: WizardStep[] = raw.map((step) => {
       const source = (step ?? {}) as Record<string, unknown>
@@ -146,8 +148,12 @@ export function dumpWizard(model: WizardModel): string {
   const steps = model.steps.map((step) => {
     const items: Record<string, unknown>[] = step.items.map((item) => {
       const out: Record<string, unknown> = { ...item.extra, type: item.type }
-      // tips 只有一段说明文字，没有字段名 / 默认值 / 校验
+      // tips 只有一段说明文字，没有字段名 / 默认值 / 校验。
+      // label（界面上是「显示文本」）必须一起写回：表单里它是可编辑的，不写回时
+      // 序列化结果完全不变——改它连「未保存」都不会亮、保存按钮也不亮，切个布局
+      // 再回来字就没了。「插入模板」给的那两份 tips 也带着 label。
       if (item.type === 'tips') {
+        if (item.label) out.label = item.label
         if (item.helpText) out.helpText = item.helpText
         return out
       }

@@ -57,6 +57,5 @@ defineExpose({
   isDirty: () => props.origin !== baseline(),
   getContent: (): EditorContent | null =>
     props.origin ? { path: props.path, content: props.origin } : null,
-  reset: () => {},
 } satisfies EditorApi)
 </script>

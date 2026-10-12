@@ -2,7 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 
-// 产物直接落到 web/dist，由 Go 的 //go:embed all:web/dist 打进二进制。
+// 产物落到 frontend/dist，由 Makefile 复制进 backend/embed，再用 //go:embed all:embed
+// 打进二进制。
 // base 固定为 './'：资源用相对路径，服务端再通过注入 <base href> 决定实际挂载点。
 export default defineConfig({
   plugins: [vue(), tailwindcss()],

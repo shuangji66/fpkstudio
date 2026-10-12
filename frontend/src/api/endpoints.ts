@@ -185,8 +185,14 @@ export const downloadEntry = (path: string) => download('/api/fs/download', { pa
 
 // ---- 日志 ----
 
+/**
+ * 增量拉日志。
+ *
+ * `boot` 是后端进程标识：seq 是进程内计数，重启后从 1 开始，前端靠它决定要不要把
+ * 去重游标归零（见 stores/logs.ts）。
+ */
 export const getLogs = (after: number, limit = 1000, source = '') =>
-  request<{ list: LogEntry[]; lastSeq: number }>('/api/logs', {
+  request<{ list: LogEntry[]; lastSeq: number; boot: string }>('/api/logs', {
     query: { after, limit, source },
   })
 

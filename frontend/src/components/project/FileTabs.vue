@@ -51,8 +51,17 @@
         </el-icon>
         <span class="truncate">{{ file.name }}</span>
         <span v-if="file.dirty" class="shrink-0 text-amber-500 dark:text-amber-400" :title="t('editor.unsaved')">●</span>
+        <!--
+          悬停才出现的关闭按钮在触屏上等于不存在（项目标签那边已经踩过），所以移动端
+          常显——判据跟布局开关走，不跟视口宽度（布局可以手动钉死）。
+        -->
         <el-icon
-          class="shrink-0 rounded text-[11px] text-slate-400 dark:text-slate-500 opacity-0 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 group-hover:opacity-100"
+          class="shrink-0 rounded text-[11px] text-slate-400 transition-opacity hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200"
+          :class="
+            layout.isMobile
+              ? 'opacity-100 dark:text-slate-400'
+              : 'opacity-0 dark:text-slate-500 group-hover:opacity-100'
+          "
           @click.stop="close(file.path)"
         >
           <Close />
@@ -74,6 +83,7 @@ import {
   SHORTCUTS_TAB,
   useWorkspaceStore,
 } from '@/stores/workspace'
+import { useLayoutStore } from '@/stores/layout'
 import { revealActive, wheelToHorizontal } from '@/utils/scroll'
 
 const props = defineProps<{
@@ -84,6 +94,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const layout = useLayoutStore()
 const { closeFile } = useCloseFile()
 
 const state = computed(() => workspace.state(props.project))

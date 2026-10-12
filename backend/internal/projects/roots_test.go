@@ -56,8 +56,8 @@ func TestSetRootsOutsideDataDir(t *testing.T) {
 		t.Errorf("OutputDir() = %q，期望 %q", m.OutputDir(), outDir)
 	}
 	// 数据目录之外时没有 home 相对路径，暂存复制要走绝对路径。
-	if m.prjInHome != "" {
-		t.Errorf("prjInHome = %q，期望为空", m.prjInHome)
+	if m.snap().prjInHome != "" {
+		t.Errorf("prjInHome = %q，期望为空", m.snap().prjInHome)
 	}
 	if _, err := os.Stat(outDir); err != nil {
 		t.Errorf("输出目录应当被创建: %v", err)
@@ -122,11 +122,11 @@ func TestImportPathOutsideProjectRoot(t *testing.T) {
 	if info.Name != "demo" {
 		t.Fatalf("项目名 = %q，期望 demo", info.Name)
 	}
-	if _, err := m.prj.Stat("demo/manifest"); err != nil {
+	if _, err := m.prjRoot().Stat("demo/manifest"); err != nil {
 		t.Errorf("项目没有落到项目根目录: %v", err)
 	}
 	// 导入后照例补上多架构工作目录。
-	if _, err := m.prj.Stat("demo/building/platform/arm"); err != nil {
+	if _, err := m.prjRoot().Stat("demo/building/platform/arm"); err != nil {
 		t.Errorf("缺少架构目录: %v", err)
 	}
 }
@@ -181,13 +181,13 @@ func TestOutputSameAsProjectRoot(t *testing.T) {
 	}
 
 	// 造一个项目与一份产物（就放在这个既是项目目录又是输出目录的地方）。
-	if err := m.prj.Mkdir("demo", 0o755, true); err != nil {
+	if err := m.prjRoot().Mkdir("demo", 0o755, true); err != nil {
 		t.Fatalf("创建项目失败: %v", err)
 	}
-	if err := m.prj.WriteFile("demo/manifest", []byte("appname               = demo\nversion               = 1.0.0\nplatform              = x86\n"), 0o644); err != nil {
+	if err := m.prjRoot().WriteFile("demo/manifest", []byte("appname               = demo\nversion               = 1.0.0\nplatform              = x86\n"), 0o644); err != nil {
 		t.Fatalf("写 manifest 失败: %v", err)
 	}
-	if err := m.prj.WriteFile("demo/demo-1.0.0-x86.fpk", []byte("x"), 0o644); err != nil {
+	if err := m.prjRoot().WriteFile("demo/demo-1.0.0-x86.fpk", []byte("x"), 0o644); err != nil {
 		t.Fatalf("写产物失败: %v", err)
 	}
 

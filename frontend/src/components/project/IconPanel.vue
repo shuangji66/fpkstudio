@@ -205,6 +205,7 @@ import {
   ENTRY_ICON_DIR,
   fitView,
   ICON_PREFIX_MAX,
+  IconError,
   imageFromFile,
   imageFromURL,
   maxZoomOf,
@@ -223,6 +224,16 @@ const { t } = useI18n()
 const workspace = useWorkspaceStore()
 
 const state = computed(() => workspace.state(props.project))
+
+/**
+ * 把错误翻成人话。
+ *
+ * `utils/icon.ts` 是纯逻辑（不引 vue-i18n），失败时给的是 i18n 键；其余错误照旧用 message。
+ */
+function errText(e: unknown): string {
+  if (e instanceof IconError) return t(e.key)
+  return e instanceof Error ? e.message : String(e)
+}
 
 /** 取景框的屏幕边长。图片按 zoom 缩放后摆在这个方框里，框内即结果。 */
 const STAGE = 256
@@ -615,7 +626,7 @@ async function load(file: File) {
     const loaded = await imageFromFile(file)
     applyImage(loaded.image, loaded.url, loaded.url)
   } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
+    ElMessage.error(errText(e))
   }
 }
 
@@ -717,7 +728,7 @@ async function save() {
     await scanIcons()
     ElMessage.success(t('iconTab.saved', { count: progress.total }))
   } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
+    ElMessage.error(errText(e))
   } finally {
     saving.value = false
     progress.total = 0

@@ -14,6 +14,7 @@
  */
 import { nextTick, reactive } from 'vue'
 import { useEditor } from '../src/components/editor/useEditor.ts'
+import { handoffText } from '../src/utils/handoff.ts'
 
 let failed = 0
 const check = (name, got, want) => {
@@ -92,6 +93,73 @@ function makeEditor(disk = DISK) {
     () => '[]\n',
   )
   check('解析失败时不算脏', api.isDirty(), false)
+}
+
+// ---- 5. 切视图时该交哪份文本（utils/handoff.ts）----
+{
+  const disk = '{"defaults":{"run-as":"package"}}\n'
+  const broken = '[{'
+  const emptyModel = '[]\n'
+
+  // 表单模型不可信（解析失败降级成空模型，saveBlocked 非空）：必须交回表单**被加载时**
+  // 的那份文本，也就是用户写坏前的那份。交空模型 = 用户刚写的文本被顶掉，而且空配置
+  // 往往还「合法」，一保存就把文件清空。
+  check(
+    '模型不可信时交回加载时的文本（不是空模型）',
+    handoffText({
+      from: 'form',
+      to: 'source',
+      formDirty: true,
+      formBlocked: '格式不对',
+      formText: emptyModel,
+      editorText: broken,
+      diskText: disk,
+    }),
+    broken,
+  )
+  // 表单干净时交磁盘原文：回写会归一格式，拿它当初值会让没编辑过的文件一按「源码」
+  // 就显示「未保存」。
+  check(
+    '表单干净时交磁盘原文',
+    handoffText({
+      from: 'form',
+      to: 'source',
+      formDirty: false,
+      formBlocked: '',
+      formText: 'NORMALIZED\n',
+      editorText: disk,
+      diskText: disk,
+    }),
+    disk,
+  )
+  // 表单脏且可信：交回写结果，用户刚才的编辑不能丢。
+  check(
+    '表单脏且可信时交回写结果',
+    handoffText({
+      from: 'form',
+      to: 'source',
+      formDirty: true,
+      formBlocked: '',
+      formText: 'EDITED\n',
+      editorText: disk,
+      diskText: disk,
+    }),
+    'EDITED\n',
+  )
+  // 源码 → 表单：交源码里的实时内容。
+  check(
+    '源码 → 表单交源码内容',
+    handoffText({
+      from: 'source',
+      to: 'form',
+      formDirty: false,
+      formBlocked: '',
+      formText: '',
+      editorText: 'LIVE SOURCE\n',
+      diskText: disk,
+    }),
+    'LIVE SOURCE\n',
+  )
 }
 
 console.log(failed ? `\n${failed} 项不通过` : '\n编辑器脏判据检查全部通过')

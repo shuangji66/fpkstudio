@@ -311,5 +311,4 @@ watch(
   { immediate: true },
 )
 
-defineExpose({ load })
 </script>

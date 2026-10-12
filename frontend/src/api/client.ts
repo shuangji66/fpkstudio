@@ -1,4 +1,5 @@
 import { apiURL } from '@/runtime'
+import { i18n } from '@/i18n'
 
 /** 后端返回 {error: "..."} 时抛出。 */
 export class ApiError extends Error {
@@ -49,7 +50,8 @@ async function extractError(res: Response): Promise<never> {
       } catch {
         // 不是后端的 {error:…}：多半是中间的网关 / 反代插了一脚（登录页、
         // 令牌提示之类）。原样带出来，不然只会看到一个 JSON 解析错误。
-        detail = `HTTP ${res.status} 返回的不是 JSON：${snippet(text)}`
+        // 这几句会经 e.message 原样显示给用户，所以走 i18n
+        detail = i18n.global.t('apiError.notJson', { status: res.status, detail: snippet(text) })
       }
     }
   } catch {
@@ -80,7 +82,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   try {
     return JSON.parse(text) as T
   } catch {
-    throw new ApiError(res.status, `HTTP ${res.status} 返回的不是 JSON：${snippet(text)}`)
+    throw new ApiError(
+      res.status,
+      i18n.global.t('apiError.notJson', { status: res.status, detail: snippet(text) }),
+    )
   }
 }
 
@@ -113,11 +118,11 @@ export function upload<T>(
         try {
           resolve(JSON.parse(xhr.responseText) as T)
         } catch {
-          reject(new ApiError(xhr.status, '响应不是合法 JSON'))
+          reject(new ApiError(xhr.status, i18n.global.t('apiError.badJson')))
         }
         return
       }
-      let message = `上传失败（${xhr.status}）`
+      let message = i18n.global.t('apiError.uploadFailed', { status: xhr.status })
       try {
         const parsed = JSON.parse(xhr.responseText) as { error?: string }
         if (parsed.error) message = parsed.error
@@ -126,8 +131,8 @@ export function upload<T>(
       }
       reject(new ApiError(xhr.status, message))
     })
-    xhr.addEventListener('error', () => reject(new ApiError(0, '网络错误')))
-    xhr.addEventListener('abort', () => reject(new ApiError(0, '上传已取消')))
+    xhr.addEventListener('error', () => reject(new ApiError(0, i18n.global.t('apiError.network'))))
+    xhr.addEventListener('abort', () => reject(new ApiError(0, i18n.global.t('apiError.aborted'))))
     xhr.send(form)
   })
 }
@@ -142,12 +147,38 @@ export function rawURL(path: string, query?: Record<string, QueryValue>): string
   return apiURL(path) + buildQuery(query)
 }
 
-/** 触发浏览器下载。 */
-export function download(path: string, query?: Record<string, QueryValue>): void {
-  const a = document.createElement('a')
-  a.href = rawURL(path, query)
-  a.rel = 'noopener'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+/** 从 Content-Disposition 或路径里取一个文件名（至少给一个合理的默认值）。 */
+function filenameOf(path: string, disposition: string | null): string {
+  const quoted = /filename="([^"]+)"/i.exec(disposition ?? '')
+  if (quoted?.[1]) return quoted[1]
+  const base = path.slice(path.lastIndexOf('/') + 1)
+  return base || 'download'
+}
+
+/**
+ * 触发浏览器下载。
+ *
+ * 先 fetch 再用 object URL 落地，而不是直接点一个 `<a href>`：后者在**失败**时
+ * （目标不存在、网关插了一脚）会把整个文档导航到那个 JSON 错误页——SPA 里的标签和
+ * 没保存的编辑全没了，用户只看到一行错误。走 fetch 就能像其它接口一样把原因报出来，
+ * 成功时也由我们自己定文件名。
+ */
+export async function download(path: string, query?: Record<string, QueryValue>): Promise<void> {
+  const res = await fetch(rawURL(path, query))
+  if (!res.ok) await extractError(res)
+
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filenameOf(path, res.headers.get('Content-Disposition'))
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  } finally {
+    // 点击之后立刻撤销会让部分浏览器来不及取内容，放到下一轮再说。
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
 }

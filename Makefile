@@ -41,7 +41,13 @@ export CGO_ENABLED
 # -buildvcs=false：仓库可能没有 .git，或者构建环境不允许读它；没必要因此失败。
 # 保留调用者已经设置的其它 GOFLAGS。
 export GOFLAGS := -buildvcs=false $(GOFLAGS)
-export PATH := /var/apps/nodejs_v24/target/bin:$(PATH)
+# fnOS 上 Node 由应用提供，不一定在 PATH 里。取版本号最高的那一个，可以用 NODE_BIN 覆盖；
+# 一个都没有（别的构建机）就什么都不加——不能退化成 `PATH=:$(PATH)`，那等于把当前目录
+# 塞进 PATH 里。
+NODE_BIN ?= $(shell ls -d /var/apps/nodejs_v*/target/bin 2>/dev/null | sort -V | tail -1)
+ifneq ($(strip $(NODE_BIN)),)
+export PATH := $(NODE_BIN):$(PATH)
+endif
 
 .PHONY: all dev release test clean
 
@@ -77,6 +83,9 @@ build:
 	# Clean the Go build cache so code and embedded-asset changes always compile in.
 	go clean -cache
 	cd "$(BACKEND)" && go build -trimpath -ldflags "$(LDFLAGS)" -o "$(OUT)" .
+	# 显式补一次执行位：飞牛的存储卷上新文件的模式位不可靠，不补的话拿到的可能是一个
+	# 跑不起来的 0000 文件。
+	chmod 755 "$(OUT)"
 	@echo "==> Cleaning embed dir..."
 	rm -rf "$(EMBED)"
 	@echo "==> Done: $(OUT)"

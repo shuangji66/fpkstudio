@@ -143,7 +143,7 @@
                   text
                   size="small"
                   :icon="Download"
-                  @click="downloadEntry(getDownloadPath(item))"
+                  @click="download(getDownloadPath(item))"
                 />
               </div>
             </li>
@@ -213,7 +213,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Box, Download, EditPen, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { downloadEntry, readFile } from '@/api/endpoints'
+import { readFile } from '@/api/endpoints'
+import { useDownload } from './useDownload'
 import type { Artifact } from '@/api/types'
 import { humanSize } from '@/utils/format'
 import { Manifest } from '@/utils/manifest'
@@ -225,6 +226,7 @@ const props = defineProps<{ project: string }>()
 const { t, te } = useI18n()
 const hostAvailable = computed(() => isHostAvailable())
 const workspace = useWorkspaceStore()
+const { download } = useDownload()
 
 const state = computed(() => workspace.state(props.project))
 const multi = ref(state.value.settings.multiPlatform)
@@ -302,9 +304,17 @@ watch(manifestBaseline, () => {
 /** 多架构发布至少要有这两个架构目录，勾上开关时缺哪个补哪个。 */
 const DEFAULT_ARCHES = ['arm', 'x86']
 
-/** 产物在项目目录里时用相对路径下载，在输出目录里时后端只能给绝对路径，改用项目内路径。 */
+/**
+ * 产物下载地址。
+ *
+ * `/api/fs/download` 的 `path` 是**相对项目根**的（不能带前导 `/`），而 `Artifact.path`
+ * 是绝对路径（后端 `root.Abs` 给的，供「打开所在目录」用）。两个 scope 的文件名相同，
+ * 而且打包时一定先在项目目录里落地一份，所以一律用项目内的相对路径——以前 project
+ * 那一支直接把 `item.path` 递过去，后端会去找 `projects/vol1/...` 这个不存在的路径，
+ * 表现是「列表里项目内那条产物的下载按钮点了报目标不存在」。
+ */
 function getDownloadPath(item: Artifact): string {
-  return item.scope === 'output' ? `${props.project}/${item.name}` : item.path
+  return `${props.project}/${item.name}`
 }
 
 /**

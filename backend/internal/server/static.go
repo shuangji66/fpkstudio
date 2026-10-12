@@ -20,6 +20,13 @@ func (s *Server) staticHandler() http.Handler {
 			return
 		}
 
+		// 没注册上的 /api/* 不回 SPA 兜底：回一份 index.html（200 text/html）时前端只能
+		// 从「不是 JSON」里猜，而 404 + 一句人话能直接看出是路径写错了。
+		if rel == "api" || strings.HasPrefix(rel, "api/") {
+			writeError(w, notFound("没有这个接口：/%s", rel))
+			return
+		}
+
 		name := path.Clean(rel)
 		if strings.Contains(name, "..") {
 			http.NotFound(w, r)

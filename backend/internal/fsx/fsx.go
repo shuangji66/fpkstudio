@@ -296,6 +296,7 @@ func (x *Root) RepairModes(base string, scriptDirs []string) (int, error) {
 	})
 	return repaired, err
 }
+
 // Mkdir 创建目录，perm 会显式设置一遍。
 //
 // perm 是参数而不是写死的 0o755：飞牛卷上 open(O_CREAT, mode) 的 mode 会被忽略、
@@ -386,6 +387,12 @@ func (x *Root) Copy(from, to string) error {
 	}
 	if to == from || strings.HasPrefix(to, from+"/") {
 		return errors.New("不能把目录复制到自身内部")
+	}
+	// 目标已存在就拒绝，绝不覆盖——和 Rename 同一条规矩。copy 内部用 O_TRUNC 写每一个
+	// 文件，静默覆盖会让「复制到这里」变成「把那个文件换掉」，而且不可逆。正常调用方
+	// （粘贴）会先用 uniqueName 换一个不重名的名字，所以这条挡不住正常路径。
+	if _, statErr := x.r.Lstat(to); statErr == nil {
+		return fmt.Errorf("%w：%s", ErrExists, to)
 	}
 	return x.copy(from, to)
 }

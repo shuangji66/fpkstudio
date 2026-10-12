@@ -112,7 +112,13 @@ eq('password 默认值', byField('pwd').initValue, 'secret')
 eq('checkbox 存数组', rawItem('langs').initValue, ['zh', 'en'])
 eq('switch 存布尔', rawItem('enable').initValue, true)
 eq('select 默认值', byField('level').initValue, '2')
-eq('tips 只写 helpText', Object.keys(rows[0].items.find((item) => item.type === 'tips')), ['helpText', 'type'])
+// tips 只写 type / label / helpText（没有字段名 / 默认值 / 校验）。label 也要写回：
+// 它在表单里是「显示文本」，不写回就等于改不动（见下面那一节）。
+eq(
+  'tips 只写 type / label / helpText',
+  Object.keys(rows[0].items.find((item) => item.type === 'tips')),
+  ['helpText', 'label', 'type'],
+)
 eq('四条规则都在', byField('wizard_field').rules.map((r) => r.type), ['required', 'min', 'len', 'pattern'])
 eq('范围规则', rawItem('wizard_field').rules[1], { max: 100, message: '范围', min: 1 })
 eq('长度规则', rawItem('wizard_field').rules[2], { len: 6, message: '长度' })
@@ -123,7 +129,23 @@ eq('二次解析稳定', dumpWizard(parseWizard(text)), text)
 eq('空文件不报错', parseWizard('').steps.length, 0)
 eq('空数组不报错', parseWizard('[]').steps.length, 0)
 check('坏 JSON 报错', parseWizard('{oops').error !== '', true)
-eq('顶层不是数组报错', parseWizard('{"a":1}').error, '顶层不是数组')
+eq('顶层不是数组报错', parseWizard('{"a":1}').error, 'top level is not an array')
+
+// tips 项的「显示文本」（label）在表单里是可编辑的，必须回写：不回写时序列化结果完全
+// 不变，改它连「未保存」都不会亮、保存按钮也不亮，换个布局再回来字就没了。
+{
+  const tipsText = JSON.stringify(
+    [{ stepTitle: 's', items: [{ type: 'tips', label: '标题', helpText: '说明' }] }],
+    null,
+    2,
+  )
+  eq('tips 的 label 保留', JSON.parse(dumpWizard(parseWizard(tipsText)))[0].items[0].label, '标题')
+  check(
+    '只改 tips 的 label 也会让内容变化',
+    dumpWizard(parseWizard(tipsText)) !== dumpWizard(parseWizard(tipsText.replace('标题', '改过'))),
+    true,
+  )
+}
 
 // ---- 4. 默认字段名不重复（它同时是脚本变量名）----
 const used = { steps: [{ ...step, items: [newWizardItem('wizard_field', 'a'), newWizardItem('wizard_field_2', 'b')] }], error: '' }

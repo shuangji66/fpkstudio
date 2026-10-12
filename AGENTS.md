@@ -21,9 +21,9 @@ make clean               # 删二进制与 embed
 
 cd frontend
 npm run typecheck        # vue-tsc，类型检查（改了 .vue / .ts 必跑）
-npm run check            # 七个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
-                         #   （含 manifest 回写）+ 编辑器脏判据 + 语义路径 + 文件管理器 store
-                         #   （重命名 / 保存）
+npm run check            # 八个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
+                         #   （含 manifest 回写）+ 编辑器脏判据/切视图交棒 + 语义路径 + 文件管理器 store
+                         #   （重命名 / 保存 / 剪贴板）+ 日志 store（后端重启后的去重游标）
 npm run build            # vite 构建到 frontend/dist
 ```
 
@@ -70,8 +70,8 @@ frontend/src/
   api/                       endpoints（接口封装）、client（fetch 封装）、types
   stores/                    pinia：projects / tabs / workspace / system / logs / theme / layout
   components/project/        项目内的固定页：文件（标签页模式）/ 总览 / 快捷设置 / 图标，
-                             以及左栏文件树、文件标签；useCloseFile / useUpload 两个
-                             小组合函数也在这里（关标签的未保存提醒、带进度的上传）
+                             以及左栏文件树、文件标签；useCloseFile / useUpload / useDownload
+                             三个小组合函数也在这里（关标签的未保存提醒、带进度的上传、下载并报错）
   components/editor/         标签页编辑器宿主 + 按路径注册的表单编辑器
   components/home/           首页：项目卡片 / 新建 / 导入
   utils/                     manifest、wizard、icon、format 等纯逻辑（可单独跑检查）
@@ -89,12 +89,34 @@ frontend/src/
 - **文件权限要显式设置**。飞牛的存储卷上 `O_CREAT` 的 mode 会被忽略，新建文件会落成 `0000`，
   这种文件打不进 fpk。新增写文件 / 复制 / 上传的代码路径时要跟 `fsx` 一样补 `chmod`。
 - **所有文件操作走 `fsx.Root`**（`os.Root` 沙箱）。不要用 `os.Open` 直接拼路径。
+- **`Manager` 的目录字段只能通过快照读**：`SetRoots`（设置弹窗里换目录）会用
+  `atomic.Pointer` 换掉一整套（项目根 / 输出目录 / 各自的绝对路径 / `prjInHome`），读方走
+  `m.snap()` / `m.prjRoot()` / `m.outputRoot()`，一次操作里只取一次快照（`Pack` 就是这么做的）。
+  别去读裸字段：`go test -race` 会报数据竞争，而且真会出现「新的项目根 + 旧的项目根相对路径」
+  这种混搭（打包照着旧位置复制内容）。
 - **文件管理器有两个视图**（左栏文件树 / 「文件」标签页，见 `stores/workspace.ts` 的
   `viewMode`），它们是同一批文件的两个入口：目录列表缓存（`state.dirs`）和剪贴板
   （`state.clipboard`）都放在 store 里共用，**别在组件里各留一份**——各留一份的表现是
   「在标签页里复制、切回文件树粘贴不了」。剪贴板粘一次就清空（复制和剪切都是），别把它
   当成「能反复粘」的剪贴板。同理，「关掉一个文件标签」的未保存提醒在
   `components/project/useCloseFile.ts`，桌面标签和移动端子页面都用它。
+- **「表单 / 源码」切换时该交哪份文本，规则在 `utils/handoff.ts`**（纯函数，`check:editor`
+  钉住）：表单模型不可信（编辑器报了 `saveBlocked`）时交回**表单被加载时的那份文本**，
+  不能交 `getContent()` 的回写结果——解析失败降级出来的是一份空配置，而 `[]` /
+  `{"defaults":{"run-as":"package"}}` 这类空配置往往还「合法」，源码视图的 `checkFormat`
+  拦不住，一保存就把用户的文件清空。
+- **「保存」相关的三条路都要问 `saveBlocked`**：`save()`、`overwriteWizards()`（覆盖其他
+  向导）、以及源码视图的 `checkFormat`。少问一条的表现是「换个按钮就把用户文件写坏」。
+  `ManifestEditor` 的 `saveBlocked` 判的是 `Manifest.unterminated`（多行值 `"""` 没闭合
+  ——解析器会一路读到文件尾、把后面的键吞进值里，再保存就把那些键埋掉了）。
+- **新建文件不许覆盖已有文件**：后端 `/api/fs/create` 对已存在的**文件**返回 400
+  （`WriteFile` 是 `O_TRUNC`，同名会把用户那份清成 0 字节），前端 `createEntryAt` 先
+  `loadDir(parent, true)` 现拉一次再判重名。目录保持 `mkdir -p` 的幂等（补架构目录依赖它）。
+- **日志的去重游标认「后端进程」**：`logging.seq` 是进程内计数，重启从 1 开始；SSE 第一帧
+  是 `event: boot`，前端 `stores/logs.ts` 靠它把 `lastSeq` 归零。不认这一层的话，重启之后
+  新日志会被整片当成旧的丢掉（弹窗从此不再更新）。补历史和实时帧是并发跑的，所以
+  `loadHistory` 只按 seq **合并**、不整体覆盖；`LogDialog` 的刷新 watch 盯最后一条的 `seq`，
+  不能盯 `visible.length`（到上限之后长度恒定，watch 永不触发）。
 - **表单行用 `form-row` / `form-label`**：编辑器的表单行挂这两个类（小控件再加
   `form-row-inline`），表单根节点在窄屏下挂 `form-stack`（`:class="{ 'form-stack':
   layout.isMobile }"`），桌面那套「固定宽度右对齐标题 + 控件」由元素上的 Tailwind 类
@@ -105,6 +127,12 @@ frontend/src/
   两个类**，别再各写一套尺寸——「每个弹窗长得都不一样」正是这次统一掉的东西。
 - **语言包两份必须同步**。`npm run check:i18n` 会挡住键不一致；消息里的 `{` 是插值语法，
   想写字面量 `{` 要转义。一条消息写错，表现是「渲染到那个组件时整个弹窗画不出来」。
+- **`utils/` 里不引 `vue-i18n`**：需要给用户看的错误在 `utils/` 里只给 **i18n 键**
+  （见 `utils/icon.ts` 的 `IconError`，界面层用 `IconPanel` 的 `errText` 翻）——否则
+  `check:icon` 这类直接跑 `.ts` 的脚本会被拖上一整套运行时。
+- **改目录设置要过权限**（`server/api_trim.go` 的 `checkDirsAuthorized`）：经过统一网关时
+  要求管理员，且新目录必须在开放 API 报的「本应用被授权目录」里；没有网关（直接调 socket /
+  开发）时不判——那种部署下 socket 权限就是边界。
 - **`utils/` 里的纯逻辑要能单独验**。解析 / 回写 / 几何这类会写坏用户文件或算错图的计算，
   放 `utils/` 并在 `frontend/scripts/check-*.mjs` 里加断言，别塞进组件里只靠手点。
 - **前端只用 Composition API + `<script setup lang="ts">`**，SFC 段落顺序
@@ -195,6 +223,10 @@ frontend/src/
   结尾不带换行）一按『源码』就显示未保存、保存按钮跟着亮」。切视图那条在
   `EditorHost.vue` 的 `watch(mode)`：表单干净就交 `tab.origin`。`check:editor` 盯着
   前一半，后一半只能按「怎么真跑起来」手点。
+- **目录改名不止改标签路径**：`renameEntryAt` 里还要一起改**活动标签**（`activeTab` 是面板
+  可见性的唯一判据，少了它编辑区整片空白）、目录缓存与展开状态（`migrateDirKeys`：不搬就
+  「改完名变回收起」+ 旧键那份缓存变成孤儿）、以及剪贴板里的路径（不换的话之后每次粘贴都拿
+  一个不存在的路径去改名 / 复制）。删除走 `dropDirKeys` + 清剪贴板。`check:workspace` 全钉住。
 - **`style.css` 的层序会吃掉你的规则**：`@layer theme, base, element, components, utilities`
   是级联层，**层序比选择器权重更硬**——写在 `components` 层里的规则永远压不过元素上
   直接写的 Tailwind 工具类（`.grid` / `.text-right` 都在 `utilities` 层），表现是

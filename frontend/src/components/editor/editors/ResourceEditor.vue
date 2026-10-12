@@ -15,7 +15,12 @@
           <el-icon class="text-slate-400 dark:text-slate-500"><Box /></el-icon>
           <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.docker') }}</span>
           <span class="flex-1" />
-          <el-button text size="small" :icon="Plus" @click="model.root['docker-project'].projects.push({ name: '', path: '' })" />
+          <el-button
+            text
+            size="small"
+            :icon="Plus"
+            @click="model.root['docker-project'].projects.push({ name: '', path: '', extra: {} })"
+          />
         </header>
         <div class="space-y-1 p-2">
           <div
@@ -137,15 +142,38 @@ import { useI18n } from 'vue-i18n'
 import { useProjectsStore } from '@/stores/projects'
 import { parseJSON, stringifyOrdered, useEditor, type EditorProps } from '../useEditor'
 
+interface ProjectItem {
+  name: string
+  path: string
+  /** 项目里表单不认识的键，保存时原样写回。 */
+  extra: Record<string, unknown>
+}
+
 interface Share {
   name: string
-  permission: { rw: string[]; ro: string[] }
+  permission: {
+    rw: string[]
+    ro: string[]
+    /** permission 里不认识的键（以后加的），保存时原样写回。 */
+    extra: Record<string, unknown>
+  }
+  /** share 上不认识的键，保存时原样写回。 */
+  extra: Record<string, unknown>
+}
+
+/** 挑出「表单不认识的键」，保存时原样写回。 */
+function pickExtra(raw: Record<string, unknown>, known: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (!known.includes(key)) out[key] = value
+  }
+  return out
 }
 
 interface ResourceRoot {
-  'docker-project': { projects: { name: string; path: string }[] }
-  'data-share': { shares: Share[] }
-  'usr-local-linker': { bin: string[]; lib: string[]; etc: string[] }
+  'docker-project': { projects: ProjectItem[]; extra: Record<string, unknown> }
+  'data-share': { shares: Share[]; extra: Record<string, unknown> }
+  'usr-local-linker': { bin: string[]; lib: string[]; etc: string[]; extra: Record<string, unknown> }
   [key: string]: unknown
 }
 
@@ -177,7 +205,7 @@ const emit = defineEmits<{ dirty: [value: boolean] }>()
 const { t } = useI18n()
 const projects = useProjectsStore()
 
-const newShare = (): Share => ({ name: '', permission: { rw: [], ro: [] } })
+const newShare = (): Share => ({ name: '', extra: {}, permission: { rw: [], ro: [], extra: {} } })
 
 const { model, api } = useEditor<Model>(
   props,
@@ -186,29 +214,35 @@ const { model, api } = useEditor<Model>(
     const parsed = parseJSON<Record<string, unknown>>(text, {})
     const raw = (parsed.value ?? {}) as Record<string, unknown>
 
-    const docker = (raw['docker-project'] ?? {}) as { projects?: unknown }
-    const share = (raw['data-share'] ?? {}) as { shares?: unknown }
+    const docker = (raw['docker-project'] ?? {}) as Record<string, unknown>
+    const share = (raw['data-share'] ?? {}) as Record<string, unknown>
     const linker = (raw['usr-local-linker'] ?? {}) as Record<string, unknown>
     const scope = raw['api-scope']
 
     const root: ResourceRoot = {
       'docker-project': {
+        // 已知块 / 每一项的未知键都留着（见 pickExtra 的说明）
+        extra: pickExtra(docker, ['projects']),
         projects: Array.isArray(docker.projects)
-          ? (docker.projects as { name?: string; path?: string }[]).map((p) => ({
+          ? (docker.projects as Record<string, unknown>[]).map((p) => ({
               name: String(p.name ?? ''),
               path: String(p.path ?? ''),
+              extra: pickExtra(p, ['name', 'path']),
             }))
           : [],
       },
       'data-share': {
+        extra: pickExtra(share, ['shares']),
         shares: Array.isArray(share.shares)
           ? (share.shares as Record<string, unknown>[]).map((s) => {
               const permission = (s.permission ?? {}) as Record<string, unknown>
               return {
                 name: String(s.name ?? ''),
+                extra: pickExtra(s, ['name', 'permission']),
                 permission: {
                   rw: Array.isArray(permission.rw) ? (permission.rw as string[]) : [],
                   ro: Array.isArray(permission.ro) ? (permission.ro as string[]) : [],
+                  extra: pickExtra(permission, ['rw', 'ro']),
                 },
               }
             })
@@ -218,6 +252,7 @@ const { model, api } = useEditor<Model>(
         bin: Array.isArray(linker.bin) ? (linker.bin as string[]) : [],
         lib: Array.isArray(linker.lib) ? (linker.lib as string[]) : [],
         etc: Array.isArray(linker.etc) ? (linker.etc as string[]) : [],
+        extra: pickExtra(linker, ['bin', 'lib', 'etc']),
       },
     }
 
@@ -237,31 +272,54 @@ const { model, api } = useEditor<Model>(
     const root = value.root
     const out: Record<string, unknown> = {}
 
-    const projects = root['docker-project'].projects.filter((p) => p.name.trim() !== '')
-    if (projects.length) {
-      out['docker-project'] = {
-        projects: projects.map((p) => ({ name: p.name, path: p.path || 'docker' })),
-      }
+    // 已知块：有内容（有效项或者未知键）就写回，未知键一个都不丢。以前是从固定字段重建
+    // 每一个块和每一项，于是「改个 share 名再保存」会把不认识的键一起删掉
+    // （`usr-local-linker.sbin`、share / permission 上以后加的键）。
+    const putBlock = (
+      key: string,
+      extra: Record<string, unknown>,
+      body: Record<string, unknown>,
+    ) => {
+      const block = { ...extra, ...body }
+      if (Object.keys(block).length) out[key] = block
     }
+
+    const projects = root['docker-project'].projects.filter((p) => p.name.trim() !== '')
+    putBlock(
+      'docker-project',
+      root['docker-project'].extra,
+      projects.length
+        ? {
+            projects: projects.map((p) => ({
+              ...p.extra,
+              name: p.name,
+              path: p.path || 'docker',
+            })),
+          }
+        : {},
+    )
 
     const shares = root['data-share'].shares.filter((s) => s.name.trim() !== '')
-    if (shares.length) {
-      out['data-share'] = {
-        shares: shares.map((s) => {
-          const item: Record<string, unknown> = { name: s.name }
-          const rw = s.permission.rw.filter(Boolean)
-          const ro = s.permission.ro.filter(Boolean)
-          if (rw.length || ro.length) {
-            item.permission = {}
-            if (rw.length) (item.permission as Record<string, unknown>).rw = rw
-            if (ro.length) (item.permission as Record<string, unknown>).ro = ro
+    putBlock(
+      'data-share',
+      root['data-share'].extra,
+      shares.length
+        ? {
+            shares: shares.map((s) => {
+              const item: Record<string, unknown> = { ...s.extra, name: s.name }
+              const permission: Record<string, unknown> = { ...s.permission.extra }
+              const rw = s.permission.rw.filter(Boolean)
+              const ro = s.permission.ro.filter(Boolean)
+              if (rw.length) permission.rw = rw
+              if (ro.length) permission.ro = ro
+              if (Object.keys(permission).length) item.permission = permission
+              return item
+            }),
           }
-          return item
-        }),
-      }
-    }
+        : {},
+    )
 
-    const linker: Record<string, string[]> = {}
+    const linker: Record<string, unknown> = { ...root['usr-local-linker'].extra }
     for (const group of ['bin', 'lib', 'etc'] as const) {
       const list = (root['usr-local-linker'][group] ?? []).filter(Boolean)
       if (list.length) linker[group] = list

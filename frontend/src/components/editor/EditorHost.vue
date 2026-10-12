@@ -118,6 +118,7 @@ import { ArrowDown, ArrowLeft, CopyDocument, Document, MessageBox } from '@eleme
 import SourceEditor from './editors/SourceEditor.vue'
 import EnvVarsDialog from './EnvVarsDialog.vue'
 import { resolveEditor } from './registry'
+import { handoffText } from '@/utils/handoff'
 import type { EditorApi, EditorContent } from './useEditor'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -184,14 +185,6 @@ const activeComponent = computed(() => {
 /** 能不能渲染出内容：文本文件可以，图片这类标了 previews 的也可以。 */
 const showEditor = computed(() => Boolean(tab.value?.text) || def.value.previews === true)
 
-watch(
-  () => props.path,
-  () => {
-    mode.value = 'form'
-    handoff.value = ''
-  },
-)
-
 // 卸载前把手里没保存的内容交回 store（见 loadText 的说明）。父组件的
 // beforeUnmount 先于子组件卸载执行，所以这时候 inner 还是活的。
 //
@@ -210,22 +203,21 @@ onBeforeUnmount(() => {
 
 watch(mode, async (next, previous) => {
   const editor = inner.value
-  if (previous === 'form' && next === 'source') {
-    // 表单 → 源码：把序列化结果带过去，避免用户刚才的编辑消失。
-    //
-    // **表单不脏时带磁盘原文**：表单的回写会把格式归一（JSON 的缩进与键序、manifest
-    // 补默认键），而源码视图的脏判据是「文本 ≠ 磁盘原文」——把归一结果当初值，一份
-    // 没编辑过的脚手架文件（`config/privilege` 是 4 空格缩进）一按「源码」就显示
-    // 「未保存」，保存按钮也跟着亮起来。干净的时候两边看到的是同一份文本，才谈得上
-    // 「切视图不算改动」。
-    const dirty = editor?.isDirty?.() ?? false
-    handoff.value = dirty
-      ? (editor?.getContent?.()?.content ?? tab.value?.origin ?? '')
-      : (tab.value?.origin ?? '')
-  } else if (previous === 'source' && next === 'form') {
-    // 源码 → 表单：把源码内容作为解析输入
-    handoff.value = editor?.getText?.() ?? tab.value?.origin ?? ''
-  }
+  // 规则本身在 utils/handoff.ts（纯函数、有断言），这里只负责把两边的值递进去。
+  //
+  // `editorText` 必须在覆盖 handoff 之前从 loadText 取：它就是当前这个编辑器挂载时
+  // 拿到的那份文本。表单模型不可信（解析失败降级成空模型）时交回的是它，而不是那份
+  // 空模型——否则用户刚写的文本会被顶掉，而且空配置往往还「合法」，一保存就把文件
+  // 清空（见 utils/handoff.ts 的文件头）。
+  handoff.value = handoffText({
+    from: previous,
+    to: next,
+    formDirty: editor?.isDirty?.() ?? false,
+    formBlocked: editor?.saveBlocked?.() ?? '',
+    formText: editor?.getContent?.()?.content ?? '',
+    editorText: previous === 'source' ? (editor?.getText?.() ?? loadText.value) : loadText.value,
+    diskText: tab.value?.origin ?? '',
+  })
   await nextTick()
   onDirty(inner.value?.isDirty?.() ?? false)
 })
@@ -306,6 +298,14 @@ async function overwriteWizards(targets: string[]) {
     return
   }
 
+  // 和「保存」同一条规矩：模型不可信（解析失败降级成空模型）时不能把它写进别的文件
+  // ——那会把目标向导整份覆盖掉，而且不可逆。以前这里只问了 getContent，没问
+  // saveBlocked，表现是「当前向导解析失败，点一下『覆盖其他向导』就把另两份清成 []」。
+  const blocked = inner.value?.saveBlocked?.()
+  if (blocked) {
+    ElMessage.error(blocked)
+    return
+  }
   const payload = inner.value?.getContent?.() ?? null
   if (!payload) {
     ElMessage.error(t('editor.notReady'))
