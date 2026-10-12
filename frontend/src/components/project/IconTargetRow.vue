@@ -2,7 +2,7 @@
   <div class="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1.5">
     <el-checkbox
       :model-value="checked"
-      size="small"
+      size="default"
       @update:model-value="emit('update:checked', $event === true)"
     />
 
@@ -17,14 +17,14 @@
       <img v-if="src" :src="src" alt="" class="h-full w-full object-contain" />
     </span>
 
-    <span class="shrink-0 text-xs text-slate-700 dark:text-slate-200">{{ t(labelKey) }}</span>
+    <span class="shrink-0 text-sm text-slate-700 dark:text-slate-200">{{ t(labelKey) }}</span>
     <span
-      class="mono min-w-0 flex-1 truncate text-right text-[11px] text-slate-400 dark:text-slate-500"
+      class="mono min-w-0 flex-1 truncate text-right text-sm text-slate-400 dark:text-slate-500"
       :title="path"
     >
       {{ path }}
     </span>
-    <span class="mono shrink-0 text-[11px] text-slate-500 dark:text-slate-400">{{ size }}px</span>
+    <span class="mono shrink-0 text-sm text-slate-500 dark:text-slate-400">{{ size }}px</span>
   </div>
 </template>
 

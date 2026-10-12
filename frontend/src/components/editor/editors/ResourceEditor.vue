@@ -5,7 +5,7 @@
         {{ t('editor.readFailed') }}: {{ model.error }}
       </div>
 
-      <p class="rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+      <p class="rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
         {{ t('resource.hint') }}
       </p>
 
@@ -13,7 +13,7 @@
       <section v-if="showDocker" class="rounded-lg border border-slate-200 dark:border-slate-700">
         <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
           <el-icon class="text-slate-400 dark:text-slate-500"><Box /></el-icon>
-          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.docker') }}</span>
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('resource.docker') }}</span>
           <span class="flex-1" />
           <el-button
             text
@@ -28,11 +28,20 @@
             :key="index"
             class="flex items-center gap-2"
           >
-            <el-input v-model="item.name" size="small" class="w-48" :placeholder="t('resource.dockerName')" />
-            <el-input v-model="item.path" size="small" class="w-40" :placeholder="t('resource.dockerPath')" />
-            <el-button text size="small" :icon="Delete" @click="model.root['docker-project'].projects.splice(index, 1)" />
+            <el-input v-model="item.name" size="default" class="w-48" :placeholder="t('resource.dockerName')" />
+            <el-input v-model="item.path" size="default" class="w-40" :placeholder="t('resource.dockerPath')" />
+            <el-button
+              text
+              type="danger"
+              size="small"
+              class="ml-auto"
+              :icon="Delete"
+              :title="t('resource.remove')"
+              :aria-label="t('resource.remove')"
+              @click="model.root['docker-project'].projects.splice(index, 1)"
+            />
           </div>
-          <p v-if="!model.root['docker-project'].projects.length" class="px-1 py-1 text-xs text-slate-400 dark:text-slate-500">
+          <p v-if="!model.root['docker-project'].projects.length" class="px-1 py-1 text-sm text-slate-400 dark:text-slate-500">
             {{ t('resource.empty') }}
           </p>
         </div>
@@ -42,7 +51,7 @@
       <section class="rounded-lg border border-slate-200 dark:border-slate-700">
         <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
           <el-icon class="text-slate-400 dark:text-slate-500"><FolderOpened /></el-icon>
-          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.shares') }}</span>
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('resource.shares') }}</span>
           <span class="flex-1" />
           <el-button text size="small" :icon="Plus" @click="model.root['data-share'].shares.push(newShare())" />
         </header>
@@ -52,22 +61,54 @@
             :key="index"
             class="rounded-md bg-slate-50 dark:bg-slate-900 p-2"
           >
+            <!-- 路径占半行（另一半留给删除按钮推到最右） -->
             <div class="flex items-center gap-2">
-              <el-input v-model="share.name" size="small" class="w-56" :placeholder="t('resource.shareName')" />
-              <el-button text size="small" :icon="Delete" @click="model.root['data-share'].shares.splice(index, 1)" />
+              <el-input v-model="share.name" size="default" class="w-1/2" :placeholder="t('resource.shareName')" />
+              <el-button
+                text
+                type="danger"
+                size="small"
+                class="ml-auto"
+                :icon="Delete"
+                :title="t('resource.remove')"
+                :aria-label="t('resource.remove')"
+                @click="removeShare(index, share.name)"
+              />
             </div>
-            <div class="mt-2 grid grid-cols-[5rem_1fr] items-center gap-2">
-              <span class="text-right text-[11px] text-slate-500 dark:text-slate-400">{{ t('resource.rw') }}</span>
-              <el-select v-model="share.permission.rw" size="small" multiple filterable allow-create default-first-option>
-                <el-option v-for="item in share.permission.rw" :key="item" :label="item" :value="item" />
-              </el-select>
-              <span class="text-right text-[11px] text-slate-500 dark:text-slate-400">{{ t('resource.ro') }}</span>
-              <el-select v-model="share.permission.ro" size="small" multiple filterable allow-create default-first-option>
-                <el-option v-for="item in share.permission.ro" :key="item" :label="item" :value="item" />
-              </el-select>
+            <!--
+              可写 / 只读：标题一行、控件一行，两个一组同一行——实际几乎只会填其中一个，
+              各占一整行太浪费高度。
+            -->
+            <div class="mt-2 grid grid-cols-2 gap-2">
+              <div class="flex min-w-0 flex-col gap-1">
+                <span class="text-sm text-slate-500 dark:text-slate-400">{{ t('resource.rw') }}</span>
+                <el-select
+                  v-model="share.permission.rw"
+                  size="default"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                >
+                  <el-option v-for="item in share.permission.rw" :key="item" :label="item" :value="item" />
+                </el-select>
+              </div>
+              <div class="flex min-w-0 flex-col gap-1">
+                <span class="text-sm text-slate-500 dark:text-slate-400">{{ t('resource.ro') }}</span>
+                <el-select
+                  v-model="share.permission.ro"
+                  size="default"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                >
+                  <el-option v-for="item in share.permission.ro" :key="item" :label="item" :value="item" />
+                </el-select>
+              </div>
             </div>
           </div>
-          <p v-if="!model.root['data-share'].shares.length" class="px-1 py-1 text-xs text-slate-400 dark:text-slate-500">
+          <p v-if="!model.root['data-share'].shares.length" class="px-1 py-1 text-sm text-slate-400 dark:text-slate-500">
             {{ t('resource.empty') }}
           </p>
         </div>
@@ -77,23 +118,24 @@
       <section class="rounded-lg border border-slate-200 dark:border-slate-700">
         <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
           <el-icon class="text-slate-400 dark:text-slate-500"><Link /></el-icon>
-          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.linker') }}</span>
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('resource.linker') }}</span>
+          <span class="text-sm text-slate-400 dark:text-slate-500">{{ t('resource.linkerPath') }}</span>
         </header>
         <div class="space-y-2 p-2">
           <div
             v-for="group in (['bin', 'lib', 'etc'] as const)"
             :key="group"
-            class="grid grid-cols-[10rem_1fr] items-center gap-2"
+            class="flex min-w-0 flex-col gap-1"
           >
-            <span class="text-right text-[11px] text-slate-500 dark:text-slate-400">{{ t(`resource.linker${group[0]!.toUpperCase()}${group.slice(1)}`) }}</span>
+            <span class="text-sm text-slate-500 dark:text-slate-400">{{ t(`resource.linker${group[0]!.toUpperCase()}${group.slice(1)}`) }}</span>
             <el-select
               v-model="model.root['usr-local-linker'][group]"
-              size="small"
+              size="default"
               multiple
               filterable
               allow-create
               default-first-option
-              placeholder="bin/myapp-cli"
+              :placeholder="LINKER_PLACEHOLDER[group]"
             >
               <el-option
                 v-for="item in model.root['usr-local-linker'][group] ?? []"
@@ -106,27 +148,26 @@
         </div>
       </section>
 
-      <!-- 飞牛 API 调用列表（api-scope） -->
+      <!-- 飞牛 API 调用列表 -->
       <section class="rounded-lg border border-slate-200 dark:border-slate-700">
         <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
           <el-icon class="text-slate-400 dark:text-slate-500"><Connection /></el-icon>
-          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('resource.apiScope') }}</span>
-          <span class="flex-1" />
-          <span class="mono text-[10px] text-slate-400 dark:text-slate-500">api-scope</span>
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('resource.apiScope') }}</span>
         </header>
         <div class="p-2">
-          <el-checkbox-group v-model="model.apiScope">
-            <div v-for="item in apiItems" :key="item.id" class="py-1">
-              <el-checkbox :value="item.id">
-                <span class="text-xs text-slate-700 dark:text-slate-200">{{ item.title }}</span>
-                <span class="mono ml-2 text-[10px] text-slate-400 dark:text-slate-500">{{ item.id }}</span>
-              </el-checkbox>
-              <div v-if="item.desc" class="ml-6 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-                {{ item.desc }}
-              </div>
-            </div>
-          </el-checkbox-group>
-          <p v-if="!apiItems.length" class="px-1 py-1 text-xs text-slate-400 dark:text-slate-500">
+          <!-- 授权项：标题 + 问号（功能描述挂在问号上），开关推到行尾 -->
+          <div v-for="item in apiItems" :key="item.id" class="flex items-center gap-1 py-1">
+            <span class="text-sm text-slate-700 dark:text-slate-200">{{ item.title }}</span>
+            <el-tooltip v-if="item.desc" placement="top" :show-after="300">
+              <template #content>
+                <div class="max-w-xs text-xs leading-relaxed">{{ item.desc }}</div>
+              </template>
+              <el-icon class="text-slate-400 dark:text-slate-500"><QuestionFilled /></el-icon>
+            </el-tooltip>
+            <span class="flex-1" />
+            <el-switch :model-value="model.apiScope.includes(item.id)" @change="setScope(item.id, $event)" />
+          </div>
+          <p v-if="!apiItems.length" class="px-1 py-1 text-sm text-slate-400 dark:text-slate-500">
             {{ t('resource.empty') }}
           </p>
         </div>
@@ -136,9 +177,10 @@
 </template>
 
 <script setup lang="ts">
-import { Box, Connection, Delete, FolderOpened, Link, Plus } from '@element-plus/icons-vue'
+import { Box, Connection, Delete, FolderOpened, Link, Plus, QuestionFilled } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessageBox } from 'element-plus'
 import { useProjectsStore } from '@/stores/projects'
 import { parseJSON, stringifyOrdered, useEditor, type EditorProps } from '../useEditor'
 
@@ -200,12 +242,43 @@ const API_SCOPES = [
 
 const KNOWN_IDS = new Set<string>(API_SCOPES.map((item) => item.id))
 
+/**
+ * 三组系统链接的示例路径（占位提示），写的是**相对 app/** 的路径。
+ *
+ * 三组各举一个对得上类型的例子：可执行文件、共享库、配置文件——同一个 `bin/myapp-cli`
+ * 摆在 lib / etc 下面只会误导。
+ */
+const LINKER_PLACEHOLDER: Record<'bin' | 'lib' | 'etc', string> = {
+  bin: 'bin/myapp-cli',
+  lib: 'lib/myapp_lib.so',
+  etc: 'etc/myapp.conf',
+}
+
 const props = defineProps<EditorProps>()
 const emit = defineEmits<{ dirty: [value: boolean] }>()
 const { t } = useI18n()
 const projects = useProjectsStore()
 
 const newShare = (): Share => ({ name: '', extra: {}, permission: { rw: [], ro: [], extra: {} } })
+
+/**
+ * 删掉一条共享目录声明。
+ *
+ * 先问一声：这一行里可能填了路径和一个读写 / 只读用户列表，误点一下就全没了，
+ * 而且列表里没有撤销。
+ */
+async function removeShare(index: number, name: string) {
+  try {
+    await ElMessageBox.confirm(
+      t('resource.removeShareConfirm', { name: name.trim() || '—' }),
+      t('common.tip'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
+  model.value.root['data-share'].shares.splice(index, 1)
+}
 
 const { model, api } = useEditor<Model>(
   props,
@@ -338,7 +411,7 @@ const { model, api } = useEditor<Model>(
   },
 )
 
-/** 勾选项：已知的 5 个 API，外加文件里出现的未知 id（保住它们，别在保存时丢掉）。 */
+/** 授权项：已知的 5 个 API，外加文件里出现的未知 id（保住它们，别在保存时丢掉）。 */
 const apiItems = computed(() => {
   const known = API_SCOPES.map((item) => ({
     id: item.id,
@@ -350,6 +423,21 @@ const apiItems = computed(() => {
     .map((id) => ({ id, title: id, desc: '' }))
   return [...known, ...extra]
 })
+
+/**
+ * 开关 = 这个 id 在不在 `api-scope` 里。
+ *
+ * 勾选状态本身就是那份字符串数组（写回文件的是它），所以开关只做增删：新选的追加到末尾，
+ * 保持用户勾选的先后顺序（整份数组按顺序写回文件）。
+ */
+function setScope(id: string, value: boolean | string | number) {
+  const list = model.value.apiScope
+  if (!value) {
+    model.value.apiScope = list.filter((item) => item !== id)
+    return
+  }
+  if (!list.includes(id)) list.push(id)
+}
 
 /**
  * 是否显示「Docker 项目」。

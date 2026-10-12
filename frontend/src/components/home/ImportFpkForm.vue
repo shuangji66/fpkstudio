@@ -3,7 +3,7 @@
     <div class="mb-2 flex items-center gap-2">
       <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('home.import.title') }}</span>
       <span class="flex-1" />
-      <el-button size="small" text @click="emit('cancel')">{{ t('common.cancel') }}</el-button>
+      <el-button size="default" text @click="emit('cancel')">{{ t('common.cancel') }}</el-button>
     </div>
 
     <div
@@ -20,7 +20,7 @@
       </p>
       <div class="flex items-center gap-2">
         <el-button
-          size="small"
+          size="default"
           :disabled="loading"
           @click.stop="pick"
         >
@@ -31,7 +31,7 @@
           授权给应用，再由后端直接读它。独立浏览器页面里没有宿主桥，按钮禁用。
         -->
         <el-button
-          size="small"
+          size="default"
           type="primary"
           plain
           :icon="FolderOpened"

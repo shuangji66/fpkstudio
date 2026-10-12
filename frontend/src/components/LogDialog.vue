@@ -13,8 +13,8 @@
     @opened="fitNow"
   >
     <div class="flex h-full min-h-0 flex-col">
-      <div class="flex shrink-0 items-center gap-2 pb-2 text-xs">
-        <el-select v-model="logs.sourceFilter" size="small" class="w-[7.5rem]" :teleported="false">
+      <div class="flex shrink-0 items-center gap-2 pb-2 text-sm">
+        <el-select v-model="logs.sourceFilter" size="default" class="w-[7.5rem]" :teleported="false">
           <el-option :label="t('log.all')" value="" />
           <el-option :label="t('log.app')" value="app" />
           <el-option :label="t('log.fnpack')" value="fnpack" />
@@ -23,15 +23,11 @@
 
         <el-input
           v-model="logs.textFilter"
-          size="small"
-          class="w-[14rem]"
+          size="default"
+          class="w-[10rem]"
           clearable
           :placeholder="t('log.filterText')"
         />
-
-        <span class="text-[11px] text-slate-500 dark:text-slate-400">
-          {{ t('log.count', { count: logs.visible.length }) }}
-        </span>
 
         <span class="flex-1" />
 
@@ -109,7 +105,7 @@ function ensureTerm() {
     convertEol: false,
     cursorBlink: false,
     disableStdin: true,
-    fontSize: 12,
+    fontSize: 14,
     fontFamily: 'var(--font-mono)',
     scrollback: 5000,
     theme: { background: '#0f172a', foreground: '#e2e8f0' },

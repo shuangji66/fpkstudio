@@ -1,10 +1,10 @@
 <template>
   <div class="rounded-lg border border-slate-200 p-2.5 dark:border-slate-700">
     <div class="flex flex-wrap items-center gap-2">
-      <span class="text-xs font-medium text-slate-700 dark:text-slate-200">
+      <span class="text-sm font-medium text-slate-700 dark:text-slate-200">
         {{ t(`settings.dirs.${slot}.title`) }}
       </span>
-      <el-tag size="small" :type="fromUser ? 'success' : 'info'" effect="plain">
+      <el-tag class="text-sm" :type="fromUser ? 'success' : 'info'" effect="plain">
         {{ fromUser ? t('settings.dirs.fromUser') : t('settings.dirs.default') }}
       </el-tag>
 
@@ -17,19 +17,19 @@
       <div class="flex shrink-0 items-center gap-2">
         <el-button
           text
-          size="small"
+          size="default"
           :icon="FolderOpened"
           :disabled="!canOpenFolder"
           :title="canOpenFolder ? t('settings.dirs.openFolder') : t('trim.error.hostUnavailable')"
           @click="emit('openFolder')"
         />
-        <el-button size="small" :disabled="pickDisabled" :title="pickTitle" @click="emit('pick')">
+        <el-button size="default" :disabled="pickDisabled" :title="pickTitle" @click="emit('pick')">
           {{ fromUser ? t('settings.dirs.replace') : t('settings.dirs.add') }}
         </el-button>
         <!-- 取消设置是「回到默认」这种带副作用的动作，给它一个红框（但不填充）区别于旁边的更换按钮 -->
         <el-button
           v-if="fromUser"
-          size="small"
+          size="default"
           type="danger"
           plain
           class="border-red-400 bg-transparent hover:bg-red-50 disabled:opacity-50 dark:border-red-500/70 dark:hover:bg-red-950/40"
@@ -47,7 +47,7 @@
       路径（这时 dialog 会另外给一句失败原因）。
     -->
     <p
-      class="mt-1.5 truncate text-xs text-slate-700 dark:text-slate-200"
+      class="mt-1.5 truncate text-sm text-slate-700 dark:text-slate-200"
       :title="semantic || path"
     >
       {{ semantic || path }}
@@ -56,7 +56,7 @@
     <!-- 环境变量被忽略的情况要说出来，否则用户会以为「我明明设了输出目录」 -->
     <p
       v-if="envIgnored"
-      class="mt-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400"
+      class="mt-1.5 text-sm leading-relaxed text-amber-600 dark:text-amber-400"
     >
       {{ t('settings.dirs.envIgnored', { path: defaultPath }) }}
     </p>

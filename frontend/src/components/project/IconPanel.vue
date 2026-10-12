@@ -33,30 +33,30 @@
             />
             <span
               v-else
-              class="flex h-full items-center justify-center px-4 text-center text-xs leading-relaxed text-slate-400 dark:text-slate-500"
+              class="flex h-full items-center justify-center px-4 text-center text-sm leading-relaxed text-slate-400 dark:text-slate-500"
             >
               {{ t('iconTab.pickHint') }}
             </span>
 
             <div
               v-if="draggingFile"
-              class="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-slate-800/80 text-xs text-sky-600 dark:text-sky-400"
+              class="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-slate-800/80 text-sm text-sky-600 dark:text-sky-400"
             >
               {{ t('iconTab.drop') }}
             </div>
           </div>
 
-          <p class="mt-2 text-center text-[11px] text-slate-500 dark:text-slate-400">
+          <p class="mt-2 text-center text-sm text-slate-500 dark:text-slate-400">
             {{ image ? t('iconTab.cropTip') : t('iconTab.pickTip') }}
           </p>
 
           <div
-            class="mx-auto mt-2 grid w-[16rem] grid-cols-[2.5rem_1fr] items-center gap-x-2 gap-y-1.5 text-xs text-slate-600 dark:text-slate-300"
+            class="mx-auto mt-2 grid w-[16rem] grid-cols-[2.5rem_1fr] items-center gap-x-2 gap-y-1.5 text-sm text-slate-600 dark:text-slate-300"
           >
             <span>{{ t('iconTab.zoom') }}</span>
             <el-slider
               v-model="zoomSlider"
-              size="small"
+              size="default"
               :min="minZoom"
               :max="maxZoom"
               :step="0.01"
@@ -68,7 +68,7 @@
             <span>{{ t('iconTab.size') }}</span>
             <el-input-number
               v-model="workSize"
-              size="small"
+              size="default"
               :min="32"
               :max="4096"
               :disabled="!image"
@@ -80,7 +80,7 @@
             <span>{{ t('iconTab.radius') }}</span>
             <el-slider
               v-model="radius"
-              size="small"
+              size="default"
               :min="0"
               :max="Math.floor(workSize / 2)"
               :disabled="!image"
@@ -88,10 +88,10 @@
 
             <span />
             <div class="flex items-center gap-2">
-              <el-button size="small" :icon="Picture" :disabled="!image" @click="pick">
+              <el-button size="default" :icon="Picture" :disabled="!image" @click="pick">
                 {{ t('iconTab.replace') }}
               </el-button>
-              <el-button size="small" :disabled="!image" @click="resetView">
+              <el-button size="default" :disabled="!image" @click="resetView">
                 {{ t('iconTab.resetView') }}
               </el-button>
             </div>
@@ -100,7 +100,23 @@
 
         <!-- 保存目标 -->
         <div class="min-w-[19rem] flex-1 space-y-2">
-          <div class="label-text">{{ t('iconTab.targets') }}</div>
+          <!-- 生成按钮挪到「写入到」这一行右对齐：它生成的就是下面这个列表里的东西 -->
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ t('iconTab.targets') }}</span>
+            <span class="flex-1" />
+            <span v-if="progress.total" class="mono text-sm text-slate-500 dark:text-slate-400">
+              {{ progress.done }}/{{ progress.total }}
+            </span>
+            <el-button
+              type="primary"
+              size="default"
+              :icon="Upload"
+              :loading="saving"
+              @click="save"
+            >
+              {{ saving ? t('iconTab.saving') : t('iconTab.save') }}
+            </el-button>
+          </div>
 
           <!-- 固定的四个位置 -->
           <IconTargetRow
@@ -117,7 +133,7 @@
             副入口图标：一个项目可以有多个入口，除默认入口（icon_256 / icon_64）之外
             的入口各自一套大 / 小图标，文件名以前缀区分（niubi → niubi_256.png）。
             导入的多入口项目里已经存在的那些，进页面时自动列出来；没写过的尺寸留空，
-            勾上「生成并写入」即可补全。
+            勾上「生成」即可补全。
           -->
           <div
             v-for="entry in entryGroups"
@@ -125,10 +141,10 @@
             class="space-y-2 rounded-md border border-dashed border-slate-300 dark:border-slate-600 p-2"
           >
             <div class="flex items-center gap-2">
-              <span class="shrink-0 text-xs text-slate-600 dark:text-slate-300">{{ t('iconTab.entryPrefix') }}</span>
+              <span class="shrink-0 text-sm text-slate-600 dark:text-slate-300">{{ t('iconTab.entryPrefix') }}</span>
               <el-input
                 v-model="entry.group.prefix"
-                size="small"
+                size="default"
                 class="w-40"
                 :maxlength="ICON_PREFIX_MAX"
                 :placeholder="t('iconTab.entryPrefixPlaceholder')"
@@ -136,9 +152,11 @@
               <span class="flex-1" />
               <el-button
                 text
+                type="danger"
                 size="small"
                 :icon="Delete"
                 :title="t('iconTab.removeEntry')"
+                :aria-label="t('iconTab.removeEntry')"
                 @click="removeGroup(entry.group)"
               />
             </div>
@@ -154,32 +172,24 @@
                 :src="iconURL(target)"
               />
             </template>
-            <p v-else class="text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+            <p v-else class="text-sm leading-relaxed text-slate-400 dark:text-slate-500">
               {{ t('iconTab.entryPrefixHint') }}
             </p>
           </div>
 
-          <el-button v-if="state.ui" size="small" :icon="Plus" @click="addGroup">
+          <el-button v-if="state.ui" size="default" :icon="Plus" @click="addGroup">
             {{ t('iconTab.addEntry') }}
           </el-button>
 
-          <div class="grid grid-cols-[auto_1fr] items-center gap-x-3 pt-1">
-            <span class="text-xs text-slate-600 dark:text-slate-300">{{ t('iconTab.smallScale') }}</span>
-            <el-radio-group v-model="smallScale" size="small" :disabled="!hasSmall">
+          <!-- 小图缩放：标题一行、四个比例一行 -->
+          <div class="flex flex-col gap-1 pt-1">
+            <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('iconTab.smallScale') }}</span>
+            <el-radio-group v-model="smallScale" size="default" :disabled="!hasSmall">
               <el-radio-button :value="1">{{ t('iconTab.scaleSame') }}</el-radio-button>
               <el-radio-button :value="0.5">1/2</el-radio-button>
               <el-radio-button :value="0.25">1/4</el-radio-button>
               <el-radio-button :value="0.125">1/8</el-radio-button>
             </el-radio-group>
-          </div>
-
-          <div class="flex items-center gap-2 pt-1">
-            <el-button type="primary" size="small" :icon="Upload" :loading="saving" @click="save">
-              {{ saving ? t('iconTab.saving') : t('iconTab.save') }}
-            </el-button>
-            <span v-if="progress.total" class="mono text-[11px] text-slate-500 dark:text-slate-400">
-              {{ progress.done }}/{{ progress.total }}
-            </span>
           </div>
         </div>
       </div>
@@ -192,7 +202,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Picture, Plus, Upload } from '@element-plus/icons-vue'
 import { rawURL } from '@/api/client'
 import { listDir } from '@/api/endpoints'
@@ -385,7 +395,22 @@ function addGroup() {
   groups.value.push(group)
 }
 
-function removeGroup(group: EntryGroup) {
+/**
+ * 删掉一组副入口图标。
+ *
+ * 先问一声：这一组里可能已经勾了大 / 小两条写入项，删掉之后列表里那份勾选和前缀一起
+ * 消失（磁盘上的图标不删，但用户看不出这一点），误点一下的代价是重填一遍前缀。
+ */
+async function removeGroup(group: EntryGroup) {
+  try {
+    await ElMessageBox.confirm(
+      t('iconTab.removeEntryConfirm', { prefix: group.prefix || '—' }),
+      t('common.tip'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
   groups.value = groups.value.filter((item) => item.id !== group.id)
   delete chosen[`${group.id}:large`]
   delete chosen[`${group.id}:small`]

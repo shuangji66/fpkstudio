@@ -90,7 +90,7 @@
     </div>
 
     <!-- 路径：点哪一段就去哪一层，省得只靠「后退」一层层退 -->
-    <div class="hscroll thin-scroll flex shrink-0 items-center px-1.5 py-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+    <div class="hscroll thin-scroll flex shrink-0 items-center px-1.5 py-0.5 text-sm text-slate-500 dark:text-slate-400">
       <template v-for="(seg, i) in crumbs" :key="seg.path">
         <span v-if="i" class="shrink-0 px-0.5 text-slate-300 dark:text-slate-600">/</span>
         <button
@@ -108,28 +108,28 @@
     <!-- 列表的标题栏：目录不显示大小，所以大小那一格留空 -->
     <div
       v-if="state.browserView === 'list'"
-      class="flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-2 py-1 text-[11px] font-medium text-slate-500 dark:text-slate-400"
+      class="flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-2 py-1 text-sm font-medium text-slate-500 dark:text-slate-400"
     >
       <span class="min-w-0 flex-1">{{ t('files.name') }}</span>
       <span class="w-16 shrink-0 text-right">{{ t('files.size') }}</span>
       <span class="w-24 shrink-0 text-right">{{ t('files.modified') }}</span>
-      <span class="w-4 shrink-0" />
+      <span class="w-7 shrink-0" />
     </div>
 
     <div class="min-h-0 flex-1 overflow-auto thin-scroll">
       <div
         v-if="!entries.length && state.error"
-        class="px-3 py-4 text-xs"
+        class="px-3 py-4 text-sm"
       >
         <p class="leading-relaxed break-all text-red-600 dark:text-red-400">{{ state.error }}</p>
-        <el-button text size="small" class="mt-1" :icon="Refresh" @click="refresh">
+        <el-button text size="default" class="mt-1" :icon="Refresh" @click="refresh">
           {{ t('common.retry') }}
         </el-button>
       </div>
 
       <div
         v-else-if="!entries.length"
-        class="px-3 py-4 text-center text-xs text-slate-400 dark:text-slate-500"
+        class="px-3 py-4 text-center text-sm text-slate-400 dark:text-slate-500"
       >
         {{ loaded ? t('tree.emptyDir') : t('common.loading') }}
       </div>
@@ -138,7 +138,7 @@
         <div
           v-for="entry in entries"
           :key="entry.name"
-          class="group flex cursor-pointer items-center gap-2 border-b border-slate-100 px-2 py-1 text-[13px] hover:bg-slate-100 dark:border-slate-700/60 dark:hover:bg-slate-700"
+          class="group flex cursor-pointer items-center gap-2 border-b border-slate-100 px-2 py-1 text-sm hover:bg-slate-100 dark:border-slate-700/60 dark:hover:bg-slate-700"
           :class="cutPath === entryPath(entry) ? 'opacity-50' : ''"
           @click="open(entry)"
           @contextmenu.prevent="openMenu(entry, $event)"
@@ -148,14 +148,14 @@
             <Document v-else />
           </el-icon>
           <span class="min-w-0 flex-1 truncate" :title="entry.name">{{ entry.name }}</span>
-          <span class="w-16 shrink-0 text-right text-[11px] text-slate-400 dark:text-slate-500">
+          <span class="w-16 shrink-0 text-right text-sm text-slate-400 dark:text-slate-500">
             {{ entry.dir || entry.size < 0 ? '' : humanSize(entry.size) }}
           </span>
-          <span class="w-24 shrink-0 text-right text-[11px] text-slate-400 dark:text-slate-500">
+          <span class="w-24 shrink-0 text-right text-sm text-slate-400 dark:text-slate-500">
             {{ formatTime(entry.modTime) }}
           </span>
           <el-icon
-            class="w-4 shrink-0 cursor-pointer rounded p-0.5 text-slate-300 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:text-slate-600 dark:hover:bg-slate-600 dark:hover:text-slate-200"
+            class="w-7 shrink-0 cursor-pointer rounded p-1 text-lg text-slate-300 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:text-slate-600 dark:hover:bg-slate-600 dark:hover:text-slate-200"
             :title="t('tree.more')"
             @click.stop="openMenu(entry, $event)"
           >
@@ -181,15 +181,15 @@
             <FolderOpened v-if="entry.dir" />
             <Document v-else />
           </el-icon>
-          <span class="line-clamp-2 w-full break-all text-[12px] leading-tight" :title="entry.name">
+          <span class="line-clamp-2 w-full break-all text-sm leading-tight" :title="entry.name">
             {{ entry.name }}
           </span>
-          <span class="text-[10px] text-slate-400 dark:text-slate-500">
+          <span class="text-sm text-slate-400 dark:text-slate-500">
             {{ entry.dir ? '' : humanSize(entry.size) }}
           </span>
           <!-- 触屏上没有 hover，这个按钮得一直看得见，只是颜色压得很淡 -->
           <el-icon
-            class="absolute right-0.5 top-0.5 cursor-pointer rounded p-0.5 text-slate-300 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:text-slate-600 dark:hover:bg-slate-600 dark:hover:text-slate-200"
+            class="absolute right-0.5 top-0.5 cursor-pointer rounded p-1 text-xl text-slate-300 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:text-slate-600 dark:hover:bg-slate-600 dark:hover:text-slate-200"
             :title="t('tree.more')"
             @click.stop="openMenu(entry, $event)"
           >
@@ -204,7 +204,7 @@
     <div
       v-if="menu.show"
       ref="menuEl"
-      class="fixed z-50 min-w-[9rem] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 py-1 text-[13px] shadow-lg"
+      class="fixed z-50 min-w-[9rem] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 py-1 text-sm shadow-lg"
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
     >
       <button
@@ -265,10 +265,16 @@ const entries = computed(() => state.value.dirs[state.value.browserDir] ?? [])
 /** 缓存里有这个目录才算加载过——没有就是在拉，或者拉失败了（看 state.error）。 */
 const loaded = computed(() => state.value.dirs[state.value.browserDir] !== undefined)
 
+/**
+ * 面包屑：第一段是「项目根」而不是项目名。
+ *
+ * 项目名就写在标签上，路径里再重复一遍只会挤掉真正有用的目录名；但这一段的**跳回根目录**
+ * 还是要留着，所以换成一句通用的根。
+ */
 const crumbs = computed(() => {
   const dir = state.value.browserDir
   const rel = dir === props.project ? '' : dir.slice(props.project.length + 1)
-  const out = [{ label: props.project, path: props.project }]
+  const out = [{ label: t('files.root'), path: props.project }]
   let acc = props.project
   for (const part of rel ? rel.split('/') : []) {
     acc = `${acc}/${part}`

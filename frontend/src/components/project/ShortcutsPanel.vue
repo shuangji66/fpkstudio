@@ -13,9 +13,9 @@
           class="mb-3 break-inside-avoid rounded-lg border border-slate-200 dark:border-slate-700"
         >
           <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
-            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t(group.labelKey) }}</span>
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t(group.labelKey) }}</span>
             <span class="flex-1" />
-            <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ t(group.hintKey) }}</span>
+            <span class="text-sm text-slate-400 dark:text-slate-500">{{ t(group.hintKey) }}</span>
           </header>
 
           <ul class="divide-y divide-slate-100 dark:divide-slate-700">
@@ -26,15 +26,15 @@
                 :title="`${props.project}/${item.path}`"
                 @click="open(item.path)"
               >
-                <span class="w-36 shrink-0 truncate text-xs text-slate-700 dark:text-slate-200">
+                <span class="w-36 shrink-0 truncate text-sm text-slate-700 dark:text-slate-200">
                   {{ t(item.labelKey) }}
                 </span>
-                <span class="mono min-w-0 flex-1 truncate text-[11px] text-slate-400 dark:text-slate-500">
+                <span class="mono min-w-0 flex-1 truncate text-sm text-slate-400 dark:text-slate-500">
                   {{ item.path }}
                 </span>
                 <el-tag
                   v-if="opened(item.path)"
-                  size="small"
+                  class="text-sm"
                   effect="plain"
                   :type="dirty(item.path) ? 'warning' : 'info'"
                 >

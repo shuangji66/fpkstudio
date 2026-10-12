@@ -10,16 +10,16 @@
         <el-tag
           v-if="system.error"
           type="danger"
-          size="small"
+          class="text-sm"
           effect="dark"
           :title="system.error"
         >
           {{ t('system.loadFailed') }}
         </el-tag>
-        <el-tag v-else-if="system.info && !system.fnpackReady" type="danger" size="small" effect="dark">
+        <el-tag v-else-if="system.info && !system.fnpackReady" type="danger" class="text-sm" effect="dark">
           {{ t('system.fnpackMissing') }}
         </el-tag>
-        <el-button text size="small" :icon="Tickets" @click="logs.dialogOpen = true">
+        <el-button text size="default" :icon="Tickets" @click="logs.dialogOpen = true">
           {{ t('log.title') }}
         </el-button>
       </div>

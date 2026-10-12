@@ -30,24 +30,38 @@
         :aria-label="t('files.switchToTabs')"
         @click="toTabs"
       />
+      <!--
+        拖宽左栏的手柄。分隔线本身只有 1px、还没法用手指点中，所以顶栏右侧再放一个
+        吸在分隔线上的按钮：按下去就是拖动（事件抛给 ProjectTab，和拖那条线同一段逻辑）。
+        touch-none 是必须的：不给的话触屏会把 pointermove 当成滚动手势收走。
+      -->
+      <el-button
+        text
+        size="default"
+        class="tree-tool -mr-1 ml-auto cursor-col-resize touch-none"
+        :icon="Rank"
+        :title="t('editor.resizeHint')"
+        :aria-label="t('editor.resizeHint')"
+        @pointerdown="onResizeStart"
+      />
     </div>
 
     <div
-      class="min-h-0 flex-1 overflow-auto thin-scroll py-1 text-[13px]"
+      class="min-h-0 flex-1 overflow-auto thin-scroll py-1 text-sm"
       @click.self="selected = project"
       @contextmenu.self.prevent="openMenu(project, true, $event)"
     >
       <div
         v-if="state.loading && !rows.length"
-        class="px-3 py-4 text-center text-xs text-slate-400 dark:text-slate-500"
+        class="px-3 py-4 text-center text-sm text-slate-400 dark:text-slate-500"
       >
         {{ t('common.loading') }}
       </div>
 
-      <div v-else-if="!rows.length" class="px-3 py-4 text-center text-xs">
+      <div v-else-if="!rows.length" class="px-3 py-4 text-center text-sm">
         <template v-if="state.error">
           <p class="text-left leading-relaxed break-all text-red-600 dark:text-red-400">{{ state.error }}</p>
-          <el-button text size="small" class="mt-1" :icon="Refresh" @click="refreshAll">
+          <el-button text size="default" class="mt-1" :icon="Refresh" @click="refreshAll">
             {{ t('common.retry') }}
           </el-button>
         </template>
@@ -84,7 +98,7 @@
             <input
               ref="renameInput"
               v-model="renameValue"
-              class="mono min-w-0 flex-1 rounded border border-sky-400 px-1 text-[12px] outline-none"
+              class="mono min-w-0 flex-1 rounded border border-sky-400 px-1 text-sm outline-none"
               @click.stop
               @keydown.enter.stop="commitRename(row.path)"
               @keydown.esc.stop="cancelEdit"
@@ -97,7 +111,7 @@
 
           <!-- 和右键菜单同一个入口：常驻但低调，省得靠猜（右键仍然可用） -->
           <el-icon
-            class="shrink-0 rounded p-0.5 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200"
+            class="shrink-0 rounded p-1 text-lg transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200"
             :class="selected === row.path ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'"
             :title="t('tree.more')"
             @click.stop="openMenu(row.path, row.dir, $event)"
@@ -118,7 +132,7 @@
           <input
             ref="createInput"
             v-model="editing.name"
-            class="mono min-w-0 flex-1 rounded border border-sky-400 px-1 text-[12px] outline-none"
+            class="mono min-w-0 flex-1 rounded border border-sky-400 px-1 text-sm outline-none"
             :placeholder="t('tree.namePrompt')"
             @keydown.enter.stop="commitCreate"
             @keydown.esc.stop="cancelEdit"
@@ -138,7 +152,7 @@
         <input
           ref="createInput"
           v-model="editing.name"
-          class="mono min-w-0 flex-1 rounded border border-sky-400 px-1 text-[12px] outline-none"
+          class="mono min-w-0 flex-1 rounded border border-sky-400 px-1 text-sm outline-none"
           :placeholder="t('tree.namePrompt')"
           @keydown.enter.stop="commitCreate"
           @keydown.esc.stop="cancelEdit"
@@ -152,7 +166,7 @@
     <div
       v-if="menu.show"
       ref="menuEl"
-      class="fixed z-50 min-w-[9rem] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 py-1 text-[13px] shadow-lg"
+      class="fixed z-50 min-w-[9rem] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 py-1 text-sm shadow-lg"
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
     >
       <button
@@ -183,6 +197,7 @@ import {
   Folder,
   FolderOpened,
   MoreFilled,
+  Rank,
   Refresh,
   Switch,
 } from '@element-plus/icons-vue'
@@ -192,6 +207,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { isArchive } from '@/utils/format'
 
 const props = defineProps<{ project: string }>()
+const emit = defineEmits<{ resizeStart: [event: PointerEvent] }>()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -242,6 +258,12 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const clipboard = computed(() => state.value.clipboard)
 
 // ---- 展开 / 收起 ----
+
+/** 顶栏那个手柄按下去 = 开始拖分隔线（逻辑在 ProjectTab，那里才有宽度状态）。 */
+function onResizeStart(event: PointerEvent) {
+  event.preventDefault()
+  emit('resizeStart', event)
+}
 
 async function onClick(row: { path: string; dir: boolean }) {
   selected.value = row.path

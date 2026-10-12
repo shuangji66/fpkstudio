@@ -127,9 +127,9 @@
     @apply border-transparent bg-transparent text-slate-500 hover:bg-white/60 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50 dark:hover:text-slate-200;
   }
 
-  /* 文件子标签同构但更小 */
+  /* 文件子标签：和主标签同一套，只是底部用一条实线表示选中 */
   .subtab {
-    @apply relative flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-1.5 text-[13px] transition-colors;
+    @apply relative flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm transition-colors;
   }
 
   .subtab-active {
@@ -148,6 +148,39 @@
     @apply text-xs font-medium text-slate-500 dark:text-slate-400;
   }
 
+  /*
+    标签上的关闭按钮（项目标签 / 文件子标签 / 入口标签）：统一成红色小叉，
+    尺寸各自用 text-[11px] / text-[12px] 指定。
+
+    颜色取 Element Plus 的危险色变量：深浅两套主题都自带对应的值，不用再写 .dark 分支。
+  */
+  .close-x {
+    flex-shrink: 0;
+    border-radius: 0.25rem;
+    color: var(--el-color-danger);
+  }
+
+  .close-x:hover {
+    background-color: var(--el-color-danger-light-9);
+    color: var(--el-color-danger-dark-2);
+  }
+
+  /*
+    弹窗右上角的关闭按钮也统一成红色（和标签上的那套一致）。
+
+    选择器要和 Element Plus 自己的同权重、并写在它之后——el-dialog / el-message-box 的
+    样式在 element 层，这组在 components 层，层序更靠后。hover / focus 两条必须一起覆盖，
+    否则鼠标一上去又变回主题色。
+  */
+  .el-dialog__headerbtn .el-dialog__close,
+  .el-dialog__headerbtn:hover .el-dialog__close,
+  .el-dialog__headerbtn:focus .el-dialog__close,
+  .el-message-box__headerbtn .el-message-box__close,
+  .el-message-box__headerbtn:hover .el-message-box__close,
+  .el-message-box__headerbtn:focus .el-message-box__close {
+    color: var(--el-color-danger);
+  }
+
   .mono {
     font-family: var(--font-mono);
   }
@@ -163,26 +196,6 @@
     overscroll-behavior-x: contain;
     touch-action: pan-x;
     -webkit-overflow-scrolling: touch;
-  }
-
-  /*
-    首页「列表」排布：一行一个项目，按屏幕宽度分列。
-
-    窄屏只有一列，容器自然往下长（外层纵向滚动）。宽屏给容器满高 + column-fill: auto，
-    于是内容先填满一列的高度再开下一列，列数不够就往右边溢出，由外层 overflow-auto
-    横向滚动——「适应窗口高度、不垂直滚动」就是这么来的。列宽固定，不会因为项目多
-    而越排越窄。Tailwind 4 没有 column-fill 的工具类，所以整块写在这里。
-  */
-  .list-columns {
-    columns: 1;
-  }
-
-  @media (width >= 64rem) {
-    .list-columns {
-      height: 100%;
-      columns: 26rem;
-      column-fill: auto;
-    }
   }
 
   /*
@@ -206,6 +219,19 @@
 
   .app-dialog .el-dialog__header {
     flex: 0 0 auto;
+  }
+
+  /*
+    少数弹窗（设置）要**适应内容**：内容不多时不要白白撑到 90% 那么高，但内容多了
+    也不能超过它。高度交回给内容，上限和 .app-dialog 一样（90vh 与让开键盘后的可视
+    高度取小），居中由弹窗自己的 align-center 负责。
+
+    `.el-dialog__body` 的 `flex: 1 1 auto` + `overflow-y: auto` 照旧生效：内容没超上限时
+    弹窗就是内容的高度，超了就在这里滚（弹窗本身不滚）。
+  */
+  .app-dialog-auto {
+    height: auto;
+    max-height: min(90vh, calc(var(--vv-height, 100vh) - 2rem));
   }
 
   .app-dialog .el-dialog__body {
@@ -247,6 +273,26 @@
  * 开关这类小控件（.form-row-inline）分成两行只会白占一行高度，仍然并排、整体左对齐。
  */
 @layer utilities {
+  /*
+    「悬停才出现」的关闭按钮（.hover-reveal 挂在关闭图标上，父元素挂 .group）。
+
+    **不要**用 Tailwind 的 `opacity-0 group-hover:opacity-100`：Tailwind 4 给 hover /
+    group-hover 变体自带 `@media (hover: hover)`，在没有指针悬停的设备上（触屏平板、
+    触屏笔记本用手指时）那条规则永远不生效，元素就一直停在 `opacity-0` 上——按钮等于
+    不存在（平板上就是这么丢的，`.tab-chip` 那套也是同一个坑）。这里反过来写：默认常显，
+    只有真的能悬停的设备才收起来。
+  */
+  @media (hover: hover) {
+    .hover-reveal {
+      opacity: 0;
+    }
+
+    .group:hover .hover-reveal,
+    .group:focus-within .hover-reveal {
+      opacity: 1;
+    }
+  }
+
   .form-stack .form-row {
     display: flex;
     flex-direction: column;

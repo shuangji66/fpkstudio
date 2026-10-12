@@ -21,9 +21,10 @@ make clean               # 删二进制与 embed
 
 cd frontend
 npm run typecheck        # vue-tsc，类型检查（改了 .vue / .ts 必跑）
-npm run check            # 九个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
-                         #   （含 manifest 回写）+ 多选下拉的标签排版 + 编辑器脏判据/切视图交棒
-                         #   + 语义路径 + 文件管理器 store（重命名 / 保存 / 剪贴板）
+npm run check            # 十个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
+                         #   （含 manifest 回写）+ 多选下拉的标签排版 + 首页分页排版
+                         #   + 编辑器脏判据/切视图交棒 + 语义路径
+                         #   + 文件管理器 store（重命名 / 保存 / 剪贴板）
                          #   + 日志 store（后端重启后的去重游标）
 npm run build            # vite 构建到 frontend/dist
 ```
@@ -122,6 +123,20 @@ frontend/src/
   `form-row-inline`），表单根节点在窄屏下挂 `form-stack`（`:class="{ 'form-stack':
   layout.isMobile }"`），桌面那套「固定宽度右对齐标题 + 控件」由元素上的 Tailwind 类
   保留、窄屏的竖排由 `style.css` 覆盖。新写表单照这个来，别自己再排一套。
+  **manifest / 入口配置 / 运行身份这几份表单是另一套**（`ManifestEditor` /
+  `UiConfigEditor` / `PrivilegeEditor`）：桌面就是标题一行、控件一行，一行里放一组字段
+  （manifest 的 `rows`，一项 = 一行；列数按组里几个字段算，`grid-cols-*` 必须写字面量
+  ——Tailwind 扫不到拼出来的类名），窄屏下 `form-stack` 再把分组拆成一行一个。运行身份
+  只有一列，两种布局完全一样，所以它不挂 `form-stack`。**拆开后的顺序就是 DOM 顺序**，
+  桌面上的配对和它不一致时（`rows` 里的 `grid`: manifest 的开发者 / 发布者那组）得用
+  `grid-flow-col` 之类把它折回去，别靠改 DOM 顺序解决——那样窄屏会读错序。
+  `ResourceEditor`（资源声明）也是「标题一行、控件一行」，只是它按块手写、没走
+  `form-row` / `form-stack`，写它的时候照抄同一套排布（字号 14px：标签 `text-sm`、
+  控件 `size="default"`，全局配的 `size: 'small'` 是 12px）。
+  **总览 / 快捷设置 / 图标这页三个面板也是 14px**（`OverviewPanel` / `ShortcutsPanel` /
+  `IconPanel` / `IconTargetRow`）：文本 `text-sm`、带字的控件 `size="default"`，
+  `el-tag` 要挂 `class="text-sm"`（它的字号写死在 `--el-tag-font-size` 里，size 只改
+  高度和内边距），不带字的图标按钮保持 `size="small"`。
 - **多选下拉（`multiple` + `collapse-tags`）一律用 `components/editor/TagSelect.vue`**，
   别直接写 `el-select`：`collapse-tags` 是按**个数**折叠的（`max-collapse-tags`，默认 1），
   根本不看容器多宽——600px 宽的字段也会显示成「第 1 个 +3」。TagSelect 每轮排版量一次
@@ -130,9 +145,12 @@ frontend/src/
   照原样透传；**没挂 `collapse-tags` 的多选不算这类问题**（它会自己折行，不隐藏），
   不用改。
 - **弹窗只有一种形态**：所有 `el-dialog` 都挂 `class="app-dialog"` +
-  `modal-class="app-modal"`（样式在 `style.css`：90vh、居中、正文自己滚、遮罩模糊），
+  `modal-class="app-modal"`（样式在 `style.css`：居中、正文自己滚、遮罩模糊），
   再加 `align-center` / `lock-scroll` / `append-to-body`。**新加弹窗照抄这三个属性和
   两个类**，别再各写一套尺寸——「每个弹窗长得都不一样」正是这次统一掉的东西。
+  高度默认固定 90% 视口高；内容不多的再挂 `app-dialog-auto`（高度跟内容走，上限仍是
+  `min(90vh, var(--vv-height) - 2rem)`），别让几行的设置弹窗空出半个屏幕。
+  弹窗标题是 Element Plus 的 18px 默认值，**正文一律 14px**（log 那条 xterm 也是）。
 - **语言包两份必须同步**。`npm run check:i18n` 会挡住键不一致；消息里的 `{` 是插值语法，
   想写字面量 `{` 要转义。一条消息写错，表现是「渲染到那个组件时整个弹窗画不出来」。
 - **`utils/` 里不引 `vue-i18n`**：需要给用户看的错误在 `utils/` 里只给 **i18n 键**
@@ -143,10 +161,41 @@ frontend/src/
   开发）时不判——那种部署下 socket 权限就是边界。
 - **`utils/` 里的纯逻辑要能单独验**。解析 / 回写 / 几何这类会写坏用户文件或算错图的计算，
   放 `utils/` 并在 `frontend/scripts/check-*.mjs` 里加断言，别塞进组件里只靠手点。
+- **首页项目的两种视图**（`HomeTab.vue`）：平铺 = `auto-fill` 自适应列宽 + 整页滚动；
+  分页 = 一页铺满容器 + 顶栏翻页。每页几个由 `utils/paging.ts` 的 `fitGrid` 从项目区的
+  实际尺寸算（`ResizeObserver` + 扣掉 `p-4` 内边距），**别写死一个每页数**：窗口一变就
+  会露出「底部空一条」或者「最后一排被切掉」。分页网格的行高必须 `1fr` 均分，列数 / 行数
+  走 inline style（拼出来的 `grid-cols-${n}` Tailwind 扫不到）。列表视图已经删掉了，
+  别再往 `ProjectCard` 里加第二种排布。**换页栏在顶栏**（工具条下面）、**项目计数 + 称号
+  在最后一行卡片下面**（居中 + 分隔线，两种视图都有）；称号分六档（`rankKeyFor`，边界归
+  下档），分页算每页几个时要把计数行的高度扣掉（`footReserve`）。
 - **前端只用 Composition API + `<script setup lang="ts">`**，SFC 段落顺序
   `<script>` → `<template>` → `<style>`。组件超过一个明确职责就拆。
 - **UI 文案全部走 i18n**，不要在组件里硬编码中文（历史遗留：manifest 的
-  `platform` / `source` / `install_type` 选项直接写在字段表里，改文案时注意两份语言包都要动）。
+  `platform` 选项直接写在字段表里，改文案时注意两份语言包都要动）。
+- **界面字号统一 14px**（现在首页和弹窗也是）：带字的控件显式 `size="default"`
+  （全局配的是 `size: 'small'` = 12px），`el-tag` 还要 `class="text-sm"`（它的字号
+  写死在 `--el-tag-font-size` 里，size 只改高度内边距）；**只有图标**的按钮保持
+  `size="small"`。子标签字号在 `style.css` 的 `.subtab`，`.label-text` 那类 12px 的
+  标签在新写的界面里直接用 `text-sm font-medium ...`。唯一的大字号是设置弹窗里的
+  「关于」标题（`text-lg`，和弹窗自己的标题「设置」一样大——那本来就是
+  `--el-dialog-title-font-size` 的默认值）。
+- **删除按钮红色、重要的删除要确认**：`text` + `type="danger"`；删掉一整块内容
+  （步骤、入口、共享目录、图标组、项目、文件）之前 `ElMessageBox.confirm`，只丢一行的
+  （字段 / 选项 / 校验）不问——逐条问会让人不敢动手。
+- **左栏文件树的宽度上限是窗口宽度的一半**（`ProjectTab.vue` 的 `treeMax()`，每次拖
+  现算 + 从 localStorage 读回来时钳一次）：别写死像素值，窄窗口上会把编辑区挤没。
+  拖动有两个入口：那条 1px 的分隔线，和树顶栏右侧吸在分隔线上的手柄按钮（`FileTree`
+  抛 `resize-start` 事件，逻辑仍在 `ProjectTab`）。手柄要带 `touch-none`，否则触屏会把
+  `pointermove` 当成滚动手势收走；手指点不中 1px 的线，所以这个按钮是**必须**的。
+- **图片预览（`ImagePreview`，含 svg 的预览面）没有可存的内容**：`EditorHost` 按
+  `registry` 里的 `previews` + 当前视图把「还原 / 保存」藏掉（`previewOnly`），
+  别再让它们灰在那里占位置。
+- **语言偏好（中文 / English / 跟随系统）在 `stores/locale.ts` + `i18n/index.ts`**，
+  记在 localStorage 的 `fpkstudio.locale`（默认跟随系统）。切语言要**三处一起换**：
+  vue-i18n 的 locale、`html lang`、Element Plus 的语言包——都收在 `applyLocale()` 里。
+  Element Plus 的全局配置对象（`elementOptions`）**必须是 reactive 的**再交给 `app.use`，
+  否则命令式 API（`ElMessage` / `ElMessageBox`）拿不到新语言。
 - **主题开关就是 `html.dark`**。Tailwind 的 `dark:` 变体（在 `style.css` 里用
   `@custom-variant dark` 改成认这个类）和 Element Plus 的暗色变量挂在一起，
   由 `stores/theme.ts` 统一切。**新写界面时每个浅色都配一个 `dark:` 变体**，
@@ -274,9 +323,15 @@ frontend/src/
   留在屏幕上不消失。**工具栏按钮的说明一律挂原生 `title`**（同时给 `aria-label`）：
   系统提示由浏览器接管，移开即消失、触屏上根本不出现。文件管理器的两个工具栏
   （`FileTree.vue` / `FileBrowser.vue`）已经全部改完；只有要富文本说明的地方
-  （`ManifestEditor.vue` 字段旁那个问号）还留着 `el-tooltip`。**新加工具栏按钮不要再加
-  `el-tooltip`**。同理 `opacity-0 group-hover:opacity-100` 这种「悬停才出现」的按钮
-  在触屏上等于不存在（项目标签的关闭按钮就踩过），移动端要常显。
+  （`ManifestEditor.vue` 字段旁、`ResourceEditor.vue` API 授权项旁那个问号）还留着
+  `el-tooltip`。**新加工具栏按钮不要再加 `el-tooltip`**。
+- **关闭按钮只有一种形态：红色小叉，且「悬停才出现」要认设备能力**。标签上的关闭按钮
+  挂 `class="close-x hover-reveal"`（样式在 `style.css`），弹窗的（`el-dialog` /
+  `el-message-box`）也在 `style.css` 里统一覆盖成红色——**不要**再各自写颜色类。
+  **不要**用 `opacity-0 group-hover:opacity-100` 写「悬停才出现」：Tailwind 4 给 hover /
+  group-hover 变体自带 `@media (hover: hover)`，没有指针悬停的设备（触屏平板）上那条
+  规则永远不生效，元素就一直停在 `opacity-0`——按钮等于不存在（平板上就是这么丢的）。
+  `.hover-reveal` 反过来写：默认常显，只有能悬停的设备才收起来（父元素要挂 `group`）。
 - **移动端输入框字号是 16px**（`style.css`）：iOS Safari 聚焦小于 16px 的输入框会把整个
   页面放大且不缩回去，`user-scalable=no` 从 iOS 10 起被忽略，只能靠字号挡。别把窄屏下
   的输入框字号改回 12–14px。

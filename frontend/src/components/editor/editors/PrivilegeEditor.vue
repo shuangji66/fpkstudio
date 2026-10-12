@@ -1,63 +1,62 @@
 <template>
-  <div
-    class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3"
-    :class="{ 'form-stack': layout.isMobile }"
-  >
+  <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3">
     <div class="mx-auto max-w-2xl">
       <div v-if="model.error" class="mb-3 rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300">
         {{ t('editor.readFailed') }}: {{ model.error }}
       </div>
 
-      <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.runAs') }}</span>
-        <el-select v-model="model.root.defaults['run-as']" size="small" class="w-64">
+      <!--
+        和 manifest / 入口配置同一套排法：标题一行、控件一行、字号 14px。
+        桌面和窄屏是同一种排布，所以这里不挂 form-stack——那是给「桌面两列、窄屏竖排」
+        的表单用的，这份表单本来就是竖排。
+      -->
+      <div class="form-row flex flex-col gap-1 py-2">
+        <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('privilege.runAs') }}</span>
+        <el-select v-model="model.root.defaults['run-as']" size="default">
           <el-option :label="t('privilege.package')" value="package" />
           <el-option :label="t('privilege.root')" value="root" />
         </el-select>
       </div>
 
-      <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.username') }}</span>
+      <div class="form-row flex flex-col gap-1 py-2">
+        <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('privilege.username') }}</span>
         <el-input
           v-model="model.root.username"
-          size="small"
-          class="w-64"
+          size="default"
           :placeholder="t('privilege.usernamePlaceholder')"
         />
       </div>
 
-      <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-2">
-        <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.groupname') }}</span>
+      <div class="form-row flex flex-col gap-1 py-2">
+        <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('privilege.groupname') }}</span>
         <el-input
           v-model="model.root.groupname"
-          size="small"
-          class="w-64"
+          size="default"
           :placeholder="t('privilege.groupnamePlaceholder')"
         />
       </div>
 
-      <div class="form-row grid grid-cols-[10rem_1fr] items-start gap-x-3 py-2">
-        <span class="form-label pt-1.5 text-right text-xs text-slate-600 dark:text-slate-300">{{ t('privilege.joinGroups') }}</span>
+      <div class="form-row flex flex-col gap-1 py-2">
+        <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('privilege.joinGroups') }}</span>
         <el-select
           v-model="model.root['join-groups']"
-          size="small"
+          size="default"
           multiple
           filterable
           allow-create
           default-first-option
-          class="w-64"
           placeholder="video / render"
         >
           <el-option v-for="item in model.root['join-groups']" :key="item" :label="item" :value="item" />
         </el-select>
       </div>
 
-      <p class="mt-3 rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+      <p class="mt-3 rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
         {{ t('privilege.hint') }}
       </p>
       <p
         v-if="model.root.defaults['run-as'] === 'root'"
-        class="mt-2 flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200"
+        class="mt-2 flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm leading-relaxed text-amber-800 dark:text-amber-200"
       >
         <el-icon class="mt-0.5 shrink-0"><WarningFilled /></el-icon>
         {{ t('privilege.rootWarning') }}
@@ -69,7 +68,6 @@
 <script setup lang="ts">
 import { WarningFilled } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
-import { useLayoutStore } from '@/stores/layout'
 import { parseJSON, stringifyOrdered, useEditor, type EditorProps } from '../useEditor'
 
 interface PrivRoot {
@@ -88,7 +86,6 @@ interface Model {
 const props = defineProps<EditorProps>()
 const emit = defineEmits<{ dirty: [value: boolean] }>()
 const { t } = useI18n()
-const layout = useLayoutStore()
 
 const { model, api } = useEditor<Model>(
   props,

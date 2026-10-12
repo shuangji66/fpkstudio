@@ -2,7 +2,7 @@
   <el-dialog
     v-model="open"
     :title="t('settings.title')"
-    class="app-dialog"
+    class="app-dialog app-dialog-auto"
     modal-class="app-modal"
     :width="layout.isMobile ? '95%' : '640px'"
     align-center
@@ -13,13 +13,13 @@
     <div class="flex flex-col gap-5">
       <!-- 主题 -->
       <section>
-        <p class="label-text mb-2">{{ t('settings.theme.title') }}</p>
+        <p class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">{{ t('settings.theme.title') }}</p>
         <!-- 三个主题各是一个独立按钮（不是连成一排的分段控件） -->
         <div class="flex flex-wrap items-center gap-2">
           <el-button
             v-for="mode in THEME_MODES"
             :key="mode"
-            size="small"
+            size="default"
             :type="theme.mode === mode ? 'primary' : 'default'"
             @click="onTheme(mode)"
           >
@@ -28,14 +28,30 @@
         </div>
       </section>
 
+      <!-- 语言 -->
+      <section>
+        <p class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">{{ t('settings.locale.title') }}</p>
+        <div class="flex flex-wrap items-center gap-2">
+          <el-button
+            v-for="item in LOCALE_MODES"
+            :key="item.value"
+            size="default"
+            :type="language.mode === item.value ? 'primary' : 'default'"
+            @click="language.setMode(item.value)"
+          >
+            {{ t(item.labelKey) }}
+          </el-button>
+        </div>
+      </section>
+
       <!-- 界面形态 -->
       <section>
-        <p class="label-text mb-2">{{ t('settings.layout.title') }}</p>
+        <p class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">{{ t('settings.layout.title') }}</p>
         <div class="flex flex-wrap items-center gap-2">
           <el-button
             v-for="mode in LAYOUT_MODES"
             :key="mode"
-            size="small"
+            size="default"
             :type="layout.mode === mode ? 'primary' : 'default'"
             @click="layout.setMode(mode)"
           >
@@ -47,11 +63,11 @@
       <!-- 目录设置 -->
       <section>
         <div class="mb-2 flex items-center gap-2">
-          <p class="label-text">{{ t('settings.dirs.title') }}</p>
+          <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ t('settings.dirs.title') }}</p>
           <span class="flex-1" />
           <span
             v-if="info && !info.trim.available"
-            class="text-[11px] text-amber-600 dark:text-amber-400"
+            class="text-sm text-amber-600 dark:text-amber-400"
           >
             {{ info.trim.message }}
           </span>
@@ -91,7 +107,7 @@
 
         <p
           v-if="semanticsError"
-          class="mt-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400"
+          class="mt-2 text-sm leading-relaxed text-amber-600 dark:text-amber-400"
         >
           {{ t('settings.dirs.semanticFailed', { error: semanticsError }) }}
         </p>
@@ -103,7 +119,7 @@
       -->
       <section class="border-t border-slate-200 pt-3 dark:border-slate-700">
         <div class="flex items-center gap-2">
-          <span class="label-text">{{ t('settings.about.title') }}</span>
+          <span class="text-lg font-medium text-slate-700 dark:text-slate-200">{{ t('settings.about.title') }}</span>
           <a
             :href="REPO_URL"
             target="_blank"
@@ -120,10 +136,10 @@
             </svg>
           </a>
         </div>
-        <p class="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+        <p class="mt-1.5 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
           {{ t('settings.about.desc') }}
         </p>
-        <p class="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+        <p class="mt-1.5 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
           {{ t('settings.about.thanks') }}
         </p>
       </section>
@@ -148,15 +164,29 @@ import { isHostAvailable, openInFileManager, pickUserDirectory } from '@/trim/sd
 import { trimErrorMessage } from '@/trim/errors'
 import { indexSemantics } from '@/utils/semantic'
 import { useThemeStore, type ThemeMode } from '@/stores/theme'
+import { useLocaleStore } from '@/stores/locale'
+import type { LocaleMode } from '@/i18n'
 import { useLayoutStore, type LayoutMode } from '@/stores/layout'
 
 type Slot = 'projectRoot' | 'outputDir'
 
 /** 主题按钮的取值顺序，文案走 i18n 的 settings.theme.<mode>。 */
+/** 主题的三档（按钮顺序）。 */
 const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system']
 
-/** 界面形态按钮的取值顺序，文案走 i18n 的 settings.layout.<mode>。 */
-const LAYOUT_MODES: LayoutMode[] = ['auto', 'desktop', 'mobile']
+/** 语言的三档；「跟随系统」是默认值，也是没存过偏好时的落点。 */
+const LOCALE_MODES: { value: LocaleMode; labelKey: string }[] = [
+  { value: 'zh-CN', labelKey: 'settings.locale.zh' },
+  { value: 'en-US', labelKey: 'settings.locale.en' },
+  { value: 'system', labelKey: 'settings.locale.system' },
+]
+
+/**
+ * 界面形态的取值顺序（文案走 i18n 的 `settings.layout.<mode>`）。
+ *
+ * 「自动」放最后：和主题、语言那两组的第三格对齐（具体值在前，跟随 / 自动那类兜底项在后）。
+ */
+const LAYOUT_MODES: LayoutMode[] = ['desktop', 'mobile', 'auto']
 
 /** 仓库地址：关于一节里的图标链到这里。 */
 const REPO_URL = 'https://github.com/shuangji66/fpkstudio'
@@ -167,8 +197,9 @@ const open = defineModel<boolean>({ required: true })
 /** 目录设置真的变了才通知外面刷新项目列表（主题变了不用）。 */
 const emit = defineEmits<{ saved: [] }>()
 
-const { t, te, locale } = useI18n()
+const { t, te, locale: i18nLocale } = useI18n()
 const theme = useThemeStore()
+const language = useLocaleStore()
 const layout = useLayoutStore()
 
 const info = ref<SettingsInfo | null>(null)
@@ -234,7 +265,7 @@ async function refreshPathInfo() {
   if (!paths.length || !info.value?.trim.available) return
 
   try {
-    semantics.value = indexSemantics(paths, await convertPaths(paths, locale.value))
+    semantics.value = indexSemantics(paths, await convertPaths(paths, i18nLocale.value))
   } catch (e) {
     semanticsError.value = fail(e)
   }

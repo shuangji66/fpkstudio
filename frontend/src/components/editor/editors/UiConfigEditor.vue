@@ -42,8 +42,7 @@
         >
           <span class="truncate">{{ entry.id }}</span>
           <el-icon
-            class="shrink-0 rounded text-[11px] text-slate-400 dark:text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200"
-            :class="layout.isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+            class="close-x hover-reveal text-[11px] transition-opacity"
             :title="t('uiConfig.removeEntry')"
             :aria-label="t('uiConfig.removeEntry')"
             @click.stop="removeEntry(entry.id)"
@@ -64,93 +63,119 @@
         </div>
 
         <template v-if="current">
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.entryId') }}</span>
-            <el-input
-              v-model="idDraft"
-              size="small"
-              class="mono w-64"
-              placeholder="myapp.Application"
-              @keydown.enter="commitId"
-              @blur="commitId"
-            />
+          <!--
+            和 manifest 的表单同一套排法：一行一组字段，组里每个字段「标题一行、控件一行」，
+            标题和控件都是 14px（控件显式 size="default"，全局配的是 small = 12px）。
+            窄屏下 .form-stack 把每行拆成一行一个。
+          -->
+          <div class="form-row grid grid-cols-2 gap-x-3 gap-y-1.5 py-1.5">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.entryId') }}</span>
+              <el-input
+                v-model="idDraft"
+                size="default"
+                class="mono"
+                placeholder="myapp.Application"
+                @keydown.enter="commitId"
+                @blur="commitId"
+              />
+            </div>
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.title') }}</span>
+              <el-input v-model="current.value.title" size="default" />
+            </div>
           </div>
 
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.title') }}</span>
-            <el-input v-model="current.value.title" size="small" class="w-64" />
+          <div class="form-row grid grid-cols-2 gap-x-3 gap-y-1.5 py-1.5">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.icon') }}</span>
+              <el-input v-model="current.value.icon" size="default" placeholder="images/icon_{0}.png" />
+            </div>
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.type') }}</span>
+              <el-select v-model="current.value.type" size="default">
+                <el-option :label="t('uiConfig.typeIframe')" value="iframe" />
+                <el-option :label="t('uiConfig.typeUrl')" value="url" />
+              </el-select>
+            </div>
           </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.icon') }}</span>
-            <el-input v-model="current.value.icon" size="small" class="w-64" placeholder="images/icon_{0}.png" />
+
+          <!--
+            协议 + 端口占一半、路径独占另一半：路径会比协议 / 端口长得多，平均分三列时
+            它反而不够填。里面这一对短的也不再往下拆（窄屏下同样并排）。
+          -->
+          <div class="form-row grid grid-cols-2 gap-x-3 gap-y-1.5 py-1.5">
+            <div class="grid grid-cols-2 gap-x-3">
+              <div class="flex min-w-0 flex-col gap-1">
+                <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.protocol') }}</span>
+                <el-select v-model="current.value.protocol" size="default">
+                  <el-option :label="t('uiConfig.autoAdaptive')" value="" />
+                  <el-option label="http" value="http" />
+                  <el-option label="https" value="https" />
+                </el-select>
+              </div>
+              <div class="flex min-w-0 flex-col gap-1">
+                <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.port') }}</span>
+                <el-input v-model="current.value.port" size="default" placeholder="${wizard_port}" />
+              </div>
+            </div>
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.url') }}</span>
+              <el-input v-model="current.value.url" size="default" />
+            </div>
           </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.type') }}</span>
-            <el-select v-model="current.value.type" size="small" class="w-64">
-              <el-option :label="t('uiConfig.typeIframe')" value="iframe" />
-              <el-option :label="t('uiConfig.typeUrl')" value="url" />
-            </el-select>
+
+          <div class="form-row grid grid-cols-2 gap-x-3 gap-y-1.5 py-1.5">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewayPrefix') }}</span>
+              <el-input v-model="current.value.gatewayPrefix" size="default" placeholder="/app/myapp" />
+            </div>
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewaySocket') }}</span>
+              <el-input v-model="current.value.gatewaySocket" size="default" placeholder="app.sock" />
+            </div>
           </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.protocol') }}</span>
-            <el-select v-model="current.value.protocol" size="small" class="w-64">
-              <el-option :label="t('uiConfig.autoAdaptive')" value="" />
-              <el-option label="http" value="http" />
-              <el-option label="https" value="https" />
-            </el-select>
+
+          <!-- 关联文件类型：多选标签要宽度，自己占一整行（没挂 collapse-tags，会自己折行） -->
+          <div class="form-row grid grid-cols-1 gap-x-3 gap-y-1.5 py-1.5">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.fileTypes') }}</span>
+              <el-select
+                v-model="current.value.fileTypes"
+                size="default"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+              >
+                <el-option v-for="item in current.value.fileTypes" :key="item" :label="item" :value="item" />
+              </el-select>
+            </div>
           </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.port') }}</span>
-            <el-input v-model="current.value.port" size="small" class="w-64" placeholder="${wizard_port}" />
-          </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.url') }}</span>
-            <el-input v-model="current.value.url" size="small" class="w-64" />
-          </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewayPrefix') }}</span>
-            <el-input v-model="current.value.gatewayPrefix" size="small" class="w-64" placeholder="/app/myapp" />
-          </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.gatewaySocket') }}</span>
-            <el-input v-model="current.value.gatewaySocket" size="small" class="w-64" placeholder="app.sock" />
-          </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.fileTypes') }}</span>
-            <el-select
-              v-model="current.value.fileTypes"
-              size="small"
-              class="w-64"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-            >
-              <el-option v-for="item in current.value.fileTypes" :key="item" :label="item" :value="item" />
-            </el-select>
-          </div>
-          <div class="form-row grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.accessPerm') }}</span>
-            <!-- 所有用户可见时，逐个用户的权限设置没有意义，直接禁用 -->
-            <el-select
-              v-model="current.value.control.accessPerm"
-              size="small"
-              class="w-64"
-              :disabled="current.value.allUsers"
-            >
-              <el-option :label="t('uiConfig.permEditable')" value="editable" />
-              <el-option :label="t('uiConfig.permReadonly')" value="readonly" />
-              <el-option :label="t('uiConfig.permHidden')" value="hidden" />
-            </el-select>
-          </div>
-          <!-- 开关是小控件，窄屏下也不用分行（form-row-inline） -->
-          <div class="form-row form-row-inline grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.allUsers') }}</span>
-            <el-switch v-model="current.value.allUsers" />
-          </div>
-          <div class="form-row form-row-inline grid grid-cols-[10rem_1fr] items-center gap-x-3 py-1.5">
-            <span class="form-label text-right text-xs text-slate-600 dark:text-slate-300">{{ t('uiConfig.noDisplay') }}</span>
-            <el-switch v-model="current.value.noDisplay" />
+
+          <!-- 入口设置权限 + 两个开关一行 -->
+          <div class="form-row grid grid-cols-3 gap-x-3 gap-y-1.5 py-1.5">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.accessPerm') }}</span>
+              <!-- 所有用户可见时，逐个用户的权限设置没有意义，直接禁用 -->
+              <el-select
+                v-model="current.value.control.accessPerm"
+                size="default"
+                :disabled="current.value.allUsers"
+              >
+                <el-option :label="t('uiConfig.permEditable')" value="editable" />
+                <el-option :label="t('uiConfig.permReadonly')" value="readonly" />
+                <el-option :label="t('uiConfig.permHidden')" value="hidden" />
+              </el-select>
+            </div>
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.allUsers') }}</span>
+              <el-switch v-model="current.value.allUsers" />
+            </div>
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="form-label text-sm text-slate-600 dark:text-slate-300">{{ t('uiConfig.noDisplay') }}</span>
+              <el-switch v-model="current.value.noDisplay" />
+            </div>
           </div>
         </template>
 
@@ -163,7 +188,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Plus } from '@element-plus/icons-vue'
 import { revealActive, wheelToHorizontal } from '@/utils/scroll'
 import { useLayoutStore } from '@/stores/layout'
@@ -369,11 +394,22 @@ function commitAdd() {
 /**
  * 删掉一个入口。
  *
+ * 先确认：入口里可能填了一整屏内容，误点一下就没了（而且这一页没有撤销）。
+ *
  * 删除入口的入口从表单里挪到了标签上的 ×，所以这里不能再无脑把选中项拨回第一个：
  * 删的是别的标签时用户的视线还留在原来那个入口上，跳走等于让他丢上下文。
  * 删的正好是当前这个，才顺势选它前面那个（第一个就往后选）。
  */
-function removeEntry(id: string) {
+async function removeEntry(id: string) {
+  try {
+    await ElMessageBox.confirm(
+      t('uiConfig.removeEntryConfirm', { name: id }),
+      t('common.tip'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return
+  }
   const at = Object.keys(model.value.urls).indexOf(id)
   delete model.value.urls[id]
   if (selected.value !== id) return

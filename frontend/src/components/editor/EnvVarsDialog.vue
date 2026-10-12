@@ -10,12 +10,12 @@
     append-to-body
     :close-on-click-modal="false"
   >
-    <p class="mb-2 rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+    <p class="mb-2 rounded-md bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
       {{ t('envVars.hint') }}
       <code class="mono rounded bg-white dark:bg-slate-800 px-1 text-slate-700 dark:text-slate-200">${TRIM_APPNAME}</code>
     </p>
 
-    <div v-if="loading" class="py-6 text-center text-xs text-slate-400 dark:text-slate-500">
+    <div v-if="loading" class="py-6 text-center text-sm text-slate-400 dark:text-slate-500">
       {{ t('common.loading') }}
     </div>
 
@@ -26,11 +26,11 @@
         class="rounded-lg border border-slate-200 dark:border-slate-700"
       >
         <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-1.5">
-          <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t(section.labelKey) }}</span>
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t(section.labelKey) }}</span>
           <span class="flex-1" />
-          <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ section.rows.length }}</span>
+          <span class="text-sm text-slate-400 dark:text-slate-500">{{ section.rows.length }}</span>
         </header>
-        <p v-if="section.noteKey" class="px-3 pt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+        <p v-if="section.noteKey" class="px-3 pt-1.5 text-sm text-slate-400 dark:text-slate-500">
           {{ t(section.noteKey) }}
         </p>
         <ul class="divide-y divide-slate-100 dark:divide-slate-700">
@@ -43,15 +43,15 @@
           <li v-for="row in section.rows" :key="row.name" class="flex flex-wrap items-start gap-2 px-3 py-1">
             <button
               type="button"
-              class="mono min-w-0 rounded px-1 text-left text-[11px] break-all text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              class="mono min-w-0 rounded px-1 text-left text-sm break-all text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40"
               :title="t('envVars.copyHint')"
               @click="copy(row.name)"
             >
               {{ row.name }}
             </button>
-            <span class="min-w-0 flex-1 text-[11px] leading-relaxed break-words whitespace-pre-wrap text-slate-600 dark:text-slate-300">{{ row.desc }}</span>
+            <span class="min-w-0 flex-1 text-sm leading-relaxed break-words whitespace-pre-wrap text-slate-600 dark:text-slate-300">{{ row.desc }}</span>
           </li>
-          <li v-if="!section.rows.length" class="px-3 py-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+          <li v-if="!section.rows.length" class="px-3 py-1.5 text-sm text-slate-400 dark:text-slate-500">
             {{ t('common.empty') }}
           </li>
         </ul>

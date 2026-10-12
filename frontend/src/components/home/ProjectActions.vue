@@ -6,14 +6,14 @@
   <div class="inline-flex items-center" @click.stop @keydown.stop>
     <el-button
       text
-      size="small"
+      size="default"
       :icon="FolderOpened"
       :disabled="!canOpenFolder"
       :title="canOpenFolder ? t('home.openFolder') : t('trim.error.hostUnavailable')"
       @click="openFolder"
     />
     <el-dropdown trigger="click" placement="bottom-end" @command="run">
-      <el-button text size="small" :icon="MoreFilled" :title="t('home.more')" />
+      <el-button text size="default" :icon="MoreFilled" :title="t('home.more')" />
       <template #dropdown>
         <el-dropdown-menu>
           <el-dropdown-item command="rename" :icon="EditPen">

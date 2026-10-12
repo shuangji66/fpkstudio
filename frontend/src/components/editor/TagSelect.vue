@@ -2,7 +2,7 @@
   <el-select
     ref="selectRef"
     :model-value="modelValue"
-    size="small"
+    :size="size ?? 'small'"
     multiple
     filterable
     allow-create
@@ -49,6 +49,8 @@ interface Props {
   options: (string | TagSelectOption)[]
   placeholder?: string
   popperClass?: string
+  /** el-select 的尺寸；默认 small（全局配的也是 small）。 */
+  size?: 'small' | 'default' | 'large'
 }
 
 const props = defineProps<Props>()

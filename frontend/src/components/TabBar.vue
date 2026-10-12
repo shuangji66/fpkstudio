@@ -26,12 +26,9 @@
       />
       <el-icon
         v-if="tab.closable"
-        class="shrink-0 rounded text-[12px] text-slate-400 transition-opacity hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200"
-        :class="
-          layout.isMobile
-            ? 'opacity-100 dark:text-slate-400'
-            : 'opacity-0 dark:text-slate-500 group-hover:opacity-100'
-        "
+        class="close-x hover-reveal text-[12px] transition-opacity"
+        :title="t('tab.close')"
+        :aria-label="t('tab.close')"
         @click.stop="close(tab)"
       >
         <Close />
@@ -59,7 +56,6 @@
 import { nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
-import { useLayoutStore } from '@/stores/layout'
 import { useTabsStore, type Tab } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { revealActive, wheelToHorizontal } from '@/utils/scroll'
@@ -67,7 +63,6 @@ import { revealActive, wheelToHorizontal } from '@/utils/scroll'
 const { t } = useI18n()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
-const layout = useLayoutStore()
 
 const menu = reactive({ show: false, x: 0, y: 0, id: '' })
 const scroller = ref<HTMLElement | null>(null)

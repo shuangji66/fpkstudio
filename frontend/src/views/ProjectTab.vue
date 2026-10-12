@@ -5,7 +5,7 @@
       class="flex shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
       :style="{ width: `${treeWidth}px` }"
     >
-      <FileTree :project="name" />
+      <FileTree :project="name" @resize-start="startResize" />
     </aside>
 
     <div
@@ -104,14 +104,30 @@ const activeTab = computed(() => state.value.activeTab)
 /** 左栏文件树只在「左栏模式」下占地方；移动端永远没有它。 */
 const showTree = computed(() => !props.mobile && state.value.viewMode === 'tree')
 
+/** 左栏能拉到的最小宽度：再窄工具栏就摆不下了。 */
+const TREE_MIN = 180
+
+/**
+ * 左栏能拉到的最大宽度：**窗口宽度的一半**。
+ *
+ * 每次拖都现算，而不是写死一个像素值：写死 640 在窄窗口上等于「能把编辑区挤到只剩
+ * 两百来像素」，而窗口拉宽之后那个上限又白白浪费——反正右边永远得留一半给编辑区。
+ */
+function treeMax() {
+  return Math.max(TREE_MIN, Math.floor(window.innerWidth / 2))
+}
+
 const stored = window.localStorage.getItem('fpkstudio.treeWidth')
-const treeWidth = ref(stored ? Number(stored) : 300)
+// 宽度记在 localStorage 里，换到窄窗口 / 小屏上打开时要按新窗口重新钳一次
+const treeWidth = ref(Math.min(stored ? Number(stored) : 300, treeMax()))
 
 function startResize(event: PointerEvent) {
+  // 手柄是按钮，不挡一下的话按下会顺手选中/聚焦（触屏上还会触发一次点击）
+  event.preventDefault()
   const startX = event.clientX
   const startWidth = treeWidth.value
   const move = (e: PointerEvent) => {
-    treeWidth.value = Math.min(Math.max(startWidth + (e.clientX - startX), 180), 640)
+    treeWidth.value = Math.min(Math.max(startWidth + (e.clientX - startX), TREE_MIN), treeMax())
   }
   const up = () => {
     window.removeEventListener('pointermove', move)

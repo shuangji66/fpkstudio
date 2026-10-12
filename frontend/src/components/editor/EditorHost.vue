@@ -39,21 +39,24 @@
       </div>
 
       <div class="ml-auto flex flex-wrap items-center gap-2">
-        <el-radio-group v-if="def.hasForm && tab.text" v-model="mode" size="small">
-          <el-radio-button value="form">{{ t('editor.form') }}</el-radio-button>
-          <el-radio-button value="source">{{ t('editor.source') }}</el-radio-button>
-        </el-radio-group>
+        <!--
+          表单 ⇄ 源码：一个按钮，字面写的是**当前**那个视图，点一下换过去。以前是两格的
+          单选滑块，工具栏里就它一种别的控件形态，看着像是另一个工具栏。
+        -->
+        <el-button v-if="def.hasForm && tab.text" size="default" @click="toggleMode">
+          {{ t(mode === 'form' ? 'editor.form' : 'editor.source') }}
+        </el-button>
 
-        <el-button v-if="templateText" size="small" @click="insertTemplate">
+        <el-button v-if="templateText" size="default" @click="insertTemplate">
           {{ t('cmdEditor.template') }}
         </el-button>
-        <el-button v-if="isLifecycle" size="small" :icon="MessageBox" @click="envOpen = true">
+        <el-button v-if="isLifecycle" size="default" :icon="MessageBox" @click="envOpen = true">
           {{ t('envVars.button') }}
         </el-button>
 
         <!-- 安装 / 更新 / 配置向导常常是同一套表单：把手上这份写进别的向导 -->
         <el-dropdown v-if="wizardTargets.length" trigger="click" @command="onOverwrite">
-          <el-button size="small" :icon="CopyDocument">
+          <el-button size="default" :icon="CopyDocument">
             {{ t('wizard.overwrite') }}<el-icon class="ml-1"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
@@ -66,10 +69,18 @@
           </template>
         </el-dropdown>
 
-        <el-button size="small" :disabled="!tab.dirty" @click="revert">
+        <!-- 图片预览（含 svg 的预览视图）没有任何可存的内容，这两个按钮只会是灰的 -->
+        <el-button v-if="!previewOnly" size="default" :disabled="!tab.dirty" @click="revert">
           {{ t('editor.revert') }}
         </el-button>
-        <el-button size="small" type="primary" :disabled="!tab.dirty" :loading="saving" @click="save">
+        <el-button
+          v-if="!previewOnly"
+          size="default"
+          type="primary"
+          :disabled="!tab.dirty"
+          :loading="saving"
+          @click="save"
+        >
           {{ saving ? t('editor.saving') : t('editor.save') }}
         </el-button>
       </div>
@@ -88,7 +99,7 @@
 
     <div v-else-if="!showEditor" class="flex flex-1 flex-col items-center justify-center gap-3">
       <p class="text-xs text-slate-500 dark:text-slate-400">{{ t('editor.binary') }}</p>
-      <el-button size="small" @click="workspace.downloadAt(`${project}/${tab.path}`)">
+      <el-button size="default" @click="workspace.downloadAt(`${project}/${tab.path}`)">
         {{ t('common.download') }}
       </el-button>
     </div>
@@ -136,6 +147,14 @@ const inner = ref<(EditorApi & { getText?: () => string }) | null>(null)
 const mode = ref<'form' | 'source'>('form')
 const saving = ref(false)
 
+/**
+ * 表单 ⇄ 源码。按钮上写的是当前视图，点一下换到另一个——切换时该交哪份文本由
+ * `watch(mode)`（utils/handoff.ts 的规则）处理，这里只改那一个状态。
+ */
+function toggleMode() {
+  mode.value = mode.value === 'form' ? 'source' : 'form'
+}
+
 /** 环境变量弹窗的显隐（只有生命周期脚本有这个按钮）。 */
 const envOpen = ref(false)
 
@@ -161,6 +180,15 @@ const tab = computed(() => workspace.state(props.project)?.files.find((f) => f.p
 const tabRef = workspace.state(props.project)?.files.find((f) => f.path === props.path) ?? null
 
 const def = computed(() => resolveEditor(props.path))
+
+/**
+ * 当前看的是「只能预览、没法编辑」的那一面。
+ *
+ * 图片（png / jpg…）没有表单，svg 的「表单」视图其实就是这张图——两种情况下
+ * `getContent()` 都交不出可写的内容，还原 / 保存只会在那里灰着占位置，藏掉。
+ * svg 切到「源码」之后照常可以改、可以存。
+ */
+const previewOnly = computed(() => def.value.previews === true && mode.value === 'form')
 
 /**
  * 真正加载进编辑器的文本。

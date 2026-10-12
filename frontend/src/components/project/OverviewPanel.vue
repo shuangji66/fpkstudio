@@ -2,7 +2,7 @@
   <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-3">
     <div
       v-if="state.error"
-      class="mx-auto mb-3 max-w-6xl rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-xs text-red-700 dark:text-red-300"
+      class="mx-auto mb-3 max-w-6xl rounded-md bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-700 dark:text-red-300"
     >
       {{ state.error }}
     </div>
@@ -15,21 +15,24 @@
         <!-- 架构选择 -->
         <section class="rounded-lg border border-slate-200 dark:border-slate-700">
           <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
-            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('pack.title') }}</span>
-            <span class="mx-1 h-3 w-px bg-slate-200 dark:bg-slate-800" />
-            <span class="text-xs text-slate-600 dark:text-slate-300">{{ t('pack.multi') }}</span>
-            <el-switch v-model="multi" size="small" />
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('pack.title') }}</span>
             <span class="flex-1" />
             <el-button text size="small" :icon="Refresh" @click="reload" />
           </header>
 
           <div class="space-y-3 p-3">
+            <!-- 多架构发布开关：从标题栏挪进来，跟它控制的那一片内容放一起 -->
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-slate-600 dark:text-slate-300">{{ t('pack.multi') }}</span>
+              <el-switch v-model="multi" />
+            </div>
+
             <template v-if="multi">
-              <p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">{{ t('pack.multiHint') }}</p>
+              <p class="text-sm leading-relaxed text-slate-500 dark:text-slate-400">{{ t('pack.multiHint') }}</p>
 
               <div v-if="state.platforms.length" class="space-y-1">
-                <div class="label-text">{{ t('pack.platforms') }}</div>
-                <el-checkbox-group v-model="selectedPlatforms">
+                <div class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ t('pack.platforms') }}</div>
+                <el-checkbox-group v-model="selectedPlatforms" size="default">
                   <el-checkbox
                     v-for="name in state.platforms"
                     :key="name"
@@ -41,7 +44,7 @@
 
               <div
                 v-else
-                class="rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200"
+                class="rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm leading-relaxed text-amber-800 dark:text-amber-200"
               >
                 <div>{{ t('pack.noPlatforms') }}</div>
                 <div class="mt-1">{{ t('pack.noPlatformsHint') }}</div>
@@ -49,17 +52,17 @@
 
               <!-- 输入框与下面的说明左对齐，不再挂一个右侧对齐的标签列 -->
               <div>
-                <el-input v-model="serverDir" size="small" class="w-64" />
-                <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{{ t('pack.serverDirHint') }}</p>
+                <el-input v-model="serverDir" size="default" class="w-64" />
+                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{{ t('pack.serverDirHint') }}</p>
               </div>
             </template>
 
-            <el-checkbox v-model="copyOut">{{ t('pack.copyOut') }}</el-checkbox>
+            <el-checkbox v-model="copyOut" size="default">{{ t('pack.copyOut') }}</el-checkbox>
 
             <div class="flex items-center gap-2">
               <el-button
                 type="primary"
-                size="small"
+                size="default"
                 :loading="state.packing"
                 :icon="Box"
                 @click="run"
@@ -72,7 +75,7 @@
 
         <!-- 结果 -->
         <section v-if="state.results.length" class="rounded-lg border border-slate-200 dark:border-slate-700">
-          <header class="border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200">
+          <header class="border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200">
             {{ t('pack.resultTitle') }}
           </header>
           <ul class="divide-y divide-slate-100 dark:divide-slate-700">
@@ -81,17 +84,17 @@
               :key="item.platform"
               class="flex items-center gap-2 px-3 py-2"
             >
-              <el-tag size="small" :type="item.ok ? 'success' : 'danger'" effect="plain">
+              <el-tag class="text-sm" :type="item.ok ? 'success' : 'danger'" effect="plain">
                 {{ item.ok ? t('pack.success') : t('pack.failed') }}
               </el-tag>
-              <span class="mono text-xs text-slate-700 dark:text-slate-200">{{ item.platform || '—' }}</span>
+              <span class="mono text-sm text-slate-700 dark:text-slate-200">{{ item.platform || '—' }}</span>
               <span
-                class="mono min-w-0 flex-1 truncate text-[11px] text-slate-500 dark:text-slate-400"
+                class="mono min-w-0 flex-1 truncate text-sm text-slate-500 dark:text-slate-400"
                 :title="item.path"
               >
                 {{ item.file || item.log || t('pack.failedTip') }}
               </span>
-              <span class="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">{{ humanSize(item.size) }}</span>
+              <span class="shrink-0 text-sm text-slate-400 dark:text-slate-500">{{ humanSize(item.size) }}</span>
             </li>
           </ul>
         </section>
@@ -99,7 +102,7 @@
         <!-- 产物 -->
         <section class="rounded-lg border border-slate-200 dark:border-slate-700">
           <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
-            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('pack.artifacts') }}</span>
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('pack.artifacts') }}</span>
             <span class="flex-1" />
             <el-button text size="small" :icon="Refresh" @click="reload" />
           </header>
@@ -109,7 +112,7 @@
               :key="item.path"
               class="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2"
             >
-              <el-tag size="small" effect="plain" type="info">
+              <el-tag class="text-sm" effect="plain" type="info">
                 {{ item.scope === 'output' ? t('pack.scopeOutput') : t('pack.scopeProject') }}
               </el-tag>
               <!--
@@ -118,7 +121,7 @@
                 而是被挤在同一行里各自折行。给个下限，窄屏才会整块换行。
               -->
               <span
-                class="mono min-w-[6rem] flex-1 truncate text-xs text-slate-700 dark:text-slate-200"
+                class="mono min-w-[6rem] flex-1 truncate text-sm text-slate-700 dark:text-slate-200"
                 :title="item.path"
               >
                 {{ item.name }}
@@ -129,8 +132,8 @@
                 吃掉了，auto margin 分不到东西）。
               -->
               <div class="ml-auto flex shrink-0 items-center gap-2">
-                <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ item.sizeRaw }}</span>
-                <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ item.modTime }}</span>
+                <span class="text-sm text-slate-400 dark:text-slate-500">{{ item.sizeRaw }}</span>
+                <span class="text-sm text-slate-400 dark:text-slate-500">{{ item.modTime }}</span>
                 <el-button
                   text
                   size="small"
@@ -148,7 +151,7 @@
               </div>
             </li>
           </ul>
-          <p v-else class="px-3 py-3 text-xs text-slate-400 dark:text-slate-500">{{ t('pack.noArtifacts') }}</p>
+          <p v-else class="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">{{ t('pack.noArtifacts') }}</p>
         </section>
       </div>
 
@@ -156,7 +159,7 @@
       <aside class="lg:sticky lg:top-0">
         <section class="rounded-lg border border-slate-200 dark:border-slate-700">
           <header class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
-            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">{{ t('overview.manifest') }}</span>
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('overview.manifest') }}</span>
             <span class="flex-1" />
             <el-button
               text
@@ -176,13 +179,13 @@
 
           <p
             v-if="manifestError"
-            class="px-3 py-3 text-[11px] leading-relaxed break-words text-amber-700 dark:text-amber-300"
+            class="px-3 py-3 text-sm leading-relaxed break-words text-amber-700 dark:text-amber-300"
           >
             {{ manifestError }}
           </p>
 
           <div v-else-if="manifestRows.length" class="px-3 py-2">
-            <div class="mono text-[11px] leading-[1.55]">
+            <div class="mono text-sm leading-[1.55]">
               <div
                 v-for="row in manifestRows"
                 :key="row.key"
@@ -200,7 +203,7 @@
             </div>
           </div>
 
-          <p v-else class="px-3 py-3 text-xs text-slate-400 dark:text-slate-500">{{ t('overview.noManifest') }}</p>
+          <p v-else class="px-3 py-3 text-sm text-slate-400 dark:text-slate-500">{{ t('overview.noManifest') }}</p>
         </section>
       </aside>
     </div>

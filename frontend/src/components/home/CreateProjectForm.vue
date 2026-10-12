@@ -4,27 +4,27 @@
 
     <div class="flex flex-wrap items-end gap-4">
       <div>
-        <div class="label-text mb-1">{{ t('home.create.name') }}</div>
+        <div class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">{{ t('home.create.name') }}</div>
         <el-input
           v-model="name"
           class="w-64"
-          size="small"
+          size="default"
           :placeholder="t('home.create.namePlaceholder')"
           @keyup.enter="submit"
         />
       </div>
 
       <div>
-        <div class="label-text mb-1">{{ t('home.create.kind') }}</div>
-        <el-radio-group v-model="docker" size="small">
+        <div class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">{{ t('home.create.kind') }}</div>
+        <el-radio-group v-model="docker" size="default">
           <el-radio-button :value="false">{{ t('home.create.native') }}</el-radio-button>
           <el-radio-button :value="true">{{ t('home.create.docker') }}</el-radio-button>
         </el-radio-group>
       </div>
 
       <div>
-        <div class="label-text mb-1">{{ t('home.create.entry') }}</div>
-        <el-radio-group v-model="withUi" size="small">
+        <div class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">{{ t('home.create.entry') }}</div>
+        <el-radio-group v-model="withUi" size="default">
           <el-radio-button :value="true">{{ t('home.create.withUi') }}</el-radio-button>
           <el-radio-button :value="false">{{ t('home.create.withoutUi') }}</el-radio-button>
         </el-radio-group>
@@ -32,8 +32,8 @@
 
       <span class="flex-1" />
 
-      <el-button size="small" @click="emit('cancel')">{{ t('common.cancel') }}</el-button>
-      <el-button size="small" type="primary" :loading="loading" @click="submit">
+      <el-button size="default" @click="emit('cancel')">{{ t('common.cancel') }}</el-button>
+      <el-button size="default" type="primary" :loading="loading" @click="submit">
         {{ loading ? t('home.create.creating') : t('home.create.submit') }}
       </el-button>
     </div>
