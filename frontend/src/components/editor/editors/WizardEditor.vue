@@ -123,24 +123,13 @@
                   :value="option.value"
                 />
               </el-select>
-              <el-select
+              <TagSelect
                 v-else-if="item.type === 'checkbox'"
                 v-model="item.initValues"
-                size="small"
                 class="w-56"
-                multiple
-                collapse-tags
-                collapse-tags-tooltip
-                :max-collapse-tags="1"
+                :options="item.options"
                 :placeholder="t('wizard.initValue')"
-              >
-                <el-option
-                  v-for="(option, index) in item.options"
-                  :key="index"
-                  :label="option.label"
-                  :value="option.value"
-                />
-              </el-select>
+              />
 
               <span class="flex-1" />
 
@@ -283,6 +272,7 @@
 import { ArrowDown, ArrowUp, CirclePlus, Delete, Plus } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { useEditor, type EditorProps } from '../useEditor'
+import TagSelect from '../TagSelect.vue'
 import {
   WIZARD_RULE_TYPES,
   WIZARD_TYPES,

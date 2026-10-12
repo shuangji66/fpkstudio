@@ -56,26 +56,14 @@
               :value="option.value"
             />
           </el-select>
-          <el-select
+          <TagSelect
             v-else-if="field.type === 'list'"
             v-model="model.lists[field.key]"
-            size="small"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            collapse-tags
-            :reserve-keyword="false"
-            class="w-full"
+            :options="listOptions(field)"
             placeholder="nodejs_v22"
-          >
-            <el-option
-              v-for="item in model.lists[field.key] ?? []"
-              :key="item"
-              :label="item"
-              :value="item"
-            />
-          </el-select>
+            :popper-class="field.presets ? 'dep-apps-popper' : ''"
+            class="w-full"
+          />
         </div>
       </div>
     </div>
@@ -90,6 +78,7 @@ import { Manifest } from '@/utils/manifest'
 import { useLayoutStore } from '@/stores/layout'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useEditor, type EditorProps } from '../useEditor'
+import TagSelect from '../TagSelect.vue'
 
 type FieldType = 'input' | 'textarea' | 'switch' | 'select' | 'list'
 
@@ -102,7 +91,60 @@ interface FieldDef {
   removeWhenOff?: boolean
   /** textarea 的起始行数（默认 2）；链接这类一行就够的字段给 1。 */
   minRows?: number
+  /** list 的下拉候选（预选值）；给空数组等于没有候选，只能手输。 */
+  presets?: readonly string[]
 }
+
+/**
+ * `install_dep_apps` 的预选依赖：官方应用中心里能装的那批，一行一个。
+ *
+ * 只是下拉里的候选，**不限制手输**——`el-select` 仍然开着 allow-create + filterable，
+ * 新依赖（尤其是排在名单发布之后的版本号）照样能直接敲进去。
+ */
+const DEP_APP_PRESETS = [
+  'nodejs_v14',
+  'nodejs_v16',
+  'nodejs_v18',
+  'nodejs_v20',
+  'nodejs_v22',
+  'nodejs_v24',
+  'bunjs',
+  'java-11-openjdk',
+  'java-17-openjdk',
+  'java-21-openjdk',
+  'python38',
+  'python39',
+  'python310',
+  'python311',
+  'python312',
+  'go-1.24',
+  'go-1.26',
+  'erlang',
+  'redis',
+  'rabbitmq',
+  'minio',
+  'techfunway-sqlite-manage',
+  'prometheus.prometheus',
+  'prometheus.node_exporter',
+  'grafana.loki',
+  'grafana.alloy',
+  'nvidia-container-toolkit',
+  'AMD-Container-Toolkit',
+  'Nvidia-Driver-580',
+  'amd.rocm-7.2',
+  'i915-sriov-dkms_driver',
+  'binder_linux_driver',
+  'ite-it87_driver',
+  'fn-aic8800',
+  'fn-broadcom-sta',
+  'fn-open-vm-tools',
+  'fn-qemu-ga',
+  'OpenVINO-OVMS',
+  'ai_installer',
+  'FastFlowLM',
+  'trim.ai-runtime-amd-migraphx',
+  'trim.ai-runtime-amd-vitisai',
+] as const
 
 const props = defineProps<EditorProps>()
 const emit = defineEmits<{ dirty: [value: boolean] }>()
@@ -175,7 +217,7 @@ const fields: FieldDef[] = [
       { label: t('fields.installTypeRoot'), value: 'root' },
     ],
   },
-  { key: 'install_dep_apps', type: 'list' },
+  { key: 'install_dep_apps', type: 'list', presets: DEP_APP_PRESETS },
   { key: 'desktop_uidir', type: 'input', placeholder: 'ui' },
   { key: 'desktop_applaunchname', type: 'input' },
   { key: 'service_port', type: 'input' },
@@ -238,6 +280,18 @@ const { model, api } = useEditor<Model>(
     return `${value.manifest.toText().replace(/\s+$/, '')}\n`
   },
 )
+
+/**
+ * 下拉里的候选项 = 预选值 + 已经选中的自定义值（预选里有的不重复列）。
+ *
+ * 加上后者是为了让当前这份 manifest 里的值在下拉里也能看到（带「已选」状态）；
+ * 只列预选值的话，自己敲进去的标识在候选里是「不存在」的。
+ */
+function listOptions(field: FieldDef): string[] {
+  const selected = model.value.lists[field.key] ?? []
+  const presets = field.presets ?? []
+  return [...presets, ...selected.filter((item) => !presets.includes(item))]
+}
 
 /**
  * platform=all 但项目里已经放了架构目录时提醒一下。

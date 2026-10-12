@@ -12,9 +12,10 @@
     "check:wizard": "node --import ./scripts/ts-hook.mjs scripts/check-wizard.mjs",
     "check:icon": "node --import ./scripts/ts-hook.mjs scripts/check-icon.mjs",
     "check:format": "node --import ./scripts/ts-hook.mjs scripts/check-format.mjs",
+    "check:tags": "node --import ./scripts/ts-hook.mjs scripts/check-tags.mjs",
     "check:editor": "node --import ./scripts/ts-hook.mjs scripts/check-editor.mjs",
     "check:workspace": "node --import ./scripts/ts-hook.mjs scripts/check-workspace.mjs",
-    "check": "npm run check:i18n && npm run check:wizard && npm run check:icon && npm run check:format && npm run check:editor && npm run check:semantic && npm run check:workspace && npm run check:logs",
+    "check": "npm run check:i18n && npm run check:wizard && npm run check:icon && npm run check:format && npm run check:tags && npm run check:editor && npm run check:semantic && npm run check:workspace && npm run check:logs",
     "check:semantic": "node --import ./scripts/ts-hook.mjs scripts/check-semantic.mjs",
     "check:logs": "node --import ./scripts/ts-hook.mjs scripts/check-logs.mjs"
   },

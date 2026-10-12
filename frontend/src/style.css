@@ -218,6 +218,19 @@
   .app-modal {
     backdrop-filter: blur(3px);
   }
+
+  /*
+    依赖应用（install_dep_apps）的下拉：候选有四十来项，全展开会盖住大半个表单，
+    所以限高 3 行、内部自己滚。
+
+    3 行 = 102px：每一项的高度是 Element Plus 默认的 34px（见 .el-select-dropdown__item），
+    它的 .el-select-dropdown__wrap 默认给 274px。类名由 ManifestEditor 通过
+    popper-class 挂在这个字段上——下拉是 teleport 到 body 的，组件里的 scoped 样式
+    够不着它。
+  */
+  .dep-apps-popper .el-select-dropdown__wrap {
+    max-height: 102px;
+  }
 }
 
 /*

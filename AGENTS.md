@@ -21,9 +21,10 @@ make clean               # 删二进制与 embed
 
 cd frontend
 npm run typecheck        # vue-tsc，类型检查（改了 .vue / .ts 必跑）
-npm run check            # 八个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
-                         #   （含 manifest 回写）+ 编辑器脏判据/切视图交棒 + 语义路径 + 文件管理器 store
-                         #   （重命名 / 保存 / 剪贴板）+ 日志 store（后端重启后的去重游标）
+npm run check            # 九个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
+                         #   （含 manifest 回写）+ 多选下拉的标签排版 + 编辑器脏判据/切视图交棒
+                         #   + 语义路径 + 文件管理器 store（重命名 / 保存 / 剪贴板）
+                         #   + 日志 store（后端重启后的去重游标）
 npm run build            # vite 构建到 frontend/dist
 ```
 
@@ -121,6 +122,13 @@ frontend/src/
   `form-row-inline`），表单根节点在窄屏下挂 `form-stack`（`:class="{ 'form-stack':
   layout.isMobile }"`），桌面那套「固定宽度右对齐标题 + 控件」由元素上的 Tailwind 类
   保留、窄屏的竖排由 `style.css` 覆盖。新写表单照这个来，别自己再排一套。
+- **多选下拉（`multiple` + `collapse-tags`）一律用 `components/editor/TagSelect.vue`**，
+  别直接写 `el-select`：`collapse-tags` 是按**个数**折叠的（`max-collapse-tags`，默认 1），
+  根本不看容器多宽——600px 宽的字段也会显示成「第 1 个 +3」。TagSelect 每轮排版量一次
+  标签的真实宽度，宽度够就全显示、放不下才折叠（算术在 `utils/tags.ts`，进 `check:tags`）。
+  它的 `options` 收字符串或 `{ label, value }`，`class` / `placeholder` / `popper-class`
+  照原样透传；**没挂 `collapse-tags` 的多选不算这类问题**（它会自己折行，不隐藏），
+  不用改。
 - **弹窗只有一种形态**：所有 `el-dialog` 都挂 `class="app-dialog"` +
   `modal-class="app-modal"`（样式在 `style.css`：90vh、居中、正文自己滚、遮罩模糊），
   再加 `align-center` / `lock-scroll` / `append-to-body`。**新加弹窗照抄这三个属性和

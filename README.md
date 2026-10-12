@@ -480,9 +480,25 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
   不会漏进用户的 manifest。没声明 `install_type` 的项目打开就是选中「存储位置」。
   链接（maintainer_url / distributor_url）和更新说明（changelog）跟描述一样是会自己长高的
   多行框——它们本来就可能很长，单行输入框只会把内容藏起来。
+  「依赖应用」给了一份预选名单（`ManifestEditor` 的 `DEP_APP_PRESETS`，一行一个应用标识），
+  但**不限制手输**：这个字段仍然是 allow-create + filterable，下拉只是省得敲；
+  候选 = 预选 + 已经选中的自定义值（只列预选的话，manifest 里自己敲进去的标识在候选里
+  等于不存在，看不到它已经选上了）。
+  下拉限高 3 行、内部滚动（`.dep-apps-popper`，在 `style.css` 里）：候选有四十来项，
+  全展开会盖住大半个表单。
+- **多选下拉的标签：宽度够就全显示，放不下才折叠**（`components/editor/TagSelect.vue`）。
+  `el-select` 的 `collapse-tags` 是**按个数**折叠的（`max-collapse-tags`，默认 1），
+  不看容器多宽——600px 宽、四个短标签的字段也会显示成「第 1 个 +3」。所以这个控件每轮
+  排版都量一次标签的真实宽度，用 `utils/tags.ts` 的 `fitTagCount` 算出放得下几个再交给
+  `el-select`；宽度变化靠 `ResizeObserver` 跟（桌面 / 移动布局、被 v-show 藏过的标签页）。
+  量宽度前会把标签全部渲染出来（折叠掉的标签不在 DOM 里，量不到），所以一轮排版有两次
+  渲染，都在同一个微任务队列里跑完，浏览器还没绘制。两处刻意的取舍：初值取「一个都不
+  折叠」而不是 1（否则首帧闪一下 +N）；算「放得下几个」时要扣掉行末输入框的最小宽度
+  （11px + gap，和 `el-select` 自己的 `tagStyle` 一致），否则点一下输入框标签就折行了。
+  用它的地方：manifest 的「依赖应用」、向导里 `checkbox` 字段的默认值。
 - **同一份产物挂任意 baseURL**：构建时 `base: './'`，服务端返回 index.html 时
   注入 `<base href>` 和 `window.__FPKSTUDIO__`。换挂载点不需要重新构建。
-- **六个检查脚本**（`npm run check`，需要 Node ≥ 23.6，用到默认开启的类型剥离）：
+- **七个检查脚本**（`npm run check`，需要 Node ≥ 23.6，用到默认开启的类型剥离）：
   - `check:i18n`：两份语言包的每条消息都能被 vue-i18n 编译、键完全一致。消息里的 `{`
     是插值语法，一句带 `${...}` 的提示会让这条消息在 `t()` 时抛错——而且是在渲染到
     那个组件时才抛，表现是「弹窗整体画不出来」，所以让它在这一步就被挡住。
@@ -496,6 +512,9 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
   - `check:format`：`utils/format.ts` 的 `uniqueName`（粘贴时挑不重名的那个名字）。
     它算错的表现是「粘贴把已有文件覆盖掉」，所以值得单独盯住。另外盯 `manifest` 的回写：
     没编辑过的内容（对齐、缩进、注释、多行值）必须原样写回，只有被改过的值才允许变。
+  - `check:tags`：`utils/tags.ts` 的 `fitTagCount`（多选下拉一行能放下几个标签）。
+    它算多的表现是标签折到第二行，算少的表现是明明有位置却白折叠一个——两种都是一眼
+    能看出来、只看代码看不出来的错。
   - `check:semantic`：`utils/semantic.ts` 把「请求了哪几条路径」和 `trim.file.convertPath`
     返回的条目对上号（尾斜杠归一、顺序一致时按位置兜底）。它错了的表现是设置弹窗里
     「语义路径不显示、退回 /vol1/...」，而且不报错，所以值得单独盯住。
@@ -681,4 +700,4 @@ Makefile 把构建期需要的环境变量都收敛到项目本地目录，`make
 
 ## 许可证
 
-MIT
+Apache-2.0 license

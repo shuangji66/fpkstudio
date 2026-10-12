@@ -392,7 +392,7 @@ export default {
     desc: '支持 HTML，多行内容会用三引号包裹写回。',
     ctl_stop: '关闭后应用中心不显示启动 / 停止按钮。',
     install_type: '留空由用户选择安装位置；root 表示装到系统分区。',
-    install_dep_apps: '多个依赖用冒号分隔，例如 nodejs_v22:cache。',
+    install_dep_apps: '从下拉列表里挑常见依赖（可多选），也可以直接输入应用标识；多个依赖用冒号分隔，例如 nodejs_v22:cache。',
     desktop_uidir: '入口配置所在目录，默认 ui，对应 app/ui/config。',
     desktop_applaunchname: '应用卡片打开哪个入口，需与 app/ui/config 里的 id 一致。',
     service_port: '应用自身监听的服务端口；走统一网关时可以不填。',

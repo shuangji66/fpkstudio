@@ -397,7 +397,7 @@ export default {
     desc: 'HTML allowed. Multi-line values are written back wrapped in triple quotes.',
     ctl_stop: 'When off, App Center hides the start / stop buttons.',
     install_type: 'Leave empty to let the user choose; root installs to the system partition.',
-    install_dep_apps: 'Separate multiple dependencies with colons, e.g. nodejs_v22:cache.',
+    install_dep_apps: 'Pick a common dependency from the list (multi-select) or type an app id; separate multiple dependencies with colons, e.g. nodejs_v22:cache.',
     desktop_uidir: 'Where entry config lives, default ui → app/ui/config.',
     desktop_applaunchname: 'Which entry the app card opens; must match an id in app/ui/config.',
     service_port: 'Port the app itself listens on. Optional when using the unified gateway.',
