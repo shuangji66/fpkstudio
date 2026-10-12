@@ -82,7 +82,7 @@
       />
     </div>
 
-    <div class="min-h-0 flex-1 overflow-auto thin-scroll p-4">
+    <div class="min-h-0 flex-1 overflow-auto thin-scroll p-4" @wheel="onWheel">
       <ProjectGrid :view="view" @open="openProject" />
     </div>
 
@@ -103,6 +103,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { projectLabel } from '@/utils/format'
+import { wheelToHorizontal } from '@/utils/scroll'
 import type { ProjectInfo } from '@/api/types'
 
 const { t } = useI18n()
@@ -119,6 +120,15 @@ const storedView = window.localStorage.getItem('fpkstudio.homeView')
 const view = ref<ViewMode>(storedView === 'list' ? 'list' : 'grid')
 
 watch(view, (next) => window.localStorage.setItem('fpkstudio.homeView', next))
+
+/**
+ * 项目区一个容器管两个方向：网格视图纵向滚，列表视图（宽屏）被撑成固定高度、
+ * 内容只往右边溢出，纵向根本没得滚——纵向上滚轮不动，这里把它转成横向，
+ * 免得用户只能去够下面那根滚动条。两个方向都能滚时不拦（见 wheelToHorizontal）。
+ */
+function onWheel(event: WheelEvent) {
+  wheelToHorizontal(event, { onlyWhenNoVerticalScroll: true })
+}
 
 function toggle(next: 'create' | 'import') {
   panel.value = panel.value === next ? '' : next
