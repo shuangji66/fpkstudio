@@ -467,6 +467,16 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
     操作区自己挡住点击，不会连带打开项目。卡片可键盘操作（Enter / 空格），项目目录的
     绝对路径由 `/api/projects` 的 `absPath` 给出——换过项目根目录之后，
     `projectsDir + name` 是拼不出来的。
+    菜单是**重命名 / 创建副本 / 导出 / 删除**（删除标红；导出这一项的标签只写「导出」，
+    原来那半句「（打包成 zip 下载）」去掉了——菜单里唯一的长文案，留着只会把菜单撑宽）。
+    **创建副本**先要一个副本项目名（不给默认值，留空或不合规时弹窗自己不让确认；重名也
+    拒绝——后端 `Root.Copy` 对已存在的目标直接回 `ErrExists`、绝不覆盖，前端再查一次
+    只是为了把提示写得更直白），然后复制整个项目目录，再把
+    两处应用标识换成副本名：`manifest` 的 `appname`、`desktop_applaunchname` 的**前缀**
+    和 `app/ui/config` 里 `.url` 每个入口 id 的**前缀**（入口 id 是 `<appname>.<入口名>`，
+    只换第一个点之前那一段）。**其他文件原样复制**——图标、脚本、向导字段都跟应用标识无关，
+    动了反而是错的。改写规则在 `utils/duplicate.ts`，`check:duplicate` 钉住；config 解析
+    不了时不写回那份文件（只提示一句），免得拿残缺内容盖掉用户原来的文本。
   - **平铺**（默认）：`auto-fill` 按宽度自适应列宽，项目多了整页纵向滚。就是原来那个
     网格视图。
   - **分页**：为项目很多时准备的——一页正好铺满容器（列数按宽度、行数按高度算，见
@@ -654,6 +664,9 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
   - `check:paging`：`utils/paging.ts` 的 `fitGrid` / `clampPage`（首页分页视图一页放几个
     卡片、页码越界退到哪一页）。差一个间距的表现是「底部那排卡片被切掉一半」，只在特定
     窗口尺寸下出现，光看代码看不出来。
+  - `check:duplicate`：`utils/duplicate.ts` 的 `replaceEntryPrefix` / `rewriteForDuplicate`
+    （创建副本时把 manifest 与 app/ui/config 里的应用标识换掉）。算错不会报错，只会让副本
+    「看着正常但用不了」——入口点不开、或者和原项目抢同一个应用标识。
   - `check:semantic`：`utils/semantic.ts` 把「请求了哪几条路径」和 `trim.file.convertPath`
     返回的条目对上号（尾斜杠归一、顺序一致时按位置兜底）。它错了的表现是设置弹窗里
     「语义路径不显示、退回 /vol1/...」，而且不报错，所以值得单独盯住。

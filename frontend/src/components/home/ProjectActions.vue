@@ -19,10 +19,20 @@
           <el-dropdown-item command="rename" :icon="EditPen">
             {{ t('common.rename') }}
           </el-dropdown-item>
+          <el-dropdown-item command="duplicate" :icon="CopyDocument">
+            {{ t('home.duplicate') }}
+          </el-dropdown-item>
+          <!-- 标签只写「导出」：括号里那句说明是菜单里唯一的长文案，放这里只会把菜单撑宽 -->
           <el-dropdown-item command="export" :icon="Download">
             {{ t('home.export') }}
           </el-dropdown-item>
-          <el-dropdown-item command="delete" :icon="Delete" divided>
+          <!-- 删除是破坏性的，红色标出来（和文件管理器的右键菜单同一套） -->
+          <el-dropdown-item
+            command="delete"
+            :icon="Delete"
+            divided
+            class="text-red-600 dark:text-red-400"
+          >
             {{ t('common.delete') }}
           </el-dropdown-item>
         </el-dropdown-menu>
@@ -35,18 +45,19 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Download, EditPen, FolderOpened, MoreFilled } from '@element-plus/icons-vue'
-import { downloadEntry, renameEntry } from '@/api/endpoints'
+import { CopyDocument, Delete, Download, EditPen, FolderOpened, MoreFilled } from '@element-plus/icons-vue'
+import { copyEntry, downloadEntry, projectExists, readFile, renameEntry, writeFile } from '@/api/endpoints'
 import { useProjectsStore } from '@/stores/projects'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { isHostAvailable, openInFileManager } from '@/trim/sdk'
 import { trimErrorMessage } from '@/trim/errors'
+import { rewriteForDuplicate } from '@/utils/duplicate'
 import type { ProjectInfo } from '@/api/types'
 
 /**
  * 项目卡片右上角的操作区：文件夹按钮（在文件管理器里打开项目目录）+「···」菜单
- * （重命名 / 导出 / 删除）。
+ * （重命名 / 创建副本 / 导出 / 删除）。
  *
  * 三个动作整条流程都在这里走完（改目录 → 处理项目标签 → 播报 → 最后刷列表）。
  * 顺序不能反：`projects.refresh()` 会换掉列表，外层 v-for 的 key 跟着变，
@@ -82,6 +93,7 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
 function run(command: string) {
   if (command === 'rename') void rename()
+  else if (command === 'duplicate') void duplicate()
   else if (command === 'export') exportProject()
   else if (command === 'delete') void remove()
 }
@@ -131,6 +143,65 @@ async function rename() {
   }
   ElMessage.success(t('home.renamed', { name: next }))
 
+  await projects.refresh()
+}
+
+/**
+ * 创建副本：把整个项目目录复制成一份新项目，再把里面的应用标识改成副本名。
+ *
+ * 只改两处（`utils/duplicate.ts` 里有注释和断言）：`manifest` 的 `appname` + 默认入口 id
+ * 的前缀、`app/ui/config` 里所有入口 id 的前缀。**其他文件原样复制**——图标、脚本、
+ * 向导里的字段名都跟应用标识无关，改了反而是错的。
+ *
+ * 目标重名的保护在后端（`Root.Copy` 对已存在的目标直接回 `ErrExists`，不覆盖），这里先查
+ * 一次只是为了给一句更直白的提示：`projects.list` 可能是旧的，所以问的是后端。
+ */
+async function duplicate() {
+  const from = props.item.name
+  let next = ''
+  try {
+    const res = await ElMessageBox.prompt(t('home.duplicatePrompt', { name: from }), t('home.duplicate'), {
+      // 刻意不给默认值：副本名得自己想，随手回车只会撞上「已经有一个叫 xxx 的项目」
+      inputPattern: NAME_RE,
+      inputErrorMessage: t('home.renameInvalid'),
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+    })
+    next = String(res.value ?? '').trim()
+  } catch {
+    return // 取消（留空 / 不合规时弹窗自己就不让确认）
+  }
+  if (!next || next === from) return
+
+  try {
+    // 现查一次（不是查本地列表）：重名后端也会拒绝，但报的是「目标已存在：xxx」
+    const taken = await projectExists(next)
+    if (taken.exists) {
+      ElMessage.warning(t('home.duplicateExists', { name: next }))
+      return
+    }
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+    return
+  }
+
+  try {
+    await copyEntry(from, next)
+
+    const manifest = await readFile(`${next}/manifest`)
+    // 不带桌面入口的项目没有这份 config，读不到就是「没有」，不是错误
+    const config = await readFile(`${next}/app/ui/config`).catch(() => null)
+    const rewrite = rewriteForDuplicate(next, manifest.content, config?.content ?? null)
+    await writeFile(`${next}/manifest`, rewrite.manifest)
+    if (rewrite.uiConfig !== null) await writeFile(`${next}/app/ui/config`, rewrite.uiConfig)
+    // 解析不了的 config 不写回（见 utils/duplicate.ts）：说一声，别让人以为改好了
+    if (rewrite.uiConfigSkipped === 'invalid') ElMessage.warning(t('home.duplicateConfigSkipped'))
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+    return
+  }
+
+  ElMessage.success(t('home.duplicated', { name: next }))
   await projects.refresh()
 }
 

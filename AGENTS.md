@@ -21,9 +21,9 @@ make clean               # 删二进制与 embed
 
 cd frontend
 npm run typecheck        # vue-tsc，类型检查（改了 .vue / .ts 必跑）
-npm run check            # 十个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
+npm run check            # 十一个检查脚本：i18n 键一致 + 向导往返 + 取景框几何/图标路径 + 命名与文本格式
                          #   （含 manifest 回写）+ 多选下拉的标签排版 + 首页分页排版
-                         #   + 编辑器脏判据/切视图交棒 + 语义路径
+                         #   + 创建副本的文本改写 + 编辑器脏判据/切视图交棒 + 语义路径
                          #   + 文件管理器 store（重命名 / 保存 / 剪贴板）
                          #   + 日志 store（后端重启后的去重游标）
 npm run build            # vite 构建到 frontend/dist
@@ -180,6 +180,12 @@ frontend/src/
   标签在新写的界面里直接用 `text-sm font-medium ...`。唯一的大字号是设置弹窗里的
   「关于」标题（`text-lg`，和弹窗自己的标题「设置」一样大——那本来就是
   `--el-dialog-title-font-size` 的默认值）。
+- **「创建副本」只改两处文本**（`utils/duplicate.ts` + `check:duplicate`）：`manifest` 的
+  `appname` 与 `desktop_applaunchname` 的前缀、`app/ui/config` 里 `.url` 每个 id 的前缀
+  （入口 id 是 `<appname>.<入口名>`，只换第一个点之前那一段；没有点的 id 原样留着）。
+  其余文件**原样复制**，别顺手改。目标重名由后端挡住（`Root.Copy` 对已存在的目标直接回
+  `ErrExists`，绝不覆盖），前端那次 `projectExists` 只是把提示写得更直白。config 解析不了时**不写回**
+  （和「解析失败就拦保存」同一条理由），只报一句。
 - **删除按钮红色、重要的删除要确认**：`text` + `type="danger"`；删掉一整块内容
   （步骤、入口、共享目录、图标组、项目、文件）之前 `ElMessageBox.confirm`，只丢一行的
   （字段 / 选项 / 校验）不问——逐条问会让人不敢动手。
