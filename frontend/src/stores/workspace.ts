@@ -22,6 +22,7 @@ import { ApiError } from '@/api/client'
 import type { Artifact, ExtractResult, FsEntry, PackResult, PackSettings } from '@/api/types'
 import { i18n } from '@/i18n'
 import { uniqueName } from '@/utils/format'
+import { localeMissingEnUS } from '@/utils/i18nFiles'
 import { useLogsStore } from './logs'
 
 /** 项目标签内固定的「总览」子标签 id（原来的「打包」页）。 */
@@ -360,6 +361,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!shape) return
     s.docker = shape.docker
     s.ui = shape.ui
+  }
+
+  /**
+   * i18n 目录在目录缓存里的键（含项目名的完整路径，和 `dirs` 同一套写法）。
+   *
+   * 单独给个函数：快捷设置的提示和打包前的拦截都要按同一个路径去 `loadDir`，
+   * 各处自己拼字符串迟早会拼出两个不一样的键，那份缓存就永远命不中。
+   */
+  const i18nDirOf = (name: string) => `${name}/i18n`
+
+  /**
+   * 项目里有 `i18n/` 目录、但缺了必需的 en-US（官方约定：有 `i18n/` 就必须提供 en-US，
+   * 且 `Pack` 也会拒绝打包）。
+   *
+   * 判据来自目录缓存，不用项目形态接口：i18n 目录没拉过、或项目根本没有这个目录，
+   * 都返回 false——「还不知道」不能当成「有问题」。所以调用方要么挂载时先把这份列表
+   * 拉回来（快捷设置），要么在需要准确答案前 force 拉一次（打包前拦截）。
+   */
+  function missingEnUS(name: string): boolean {
+    return localeMissingEnUS(states.value[name]?.dirs[i18nDirOf(name)])
   }
 
   /** 项目内文件被写入后调用：让图片预览之类的缓存失效。 */
@@ -929,6 +950,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     expandAll,
     reloadTree,
     reloadPackageInfo,
+    i18nDirOf,
+    missingEnUS,
     openFile,
     closeFile,
     setActive,

@@ -18,6 +18,18 @@
             <span class="text-sm text-slate-400 dark:text-slate-500">{{ t(group.hintKey) }}</span>
           </header>
 
+          <!--
+            官方约定：有 i18n/ 就必须有 en-US（缺了应用在英文环境下元数据 / 入口 /
+            向导的占位符全取不到值，打包也会被拦下）。提示就挂在 i18n 这一组里——
+            用户是在这里点开那两个文案文件的。
+          -->
+          <p
+            v-if="group.key === 'i18n' && missingEnUS"
+            class="border-b border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm leading-relaxed text-amber-800 dark:text-amber-200"
+          >
+            {{ t('shortcuts.i18nMissingEnUS') }}
+          </p>
+
           <ul class="divide-y divide-slate-100 dark:divide-slate-700">
             <li v-for="item in group.items" :key="item.path">
               <button
@@ -51,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRight } from '@element-plus/icons-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -160,6 +172,29 @@ const groups = computed(() =>
     (group) =>
       (!group.needsUi || state.value.ui) && (!group.needsDocker || state.value.docker),
   ),
+)
+
+/**
+ * i18n 目录存在但缺 en-US（官方约定：有 i18n/ 就必须提供 en-US，见 utils/i18nFiles.ts）。
+ *
+ * 判据用的是目录缓存，所以这份列表得先拉过一次；而它可能是进项目之后才建出来的
+ * （文件管理器里新建目录），所以盯的是根目录里那个条目——它一出现就把列表拉回来。
+ * 没有 i18n/ 目录的项目不提示：那只是「这个应用不做国际化」，官方允许。
+ */
+const hasI18nDir = computed(() =>
+  (state.value.dirs[props.project] ?? []).some((entry) => entry.name === 'i18n' && entry.dir),
+)
+const missingEnUS = computed(() => hasI18nDir.value && workspace.missingEnUS(props.project))
+
+watch(
+  hasI18nDir,
+  (on) => {
+    if (!on) return
+    void workspace
+      .loadDir(props.project, workspace.i18nDirOf(props.project))
+      .catch(() => undefined)
+  },
+  { immediate: true },
 )
 
 function find(path: string) {

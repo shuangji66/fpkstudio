@@ -184,6 +184,8 @@ export default {
     formatManifest: 'manifest 里有不是 key = value 的行，已阻止保存（内容没有被清空）：{line}',
     formatManifestMultiline:
       'manifest 里的多行值（"""）没有闭合，已阻止保存（内容没有被清空）：它会把后面的键吞掉。受影响：{keys}',
+    formatI18n: 'i18n 文案里有不是 [section] 或 key="值" 的行，已阻止保存（内容没有被清空）：{line}',
+    formatI18nQuote: 'i18n 文案里 {key} 的引号没有闭合，已阻止保存（内容没有被清空）。',
     binary: '这是二进制文件，无法以文本方式编辑。可以下载后本地查看。',
     imageFailed: '图片加载失败',
     readFailed: '读取失败',
@@ -213,6 +215,8 @@ export default {
     groupCmdHint: '安装 / 卸载 / 升级 / 配置 / 启停',
     groupI18n: '国际化',
     groupI18nHint: '应用中心里的显示文案',
+    i18nMissingEnUS:
+      '有 i18n/ 目录就必须提供 en-US：缺了它，应用中心里的文案在英文环境下是空的，打包也会被拦下。',
     groupDocker: 'Docker',
     groupDockerHint: 'compose 文件就是应用本体',
     manifest: '应用清单',
@@ -356,6 +360,7 @@ export default {
     scopeOutput: '输出目录',
     failedTip: '打包失败，详情见日志',
     selectPlatform: '请至少选择一个架构',
+    missingEnUS: 'i18n/ 目录里缺少必需的 en-US，补上之后才能打包。',
     archAdded: '已创建缺少的架构目录：{names}',
   },
   log: {

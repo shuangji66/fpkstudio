@@ -511,6 +511,23 @@ func existsIn(root *fsx.Root, rel string) bool {
 	return err == nil
 }
 
+// checkI18nLocale 执行官方关于 i18n/ 的那条约定：目录存在就必须提供 en-US。
+//
+// 只看 en-US 有无，不去管别的语言：官方只点名要求 en-US（多一种语言只是多一份文案，
+// 缺 en-US 却是「应用在非中文环境下没有可用的默认文案」——英文环境下应用中心里的
+// 元数据、桌面入口和向导的占位符全都取不到值）。没有 i18n/ 目录是合法的，直接放行。
+//
+// 返回 ErrInvalidInput：这是「改一下就能过」的用户输入问题，HTTP 层据此回 400。
+func checkI18nLocale(root *fsx.Root, rel string) error {
+	if !existsIn(root, rel+"/i18n") {
+		return nil
+	}
+	if !existsIn(root, rel+"/i18n/en-US") {
+		return fmt.Errorf("%w：i18n/ 目录存在但缺少 en-US（官方要求有 i18n/ 就必须提供 en-US）", ErrInvalidInput)
+	}
+	return nil
+}
+
 // Create 调用 fnpack 创建项目骨架，并补齐 fpkstudio 需要的工作目录。
 func (m *Manager) Create(ctx context.Context, name string, docker, withUI bool) error {
 	// 名字先 trim 再往下传：判重名用的是 projectPath（内部 trim），而调 fnpack 用的是
@@ -774,6 +791,12 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 		targets = append(targets, p)
 	}
 	single := len(targets) == 0
+
+	// 官方约定：项目里有 i18n/ 目录就必须提供 en-US。拦在落地之前，别让用户拿到一个
+	// 英文环境下元数据 / 入口 / 向导文案全是空的包（界面上同样会在打包前提示一次）。
+	if err := checkI18nLocale(s.prj, rel); err != nil {
+		return nil, err
+	}
 
 	stageName := fmt.Sprintf("build-%s-%d", sanitize(req.Name), time.Now().UnixNano())
 	stage := "tmp/" + stageName

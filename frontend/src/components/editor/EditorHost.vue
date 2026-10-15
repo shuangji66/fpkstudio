@@ -132,6 +132,7 @@ import SourceEditor from './editors/SourceEditor.vue'
 import EnvVarsDialog from './EnvVarsDialog.vue'
 import { resolveEditor } from './registry'
 import { handoffText } from '@/utils/handoff'
+import { i18nTemplateFor } from '@/utils/i18nFiles'
 import { mainScriptTemplate } from '@/utils/lifecycle'
 import type { EditorApi, EditorContent } from './useEditor'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -276,12 +277,16 @@ function onDirty(value: boolean) {
  * 删不删数据；这份骨架就是那个标准写法。其他 cmd 脚本（install/upgrade…）各写各的。
  * 卸载向导：它和上面那个脚本是一对——向导收集 wizard_data_action，脚本照着执行，
  * 所以给一份配套的向导骨架（数据保留 / 删除二选一）。
+ * locale 文案（`i18n/en-US`、`i18n/zh-CN`）：官方那套 section / key 的骨架、值留空
+ * （见 `utils/i18nFiles.ts`）。其他语言不给模板，按钮照常不出现。
  */
 function templateFor(path: string, docker: boolean): string {
   // 写成函数而不是常量表：模板常量在下面，常量表会在求值时就踩到 TDZ。
   if (path === 'cmd/main') return mainScriptTemplate(docker)
   if (path === 'cmd/uninstall_callback') return UNINSTALL_SCRIPT
   if (path === 'wizard/uninstall') return UNINSTALL_WIZARD
+  const locale = i18nTemplateFor(path)
+  if (locale) return locale
   return ''
 }
 

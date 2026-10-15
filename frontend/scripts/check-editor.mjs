@@ -1,6 +1,6 @@
 /**
  * 校验表单编辑器的「未改动」判据（src/components/editor/useEditor.ts），以及
- * `cmd/main` 的插入模板（src/utils/lifecycle.ts）。
+ * 「插入模板」的文本（src/utils/lifecycle.ts、src/utils/i18nFiles.ts）。
  *
  *   npm run check:editor
  *
@@ -16,6 +16,11 @@
 import { nextTick, reactive } from 'vue'
 import { useEditor } from '../src/components/editor/useEditor.ts'
 import { handoffText } from '../src/utils/handoff.ts'
+import {
+  I18N_LOCALE_TEMPLATE,
+  i18nTemplateFor,
+  localeMissingEnUS,
+} from '../src/utils/i18nFiles.ts'
 import {
   MAIN_DOCKER_SCRIPT_TEMPLATE,
   MAIN_SCRIPT_TEMPLATE,
@@ -198,6 +203,62 @@ check('原生模板不掺 docker 的东西', /docker/i.test(MAIN_SCRIPT_TEMPLATE
 check('docker 模板 start 分支什么都不做', MAIN_DOCKER_SCRIPT_TEMPLATE.includes('will be started by appcenter'), true)
 check('docker 模板问的是容器状态', MAIN_DOCKER_SCRIPT_TEMPLATE.includes('docker inspect'), true)
 check('docker 模板不自己写 pid 文件', /PID_FILE/.test(MAIN_DOCKER_SCRIPT_TEMPLATE), false)
+
+// ---- i18n locale 文件的模板与「缺 en-US」判据 ----
+//
+// 模板是纯文本，写错的后果都在界面上：少一个 section / key，用到它的那个字段在
+// fnOS 侧就取不到值（应用中心里是空白）；值必须在（空的）双引号里——官方语法就是
+// `key="value"`，漏掉引号那一行会被当成不认识的行。判据算错则是「该提示的不提示」，
+// 只在英文环境下才看得出来（而且打包会被后端拦下，报错却指不到根因）。
+
+check('en-US 用 locale 模板', i18nTemplateFor('i18n/en-US'), I18N_LOCALE_TEMPLATE)
+check('zh-CN 用同一份 locale 模板', i18nTemplateFor('i18n/zh-CN'), I18N_LOCALE_TEMPLATE)
+check('其他语言不给模板', i18nTemplateFor('i18n/ja-JP'), '')
+check('i18n 以外的文件不给模板', i18nTemplateFor('manifest'), '')
+
+for (const section of ['[common]', '[entry]', '[install]', '[uninstall]']) {
+  check(`模板有 ${section}`, I18N_LOCALE_TEMPLATE.includes(`${section}\n`), true)
+}
+for (const key of [
+  'displayName',
+  'desc',
+  'changelog',
+  'title',
+  'stepTitle',
+  'label',
+  'helpText',
+  'option1Label',
+  'option2Label',
+]) {
+  check(`模板保留了键 ${key}`, new RegExp(`^${key}=""$`, 'm').test(I18N_LOCALE_TEMPLATE), true)
+}
+check('模板以换行结尾', I18N_LOCALE_TEMPLATE.endsWith('\n'), true)
+// 值必须留成空的双引号：官方语法是 `key="value"`，这份骨架只留键、不留示例值
+const valueLines = I18N_LOCALE_TEMPLATE.split('\n').filter(
+  (line) => line !== '' && !line.startsWith('['),
+)
+check(
+  '每一行都是 `键=""`（值都留空）',
+  valueLines.every((line) => /^[A-Za-z][A-Za-z0-9]*=""$/.test(line)),
+  true,
+)
+check('模板里没有残留的示例值', I18N_LOCALE_TEMPLATE.includes('My App'), false)
+check('模板里没有 ${ 插值（会被模板字面量求值吃掉）', I18N_LOCALE_TEMPLATE.includes('${'), false)
+
+// 没有 i18n 目录（undefined）与「目录存在但缺 en-US」是两回事，别混成一个 false
+check('没有 i18n 目录时不报', localeMissingEnUS(undefined), false)
+check('目录存在但是空的，报缺 en-US', localeMissingEnUS([]), true)
+check('只有 zh-CN 时报缺', localeMissingEnUS([{ name: 'zh-CN', dir: false }]), true)
+check('有 en-US 文件就不报', localeMissingEnUS([{ name: 'en-US', dir: false }]), false)
+check('同名的目录不算 en-US 文件', localeMissingEnUS([{ name: 'en-US', dir: true }]), true)
+check(
+  'en-US 和其他语言并存时不报',
+  localeMissingEnUS([
+    { name: 'zh-CN', dir: false },
+    { name: 'en-US', dir: false },
+  ]),
+  false,
+)
 
 console.log(failed ? `\n${failed} 项不通过` : '\n编辑器脏判据检查全部通过')
 process.exit(failed ? 1 : 0)

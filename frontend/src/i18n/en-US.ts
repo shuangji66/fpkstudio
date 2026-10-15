@@ -187,6 +187,10 @@ export default {
       'manifest has a line that is not key = value — saving was blocked (nothing was cleared): {line}',
     formatManifestMultiline:
       'A multi-line value (""") in the manifest is not closed — saving was blocked (nothing was cleared): it would swallow the following keys. Affected: {keys}',
+    formatI18n:
+      'An i18n line is neither [section] nor key="value" — saving was blocked (nothing was cleared): {line}',
+    formatI18nQuote:
+      'The quote in {key} is not closed — saving was blocked (nothing was cleared).',
     binary: 'Binary file — cannot be edited as text. Download it instead.',
     imageFailed: 'Failed to load image',
     readFailed: 'Failed to read',
@@ -217,6 +221,8 @@ export default {
     groupCmdHint: 'install / uninstall / upgrade / config / start-stop',
     groupI18n: 'i18n',
     groupI18nHint: 'labels shown in the app centre',
+    i18nMissingEnUS:
+      'An i18n/ folder must also contain en-US: without it the app centre has no text for English users, and packing is blocked.',
     groupDocker: 'Docker',
     groupDockerHint: 'the compose file is the app itself',
     manifest: 'Manifest',
@@ -361,6 +367,7 @@ export default {
     scopeOutput: 'Output dir',
     failedTip: 'Packing failed — see the logs',
     selectPlatform: 'Select at least one architecture',
+    missingEnUS: 'The i18n/ folder is missing the required en-US file — add it before packing.',
     archAdded: 'Created the missing architecture folders: {names}',
   },
   log: {

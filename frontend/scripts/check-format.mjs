@@ -10,6 +10,7 @@
  * 不让存。都不适合只靠手点。
  */
 import { formatTime, isArchive, uniqueName } from '../src/utils/format.ts'
+import { I18N_LOCALE_TEMPLATE } from '../src/utils/i18nFiles.ts'
 import { Manifest } from '../src/utils/manifest.ts'
 import { checkFormat } from '../src/utils/validate.ts'
 
@@ -91,7 +92,27 @@ check(
 check('privilege 的坏 JSON 要报', checkFormat('config/privilege', '{"run-as":}')?.key, 'editor.formatJson')
 check('privilege 的好 JSON 不报', checkFormat('config/privilege', '{"run-as":"package"}'), null)
 check('入口配置的坏 JSON 要报', checkFormat('app/ui/config', '{oops}')?.key, 'editor.formatJson')
-check('i18n 文案的坏 JSON 要报', checkFormat('i18n/zh-CN', '{oops}')?.key, 'editor.formatJson')
+// i18n 的 locale 文件是 INI（官方语法），**不是 JSON**：以前这边把它和几份 JSON 配置
+// 归成一类，判据完全对不上——一份合法的 locale 文件在源码视图里存不进去，而它只有
+// 源码视图这一条路（registry 里没有 i18n 编辑器）。这里钉住「合法的放行、会静默失效的拦住」。
+check('i18n 的空模板不报', checkFormat('i18n/en-US', I18N_LOCALE_TEMPLATE), null)
+check(
+  'i18n 的合法 INI 不报（注释、空行、section、带引号的值）',
+  checkFormat('i18n/zh-CN', '# 说明\n\n[common]\ndisplayName="演示"\n'),
+  null,
+)
+check('i18n 的不带引号的值也放行', checkFormat('i18n/zh-CN', '[common]\ndesc=hello\n'), null)
+check(
+  'i18n 里既不是 section 也不是 key=值 的行要报',
+  checkFormat('i18n/zh-CN', '[common]\n{oops}\n')?.key,
+  'editor.formatI18n',
+)
+check(
+  'i18n 的引号没闭合要报',
+  checkFormat('i18n/zh-CN', '[common]\ndisplayName="演示\n')?.key,
+  'editor.formatI18nQuote',
+)
+check('i18n 文件不再按 JSON 判', checkFormat('i18n/zh-CN', 'not json at all')?.key, 'editor.formatI18n')
 check('向导的坏 JSON 要报', checkFormat('wizard/install', '[{]')?.key, 'editor.formatWizard')
 check('向导的空数组不报', checkFormat('wizard/install', '[]'), null)
 check('向导的空文件不报', checkFormat('wizard/install', ''), null)

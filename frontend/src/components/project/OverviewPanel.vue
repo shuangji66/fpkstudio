@@ -382,9 +382,28 @@ watch(multi, (on) => {
   if (on) void ensureArchDirs()
 })
 
+/**
+ * 官方约定：项目里有 i18n/ 目录就必须提供 en-US（缺失的话应用中心里的元数据、入口
+ * 和向导文案在英文环境下全是空的）。界面在快捷设置的 i18n 分组里提示，这里在打包前
+ * 再拦一道——**后端 `Pack` 也会拒绝**，这里只是把话说明白、少发一趟注定失败的请求。
+ *
+ * 目录列表现拉一次（force）：这条判据要用来拦打包，读缓存既可能放行一个已经坏掉的
+ * 项目，也可能反过来拦下一个刚补好 en-US 的项目。
+ */
+async function missingEnUS(): Promise<boolean> {
+  await workspace
+    .loadDir(props.project, workspace.i18nDirOf(props.project), true)
+    .catch(() => undefined)
+  return workspace.missingEnUS(props.project)
+}
+
 async function run() {
   if (multi.value && !selectedPlatforms.value.length) {
     ElMessage.warning(t('pack.selectPlatform'))
+    return
+  }
+  if (await missingEnUS()) {
+    ElMessage.error(t('pack.missingEnUS'))
     return
   }
   try {

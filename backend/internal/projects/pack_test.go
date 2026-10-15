@@ -96,6 +96,18 @@ func seedProjectWithManifest(t *testing.T, root, manifest string) {
 	}
 }
 
+// writeTestFile 在项目里写一个小文件（父目录一起建），用来构造 i18n/ 这类用例。
+func writeTestFile(t *testing.T, root, rel, body string) {
+	t.Helper()
+	full := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestPackMultiPlatformDefaultDeploy 是 S1 的回归：默认部署（项目根在数据目录内，
 // copyIntoStage 走 home 沙箱的 Root.Copy）下，多架构打包必须真的能出包。
 //
@@ -356,5 +368,45 @@ func TestPackStripsManifestSpaces(t *testing.T) {
 	}
 	if string(raw) != src {
 		t.Errorf("用户项目里的 manifest 被改了：\n got %q\nwant %q", raw, src)
+	}
+}
+
+// TestPackRejectsI18nWithoutEnUS：官方约定「有 i18n/ 目录就必须提供 en-US」。
+//
+// 缺 en-US 时打出来的包在英文环境下元数据、桌面入口和向导的占位符全取不到值，
+// 所以在入口就拒掉（HTTP 层按 ErrInvalidInput 回 400），别让用户拿到一个坏包。
+func TestPackRejectsI18nWithoutEnUS(t *testing.T) {
+	m, _ := newPackManager(t)
+	seedProject(t, m.ProjectRoot())
+	// 只放一个 zh-CN：i18n/ 目录存在、en-US 不存在，正是要拦的那种项目。
+	writeTestFile(t, m.ProjectRoot(), "demo/i18n/zh-CN", "[common]\ndisplayName=\"演示\"\n")
+	t.Setenv("FPKSTUDIO_TEST_STAGE", filepath.Join(t.TempDir(), "stage.txt"))
+
+	_, err := m.Pack(context.Background(), PackRequest{Name: "demo"})
+	if err == nil {
+		t.Fatal("i18n/ 目录缺 en-US 时应当拒绝打包")
+	}
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("错误应当能被判成「用户输入不合法」（HTTP 层据此回 400），得到 %v", err)
+	}
+	if !strings.Contains(err.Error(), "en-US") {
+		t.Errorf("错误里应当点出缺的是 en-US：%v", err)
+	}
+}
+
+// TestPackAllowsI18nWithEnUS：补上 en-US 之后照常出包（别把合法的多语言项目一起挡掉）。
+func TestPackAllowsI18nWithEnUS(t *testing.T) {
+	m, _ := newPackManager(t)
+	seedProject(t, m.ProjectRoot())
+	writeTestFile(t, m.ProjectRoot(), "demo/i18n/zh-CN", "[common]\ndisplayName=\"演示\"\n")
+	writeTestFile(t, m.ProjectRoot(), "demo/i18n/en-US", "[common]\ndisplayName=\"Demo\"\n")
+	t.Setenv("FPKSTUDIO_TEST_STAGE", filepath.Join(t.TempDir(), "stage.txt"))
+
+	results, err := m.Pack(context.Background(), PackRequest{Name: "demo"})
+	if err != nil {
+		t.Fatalf("有 en-US 时不该被拒：%v", err)
+	}
+	if len(results) != 1 || !results[0].OK {
+		t.Fatalf("打包失败：%+v", results)
 	}
 }

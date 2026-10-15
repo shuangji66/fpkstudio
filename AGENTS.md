@@ -167,6 +167,15 @@ frontend/src/
   弹窗标题是 Element Plus 的 18px 默认值，**正文一律 14px**（log 那条 xterm 也是）。
 - **语言包两份必须同步**。`npm run check:i18n` 会挡住键不一致；消息里的 `{` 是插值语法，
   想写字面量 `{` 要转义。一条消息写错，表现是「渲染到那个组件时整个弹窗画不出来」。
+- **别把「项目的 i18n 目录」和「本应用的语言包」搞混**。`src/i18n/zh-CN.ts` 是这个工具
+  自己的界面语言；项目里的 `i18n/en-US` 是**被打包的 fpk** 的文案，官方语法是 **INI**
+  （`[section]` + `key="值"`），**不是 JSON**——`utils/validate.ts` 按 INI 校验（判成 JSON
+  的后果是「一份合法的 locale 文件在源码视图里存不进去」）。官方还要求「有 `i18n/`
+  目录就必须提供 `en-US`」：`Pack` 会拒（后端 `checkI18nLocale`），界面在快捷设置的
+  i18n 分组提示、打包前也拦一道。**前端的判据走目录缓存**（`workspace.missingEnUS`，
+  i18n 目录没拉过 = 「还不知道」= 不报），所以需要准确的地方（拦打包）要先
+  `loadDir(..., true)` 现拉一次；目录存在与否、缺哪个语言别去读裸字段或自己拼字符串，
+  用 `workspace.i18nDirOf`。
 - **`utils/` 里不引 `vue-i18n`**：需要给用户看的错误在 `utils/` 里只给 **i18n 键**
   （见 `utils/icon.ts` 的 `IconError`，界面层用 `IconPanel` 的 `errText` 翻）——否则
   `check:icon` 这类直接跑 `.ts` 的脚本会被拖上一整套运行时。
