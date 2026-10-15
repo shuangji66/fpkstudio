@@ -612,8 +612,18 @@ Vue 3.5 + Pinia 4 + Tailwind 4 + TypeScript 6.0.2 + Vite 8，UI 组件用 Elemen
   表单里没有对应控件就被删掉。
   **解析失败时保存会被拦住**（`EditorApi.saveBlocked`）：表单里那份模型是空的，
   存下去等于把用户的向导文件清空——那是不可逆的，宁可不让存，让人在源码视图里改回来。
-  `wizard/uninstall` 有「插入模板」：卸载向导收集 `wizard_data_action`、卸载回调脚本
-  照着它决定删不删数据，两份是一套的，所以模板也配套给。
+  **「插入模板」按文件给**（`EditorHost` 的 `templateFor`）：没有通用模板的文件不显示这个
+  按钮。`wizard/uninstall` 是卸载向导骨架——它收集 `wizard_data_action`，卸载回调脚本
+  `cmd/uninstall_callback` 照着它决定删不删数据，两份是一套的，所以模板也配套给。
+  `cmd/main` 是**启停脚本**，按项目类型给两份完全不同的模板（`utils/lifecycle.ts`，官方
+  脚手架的原样文本，别顺手「优化」写法）：非 docker 由脚本自己托管进程（pid 写进
+  `${TRIM_PKGVAR}/app.pid`、日志追加到 `info.log`、TERM 之后等 10 秒再 KILL、status 返回
+  0 / 3）；docker 应用是应用中心拉起的容器，start / stop 直接 `exit 0`，只有 `status`
+  去 `docker inspect` 那个 `container_name`。判据是 `ProjectInfo.docker`（后端按
+  `app/docker/docker-compose.yaml` 是否存在判定，从 `workspace` 的状态读，项目标签打开时
+  它一定已经就位）。给错的表现很隐蔽：脚本语法没问题，但应用中心里「启动」点了没反应。
+  `${...}` 在这种模板字面量里**少转义一个反斜杠就会被当插值吃掉**，所以 `check:editor`
+  钉住两份模板的归属、变量写法和关键语句。
 - **manifest 回写保持原样**：`src/utils/manifest.ts` 逐行记住原文件（含注释、
   空行、对齐风格），只改动真正被编辑的键；`"""多行值"""` 会被正确识别。
   官方 fnpack 的模板是对过齐的，直接按行重排会让 diff 没法看。

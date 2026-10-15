@@ -1,5 +1,6 @@
 /**
- * 校验表单编辑器的「未改动」判据（src/components/editor/useEditor.ts）。
+ * 校验表单编辑器的「未改动」判据（src/components/editor/useEditor.ts），以及
+ * `cmd/main` 的插入模板（src/utils/lifecycle.ts）。
  *
  *   npm run check:editor
  *
@@ -15,6 +16,11 @@
 import { nextTick, reactive } from 'vue'
 import { useEditor } from '../src/components/editor/useEditor.ts'
 import { handoffText } from '../src/utils/handoff.ts'
+import {
+  MAIN_DOCKER_SCRIPT_TEMPLATE,
+  MAIN_SCRIPT_TEMPLATE,
+  mainScriptTemplate,
+} from '../src/utils/lifecycle.ts'
 
 let failed = 0
 const check = (name, got, want) => {
@@ -161,6 +167,37 @@ function makeEditor(disk = DISK) {
     'LIVE SOURCE\n',
   )
 }
+
+// ---- cmd/main 的插入模板 ----
+//
+// 模板是**纯文本**，写错的后果都在界面上：`${...}` 少转义一个反斜杠会被当成插值、
+// 在源码里被换成别的东西（甚至编译报错），docker / 非 docker 两份相互贴错则会让
+// 应用中心里「启动」点了没反应。这两种都不会有编译期或运行期报错，所以钉在这里。
+
+check('非 docker 项目给原生模板', mainScriptTemplate(false), MAIN_SCRIPT_TEMPLATE)
+check('docker 项目给 docker 模板', mainScriptTemplate(true), MAIN_DOCKER_SCRIPT_TEMPLATE)
+check('两份模板不是同一份文本（贴错就是两处都不对）', MAIN_SCRIPT_TEMPLATE === MAIN_DOCKER_SCRIPT_TEMPLATE, false)
+
+for (const [label, text] of [
+  ['原生', MAIN_SCRIPT_TEMPLATE],
+  ['docker', MAIN_DOCKER_SCRIPT_TEMPLATE],
+]) {
+  check(`${label}模板以 bash 开头`, text.startsWith('#!/bin/bash\n'), true)
+  check(`${label}模板以换行结尾（插入后文件末尾有换行）`, text.endsWith('\n'), true)
+  check(`${label}模板有 start / stop / status 三个分支`, /case \$1 in[\s\S]*start\)[\s\S]*stop\)[\s\S]*status\)[\s\S]*esac/.test(text), true)
+  // ${...} 的字面量必须还在：少写一个 \ 会被当插值求值，脚本里的变量就没了
+  check(`${label}模板里的变量写法没被当插值吃掉`, text.includes('${TRIM_PKGVAR}') || text.includes('${TRIM_APPDEST}'), true)
+}
+
+// 原生：自己托管进程（pid 文件 + TERM/KILL），且不该提到 docker
+check('原生模板写 pid 文件', MAIN_SCRIPT_TEMPLATE.includes('${PID_FILE}'), true)
+check('原生模板会发 TERM / KILL', MAIN_SCRIPT_TEMPLATE.includes('kill -TERM') && MAIN_SCRIPT_TEMPLATE.includes('kill -KILL'), true)
+check('原生模板不掺 docker 的东西', /docker/i.test(MAIN_SCRIPT_TEMPLATE), false)
+
+// docker：容器由应用中心管，脚本什么都不做，只 status 去问容器
+check('docker 模板 start 分支什么都不做', MAIN_DOCKER_SCRIPT_TEMPLATE.includes('will be started by appcenter'), true)
+check('docker 模板问的是容器状态', MAIN_DOCKER_SCRIPT_TEMPLATE.includes('docker inspect'), true)
+check('docker 模板不自己写 pid 文件', /PID_FILE/.test(MAIN_DOCKER_SCRIPT_TEMPLATE), false)
 
 console.log(failed ? `\n${failed} 项不通过` : '\n编辑器脏判据检查全部通过')
 process.exit(failed ? 1 : 0)

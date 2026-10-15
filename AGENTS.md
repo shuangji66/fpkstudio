@@ -428,6 +428,14 @@ frontend/src/
   `utils/entries.ts`（入口 id 只存在键名里）。这个字段要在**每次点开下拉时现读**一次磁盘上
   的 config（`ManifestEditor.refreshLaunchOptions`，并进当前值），不然「刚在入口配置里加的
   入口」在下拉里选不到；读不到不弹错、照样能手输。断言在 `check:duplicate`。
+- **「插入模板」按路径给，`cmd/main` 还按项目类型分两份**（`EditorHost` 的 `templateFor` +
+  `utils/lifecycle.ts`）：非 docker 的启停脚本自己托管进程（pid 文件 / TERM / KILL），
+  docker 应用交给应用中心、脚本只做 status；两份都是官方脚手架的原样文本，别「优化」写法。
+  项目类型取 `workspace.state(project).docker`（`ensure()` 填的，项目标签打开时一定就位），
+  不要去读项目列表。模板是模板字面量，**`${...}` 少转义一个反斜杠会被当插值吃掉**（脚本里
+  的变量就没了，而且大概率不报错），所以 `check:editor` 钉住两份模板的归属、变量写法与
+  关键语句。新增模板照这个来：文本放 `utils/lifecycle.ts`（能单独验），组件里只留
+  「哪个路径用哪份」的判断。
 
 ## 交付前自检
 
