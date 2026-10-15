@@ -31,6 +31,20 @@
         @click="toTabs"
       />
       <!--
+        在飞牛的文件管理器里打开项目目录（宿主能力，独立浏览器页面里置灰并说明原因）。
+        说明挂原生 title：工具栏按钮不用 el-tooltip（触屏上点一下就挂着挡内容）。
+      -->
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="FolderOpened"
+        :disabled="!canOpenFolder"
+        :title="canOpenFolder ? t('common.openFolder') : t('trim.error.hostUnavailable')"
+        :aria-label="t('common.openFolder')"
+        @click="openFolder"
+      />
+      <!--
         拖宽左栏的手柄。分隔线本身只有 1px、还没法用手指点中，所以顶栏右侧再放一个
         吸在分隔线上的按钮：按下去就是拖动（事件抛给 ProjectTab，和拖那条线同一段逻辑）。
         touch-none 是必须的：不给的话触屏会把 pointermove 当成滚动手势收走。
@@ -223,6 +237,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useUpload } from './useUpload'
 import { useDownload } from './useDownload'
+import { useOpenFolder } from './useOpenFolder'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { isArchive } from '@/utils/format'
 
@@ -233,6 +248,7 @@ const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const { upload, cancel: cancelUpload, busy: uploading, percent: uploadPercent } = useUpload()
 const { download } = useDownload()
+const { canOpenFolder, openFolder } = useOpenFolder(() => props.project)
 
 const state = computed(() => workspace.state(props.project))
 
@@ -523,7 +539,8 @@ const menuItems = computed<MenuItem[]>(() => {
     label: t('tree.cut'),
     run: () => workspace.copyToClipboard(props.project, path, true),
   })
-  items.push({ label: t('common.download'), run: () => void download(path) })
+  // 目录是后端现打的 zip（`zip: true` 挂一条「正在打包」的提示），文件是直传
+  items.push({ label: t('common.download'), run: () => void download(path, { zip: menu.dir }) })
   if (!menu.dir && isArchive(name)) {
     items.push({ label: t('tree.extract'), run: () => void extract(path) })
   }

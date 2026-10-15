@@ -194,6 +194,61 @@ func TestZipDirKeepsDotNames(t *testing.T) {
 	}
 }
 
+// TestZipDirKeepsTopLevelDir：下载一个目录时，zip 里要有一层和目录同名的最外层目录。
+//
+// 少了这一层，「解压到当前目录」会把 manifest、app 直接撒在用户选的地方，和已有文件
+// 混在一起——所以这是刻意保留的，别当成冗余条目删掉。空目录也得有这一条：整个包只有
+// 它一个成员时才不是一个「没有任何成员的包」（那种包解压工具会直接报错）。
+func TestZipDirKeepsTopLevelDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "demo", "app", "server"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "demo", "manifest"), []byte("appname=demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	x, err := Open(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Close()
+
+	names := func(rel string) []string {
+		t.Helper()
+		var buf bytes.Buffer
+		if err := x.ZipDir(rel, &buf); err != nil {
+			t.Fatalf("ZipDir(%s) 失败: %v", rel, err)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make([]string, 0, len(zr.File))
+		for _, f := range zr.File {
+			out = append(out, f.Name)
+		}
+		return out
+	}
+
+	got := strings.Join(names("demo"), " ")
+	for _, want := range []string{"demo/", "demo/manifest", "demo/app/", "demo/app/server/"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("zip 里缺少条目 %q：%s", want, got)
+		}
+	}
+	// 摊平的那些条目不允许再出现（`demo/manifest` 里也有个 manifest，所以比完整名字）
+	if strings.Contains(got, " manifest") || strings.HasPrefix(got, "manifest") {
+		t.Errorf("顶层不该出现没有目录前缀的条目：%s", got)
+	}
+
+	if empty := names("empty"); len(empty) != 1 || empty[0] != "empty/" {
+		t.Errorf("空目录的 zip 应当只有顶层目录这一条，得到 %v", empty)
+	}
+}
+
 // TestZipDirReportsUnreadableFile：读不了的文件必须让 ZipDir 报错（调用方据此回一句
 // 人话，而不是发一个「里面是 0 字节条目」的残包）。
 func TestZipDirReportsUnreadableFile(t *testing.T) {

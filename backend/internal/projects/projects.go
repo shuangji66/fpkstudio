@@ -801,6 +801,14 @@ func (m *Manager) Pack(ctx context.Context, req PackRequest) ([]PackResult, erro
 	}
 	stagePrj := m.home.Abs(stage + "/project")
 
+	// 打进 fpk 的 manifest 不收格式空格（见 stripManifestSpaces）：`key = value` 收成
+	// `key=value`，值内部的空格原样保留。只改这份暂存副本，用户项目里那份不动。
+	// 失败只记一条日志——格式化失败不该让整次打包失败（真读不了写不了，fnpack 那步
+	// 会自己报出来）。
+	if err := stripStagedManifestSpaces(filepath.Join(stagePrj, "manifest")); err != nil {
+		m.log.Warnf("清理 manifest 里的空格失败: %v", err)
+	}
+
 	m.log.Infof("开始打包 %s (%s)，输出目录 %s", req.Name, version, s.outputDir)
 
 	rounds := targets
@@ -1181,6 +1189,22 @@ func sanitize(name string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-.")
+}
+
+// stripStagedManifestSpaces 把暂存副本里的 manifest 重写成「不带格式空格」的样子。
+//
+// 只写暂存副本：用户项目里的那份 manifest 一个字节都不动（打包全程操作副本）。文件
+// 已经存在，所以这是原地截断重写、模式位不变（模式修正在这之前已经跑过）。
+func stripStagedManifestSpaces(manifestPath string) error {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+	next := stripManifestSpaces(string(data))
+	if next == string(data) {
+		return nil
+	}
+	return os.WriteFile(manifestPath, []byte(next), 0o644)
 }
 
 // setManifestPlatform 在暂存区的 manifest 里改 platform，保留其余字节。

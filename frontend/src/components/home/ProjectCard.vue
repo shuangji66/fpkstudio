@@ -20,6 +20,26 @@
           <el-tag v-if="kindLabel" class="text-sm" :type="kindType" effect="plain">
             {{ kindLabel }}
           </el-tag>
+          <!--
+            置顶标记。“排在最前面”本身看不出是置顶还是巧合，所以标题旁边补一个**图钉**。
+
+            自己画 svg 是因为 Element Plus 的图标集里没有图钉（`Top` 是个向上的箭头，
+            摆在项目名旁边像「排序」或者「回到顶部」）。三个图元：钉帽、带法兰的钉身、
+            针；`fill="currentColor"` 跟着文字色走，尺寸跟着 14px 的标题（0.875rem）。
+          -->
+          <span
+            v-if="pinned"
+            class="shrink-0 text-amber-500 dark:text-amber-400"
+            role="img"
+            :title="t('home.pinned')"
+            :aria-label="t('home.pinned')"
+          >
+            <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+              <rect x="6.6" y="2.4" width="10.8" height="2.8" rx="1" />
+              <path d="M9.5 5.2h5v5.1l3.1 3.9H6.4l3.1-3.9z" />
+              <rect x="11.2" y="14.2" width="1.6" height="6.6" rx="0.8" />
+            </svg>
+          </span>
         </div>
         <p
           v-if="item.name !== projectLabel(item)"
@@ -44,6 +64,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ProjectActions from './ProjectActions.vue'
+import { useProjectsStore } from '@/stores/projects'
 import { projectLabel } from '@/utils/format'
 import type { ProjectInfo } from '@/api/types'
 
@@ -52,8 +73,8 @@ import type { ProjectInfo } from '@/api/types'
  *
  * 首页只有这一种卡片（平铺 / 分页两种视图共用同一张卡）：**点卡片即打开项目**
  * （没有单独的「打开」按钮——卡片就那么点地方，一个占满整行的按钮只是把点击目标变小了）。
- * 重命名 / 导出 / 删除在 ProjectActions 里，打开项目目录也在那儿（「···」左边的文件夹
- * 按钮），它们自己走完整条流程，所以这里只需要把「打开」抛给上层。
+ * 置顶 / 重命名 / 导出 / 删除在 ProjectActions 里，打开项目目录也在那儿（「···」左边的
+ * 文件夹按钮），它们自己走完整条流程，所以这里只需要把「打开」抛给上层。
  *
  * 卡片本身可点，所以内部按钮都要自己挡住冒泡（ProjectActions 里统一 stop），
  * 键盘用户按 Enter / 空格也能打开。
@@ -63,6 +84,10 @@ const props = defineProps<{ item: ProjectInfo }>()
 const emit = defineEmits<{ open: [project: ProjectInfo] }>()
 
 const { t } = useI18n()
+const projects = useProjectsStore()
+
+/** 置顶状态（只在浏览器里，见 utils/pins.ts）：置顶的卡片标题旁多一个图钉。 */
+const pinned = computed(() => projects.isPinned(props.item.name))
 
 /**
  * 卡片上的类型标签。

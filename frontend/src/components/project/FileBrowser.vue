@@ -87,6 +87,23 @@
         :aria-label="t('files.switchToTree')"
         @click="toTree"
       />
+
+      <span class="mx-1 h-4 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+
+      <!--
+        在飞牛的文件管理器里打开项目目录：和上面那批「对文件做什么」不是一类动作，
+        单独隔一组。宿主能力，独立浏览器页面里置灰并说明原因（用原生 title）。
+      -->
+      <el-button
+        text
+        size="default"
+        class="tree-tool"
+        :icon="FolderOpened"
+        :disabled="!canOpenFolder"
+        :title="canOpenFolder ? t('common.openFolder') : t('trim.error.hostUnavailable')"
+        :aria-label="t('common.openFolder')"
+        @click="openFolder"
+      />
     </div>
 
     <!-- 路径：点哪一段就去哪一层，省得只靠「后退」一层层退 -->
@@ -260,6 +277,7 @@ import {
 import type { FsEntry } from '@/api/types'
 import { useUpload } from './useUpload'
 import { useDownload } from './useDownload'
+import { useOpenFolder } from './useOpenFolder'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { formatTime, humanSize, isArchive } from '@/utils/format'
 
@@ -269,6 +287,7 @@ const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const { upload, cancel: cancelUpload, busy: uploading, percent: uploadPercent } = useUpload()
 const { download } = useDownload()
+const { canOpenFolder, openFolder } = useOpenFolder(() => props.project)
 
 const state = computed(() => workspace.state(props.project))
 
@@ -541,7 +560,8 @@ const menuItems = computed<MenuItem[]>(() => {
     danger: true,
     run: () => void remove(),
   })
-  items.push({ label: t('common.download'), run: () => void download(path) })
+  // 目录是后端现打的 zip（`zip: true` 挂一条「正在打包」的提示），文件是直传
+  items.push({ label: t('common.download'), run: () => void download(path, { zip: menu.dir }) })
   if (!menu.dir && isArchive(name)) {
     items.push({ label: t('tree.extract'), run: () => void extract() })
   }

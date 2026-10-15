@@ -99,6 +99,68 @@ func TestParseManifestHandlesCRLF(t *testing.T) {
 	}
 }
 
+// 打包前把 manifest 的格式空格收掉（stripManifestSpaces）：值内部的空格、多行值的
+// 正文、空行都不能动——判断标准就是「解析出来的键值完全不变」。
+func TestStripManifestSpacesKeepsValues(t *testing.T) {
+	src := "# 说明：下面这些对齐都是为了好看\n" +
+		"appname        =    demo   \n" +
+		"display_name   = My App\n" +
+		"distributor_url= https://example.com/?a=1&b=2\n" +
+		"desc = \"\"\"\n" +
+		"  第一行有缩进   \n" +
+		"\n" +
+		"  第三行 = 这不是键值\n" +
+		"\"\"\"\n" +
+		"\tcool=yes\n" +
+		"只有一行说明\n" +
+		"version = 1.0.0 \n"
+
+	got := stripManifestSpaces(src)
+	want := "# 说明：下面这些对齐都是为了好看\n" +
+		"appname=demo\n" +
+		"display_name=My App\n" +
+		"distributor_url=https://example.com/?a=1&b=2\n" +
+		"desc=\"\"\"\n" +
+		"  第一行有缩进   \n" +
+		"\n" +
+		"  第三行 = 这不是键值\n" +
+		"\"\"\"\n" +
+		"cool=yes\n" +
+		"只有一行说明\n" +
+		"version=1.0.0\n"
+
+	if got != want {
+		t.Errorf("格式化结果不对：\n got %q\nwant %q", got, want)
+	}
+	// 判据落到「解析出来的键值」上：格式化只该改书写格式。
+	before, after := parseManifest(src), parseManifest(got)
+	if len(before) != len(after) {
+		t.Fatalf("键的数量变了：%v → %v", before, after)
+	}
+	for k, v := range before {
+		if after[k] != v {
+			t.Errorf("键 %s 的值被改了：%q → %q", k, v, after[k])
+		}
+	}
+}
+
+// 已经没有多余空格时一个字节都不改（打包前那次重写不该凭空改文件）。
+func TestStripManifestSpacesIdempotent(t *testing.T) {
+	src := "appname=demo\ndesc=\"\"\"\n带 空格 的正文\n\"\"\"\n"
+	if got := stripManifestSpaces(src); got != src {
+		t.Errorf("无空格的文件被改了：%q", got)
+	}
+	// 不以换行结尾的文件也不能被补一个换行（splitLines 末尾那个空元素要留住）。
+	noEOL := "appname=demo"
+	if got := stripManifestSpaces(noEOL); got != noEOL {
+		t.Errorf("结尾换行被补上了：%q", got)
+	}
+	// CRLF 归一成 LF（和 parseManifest 读文件时的做法一致）。
+	if got := stripManifestSpaces("appname = demo\r\n"); got != "appname=demo\n" {
+		t.Errorf("CRLF 没被归一：%q", got)
+	}
+}
+
 // setManifestPlatform 是「按行改 manifest」的那一处，必须和 parseManifest 一样跳过
 // `"""` 多行值：desc 正文里出现一行 `platform = x86` 时，改错行的表现是「产物里的
 // platform 和用户选的不一致」，而且描述正文被改坏。

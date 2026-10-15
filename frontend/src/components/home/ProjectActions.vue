@@ -9,13 +9,17 @@
       size="default"
       :icon="FolderOpened"
       :disabled="!canOpenFolder"
-      :title="canOpenFolder ? t('home.openFolder') : t('trim.error.hostUnavailable')"
+      :title="canOpenFolder ? t('common.openFolder') : t('trim.error.hostUnavailable')"
       @click="openFolder"
     />
     <el-dropdown trigger="click" placement="bottom-end" @command="run">
       <el-button text size="default" :icon="MoreFilled" :title="t('home.more')" />
       <template #dropdown>
         <el-dropdown-menu>
+          <!-- 置顶是纯界面动作（状态只在浏览器里），排在最前面 -->
+          <el-dropdown-item command="pin" :icon="Top">
+            {{ pinned ? t('home.unpin') : t('home.pin') }}
+          </el-dropdown-item>
           <el-dropdown-item command="rename" :icon="EditPen">
             {{ t('common.rename') }}
           </el-dropdown-item>
@@ -45,11 +49,12 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CopyDocument, Delete, Download, EditPen, FolderOpened, MoreFilled } from '@element-plus/icons-vue'
-import { copyEntry, downloadEntry, projectExists, readFile, renameEntry, writeFile } from '@/api/endpoints'
+import { CopyDocument, Delete, Download, EditPen, FolderOpened, MoreFilled, Top } from '@element-plus/icons-vue'
+import { copyEntry, projectExists, readFile, renameEntry, writeFile } from '@/api/endpoints'
 import { useProjectsStore } from '@/stores/projects'
 import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useDownload } from '@/components/project/useDownload'
 import { isHostAvailable, openInFileManager } from '@/trim/sdk'
 import { trimErrorMessage } from '@/trim/errors'
 import { rewriteForDuplicate } from '@/utils/duplicate'
@@ -57,7 +62,7 @@ import type { ProjectInfo } from '@/api/types'
 
 /**
  * 项目卡片右上角的操作区：文件夹按钮（在文件管理器里打开项目目录）+「···」菜单
- * （重命名 / 创建副本 / 导出 / 删除）。
+ * （置顶 / 重命名 / 创建副本 / 导出 / 删除）。
  *
  * 三个动作整条流程都在这里走完（改目录 → 处理项目标签 → 播报 → 最后刷列表）。
  * 顺序不能反：`projects.refresh()` 会换掉列表，外层 v-for 的 key 跟着变，
@@ -66,6 +71,10 @@ import type { ProjectInfo } from '@/api/types'
  *
  * 删除只有这一条路，并且一定要过一遍确认弹窗——项目目录是直接删掉的，没有回收站。
  * 重命名改的是**项目目录名**（应用标识在 manifest.appname 里，不在这里动）。
+ *
+ * 置顶（`pin`）只是界面偏好：状态在浏览器里（见 `stores/projects.ts` 的 pinned），
+ * 不请求后端，所以它是唯一一个「点完什么都不用等」的动作——但**改名 / 删除时要把
+ * 置顶表一起改**，否则会留下一条指向不存在项目的记录（见下面的 rename / remove）。
  */
 const props = defineProps<{ item: ProjectInfo }>()
 
@@ -73,6 +82,10 @@ const { t, te } = useI18n()
 const projects = useProjectsStore()
 const tabs = useTabsStore()
 const workspace = useWorkspaceStore()
+const { download } = useDownload()
+
+/** 这个项目当前是不是置顶状态：菜单项在「置顶 / 取消置顶」之间切。 */
+const pinned = computed(() => projects.isPinned(props.item.name))
 
 /**
  * 文件管理器是宿主能力：独立浏览器页面里没有它可开；路径也必须是后端给出来的
@@ -101,15 +114,21 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 const APPNAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{1,30}[A-Za-z0-9]$/
 
 function run(command: string) {
-  if (command === 'rename') void rename()
+  if (command === 'pin') projects.togglePin(props.item.name)
+  else if (command === 'rename') void rename()
   else if (command === 'duplicate') void duplicate()
   else if (command === 'export') exportProject()
   else if (command === 'delete') void remove()
 }
 
-/** 导出：把项目目录打成 zip 交给浏览器下载（后端对目录就是这么处理的）。 */
+/**
+ * 导出：把项目目录打成 zip 交给浏览器下载（后端对目录就是这么处理的，包内带顶层目录）。
+ *
+ * 走后端现压缩这条路，所以挂 `zip: true`：稍大的项目能压好几秒，得先告诉用户「在动」，
+ * 否则看起来像没点中（见 `useDownload`）。
+ */
 function exportProject() {
-  downloadEntry(props.item.name)
+  void download(props.item.name, { zip: true })
 }
 
 async function rename() {
@@ -141,6 +160,8 @@ async function rename() {
     ElMessage.error(e instanceof Error ? e.message : String(e))
     return
   }
+  // 置顶表里存的是项目名，改名之后要跟着换（否则那条置顶就指向一个不存在的项目）
+  projects.renamePinned(from, next)
 
   // 目录名换了，原来那个项目标签指向的路径已经不存在：关掉，按新名字重开一个
   // （未保存的改动在上面提醒过）。新标签的标题先落成目录名，列表刷新后

@@ -72,8 +72,10 @@ frontend/src/
   api/                       endpoints（接口封装）、client（fetch 封装）、types
   stores/                    pinia：projects / tabs / workspace / system / logs / theme / layout
   components/project/        项目内的固定页：文件（标签页模式）/ 总览 / 快捷设置 / 图标，
-                             以及左栏文件树、文件标签；useCloseFile / useUpload / useDownload
-                             三个小组合函数也在这里（关标签的未保存提醒、带进度的上传、下载并报错）
+                             以及左栏文件树、文件标签；useCloseFile / useUpload / useDownload /
+                             useOpenFolder 四个小组合函数也在这里（关标签的未保存提醒、
+                             带进度的上传、下载并报错（目录挂「正在打包」提示）、
+                             在文件管理器里打开项目目录）
   components/editor/         标签页编辑器宿主 + 按路径注册的表单编辑器
   components/home/           首页：项目卡片 / 新建 / 导入
   utils/                     manifest、wizard、icon、format 等纯逻辑（可单独跑检查）
@@ -401,6 +403,31 @@ frontend/src/
   `utils/validate.ts` 的 `checkFormat`（SourceEditor 的 `saveBlocked` 调它）——
   改格式判据要两边都看：`checkFormat` 决定源码视图拦不拦，`saveBlocked` 决定表单视图。
   判据放在 `utils/` 是为了能进 `check:format` 单独验。
+- **`fsx.ZipDir` 默认带一层和目录同名的最外层目录**（只有 `path` 为 `.` 时省掉，那时没有
+  目录名可取）：项目导出和文件管理器的「下载」都走它，摊平会把 `manifest` / `app/` 直接撒
+  在用户选的目标目录里。**空目录也要留下这一个目录条目**——少它就得到一个没有任何成员的
+  「空包」，解压工具直接报错。回归在 `fsx.ZipDirKeepsTopLevelDir`。
+- **打包会清掉 manifest 的格式空格**（`stripManifestSpaces`，`Pack` 里对着**暂存副本**跑
+  一次）：`appname   =   demo  ` → `appname=demo`。值内部的空格、`"""` 多行值的正文、
+  空行与注释都不许动，只去 `key` / `value` 两侧和行尾的空白。判据必须和 `parseManifest`
+  对齐——**先把值 TrimSpace 再判 `"""`**：不 Trim 的话带空格的对齐写法（官方模板就是
+  `desc = """`）认不出来，多行值的正文会被当成普通行逐行去空格改坏（第一版就这么错了，
+  `TestStripManifestSpacesKeepsValues` 钉住）。用户项目里那份 manifest 保持原样。
+- **首页卡片置顶只存浏览器**（`utils/pins.ts` + `stores/projects.ts` 的 `pinned`，键是
+  localStorage 的 `fpkstudio.pinnedProjects`，不进后端、不进 `state.json`）。顺序语义是
+  「先置顶的排前面」，排序必须**稳定**（没置顶的保持后端顺序，用 `sortPinned`，别自己写
+  filter + concat 打乱顺序）。项目**改名 / 删除时置顶表要跟着改**，否则会留下一条指向
+  不存在项目的记录。断言在 `check:paging`。**卡片上那个置顶标记是自己画的 svg 图钉**：
+  Element Plus 的图标集里没有图钉，用 `Top` 会是个向上箭头，摆在项目名旁边像「排序 /
+  回到顶部」（`ProjectCard.vue` 里三个图元：钉帽、带法兰的钉身、针）。
+- **「在文件管理器里打开项目目录」三处共用一个组合函数**（`components/project/useOpenFolder.ts`：
+  首页卡片操作区、左栏文件树顶栏、「文件」标签页顶栏）。它按**项目名**去 `stores/projects`
+  里查 `absPath`，别用 `projectsDir + name` 拼——项目根可以被换成授权目录。独立浏览器页面
+  里置灰并说明原因（宿主能力），说明挂原生 `title`（工具栏按钮不许用 `el-tooltip`）。
+- **manifest 的「默认入口」候选来自 `app/<入口目录>/config` 的 `.url` 键**，读法在
+  `utils/entries.ts`（入口 id 只存在键名里）。这个字段要在**每次点开下拉时现读**一次磁盘上
+  的 config（`ManifestEditor.refreshLaunchOptions`，并进当前值），不然「刚在入口配置里加的
+  入口」在下拉里选不到；读不到不弹错、照样能手输。断言在 `check:duplicate`。
 
 ## 交付前自检
 

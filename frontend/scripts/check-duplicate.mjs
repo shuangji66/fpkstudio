@@ -1,5 +1,6 @@
 /**
- * 「创建副本」的两处文本改写（src/utils/duplicate.ts）。
+ * 「创建副本」的两处文本改写（src/utils/duplicate.ts），以及 manifest「默认入口」下拉
+ * 的候选取值（src/utils/entries.ts，同一份 config 的另一种读法）。
  *
  *   npm run check:duplicate
  *
@@ -8,6 +9,7 @@
  * （fsx.Copy 是复制目录，不会替我们改这些）。所以拿几份真实形状的文本钉住。
  */
 import { replaceEntryPrefix, rewriteForDuplicate } from '../src/utils/duplicate.ts'
+import { entryIds } from '../src/utils/entries.ts'
 
 let failed = 0
 const check = (name, got, want) => {
@@ -79,6 +81,14 @@ check('坏 config 时 manifest 照常改', /appname\s+= copy\n/.test(broken.mani
 const noUrls = rewriteForDuplicate('copy', MANIFEST, '{"docker-project":{}}\n')
 check('没有 .url 时不写回', noUrls.uiConfig, null)
 check('没有 .url 时不算异常跳过', noUrls.uiConfigSkipped, '')
+
+// ---- 入口 id 列表（manifest 的「默认入口」下拉） ----
+check('取出全部入口 id', entryIds(CONFIG), ['myapp.main', 'myapp.Application'])
+check('没有 .url 时没有候选', entryIds('{"docker-project":{}}'), [])
+check('解析不了时没有候选（也不报错）', entryIds('{oops'), [])
+check('.url 不是对象时没有候选', entryIds('{".url":[]}'), [])
+check('空文本没有候选', entryIds(''), [])
+check('顺序就是文件里的书写顺序（不排序）', entryIds('{".url":{"b.x":{},"a.y":{}}}'), ['b.x', 'a.y'])
 
 console.log(failed ? `\n${failed} 项不通过` : '\n创建副本的文本改写检查全部通过')
 process.exit(failed ? 1 : 0)

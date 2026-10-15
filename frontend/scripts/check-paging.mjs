@@ -1,5 +1,5 @@
 /**
- * 首页项目的排版算术与文案映射（src/utils/paging.ts）。
+ * 首页项目的排版算术 / 文案映射（src/utils/paging.ts）与置顶排序（src/utils/pins.ts）。
  *
  *   npm run check:paging
  *
@@ -15,6 +15,7 @@ import {
   fitGrid,
   rankKeyFor,
 } from '../src/utils/paging.ts'
+import { addPin, removePin, renamePin, sortPinned, togglePin } from '../src/utils/pins.ts'
 
 let failed = 0
 const check = (name, got, want) => {
@@ -76,6 +77,31 @@ check('50 个仍在第四档', rankKeyFor(50), 'home.ranks.tier4')
 check('51 个才是打包之神', rankKeyFor(51), 'home.ranks.tier5')
 check('负数也走第一档（这一行本来就不渲染）', rankKeyFor(-3), 'home.ranks.tier0')
 
+// ---- 置顶：增删、顺序、稳定性 ----
+const P = (...names) => names.map((name) => ({ name }))
+
+check('置顶表为空时原样返回（顺序不动）', sortPinned(P('a', 'b', 'c'), []), P('a', 'b', 'c'))
+check('置顶的排到最前面', sortPinned(P('a', 'b', 'c'), ['c']), P('c', 'a', 'b'))
+check('多个置顶时先置顶的在前', sortPinned(P('a', 'b', 'c'), ['c', 'b']), P('c', 'b', 'a'))
+check('没置顶的保持原来的相对顺序', sortPinned(P('a', 'b', 'c', 'd'), ['d', 'b']), P('d', 'b', 'a', 'c'))
+check('置顶表里的陌生名字不影响排序（项目被删掉了）', sortPinned(P('a', 'b'), ['gone', 'b']), P('b', 'a'))
+
+check('置顶一次', addPin([], 'a'), ['a'])
+check('重复置顶不产生第二项', addPin(['a'], 'a'), ['a'])
+check('新置顶排在已有置顶后面', addPin(['a'], 'b'), ['a', 'b'])
+check('取消置顶', removePin(['a', 'b'], 'a'), ['b'])
+check('取消一个没置顶的不报错', removePin(['a'], 'b'), ['a'])
+check('点一下置顶', togglePin(['a'], 'b'), ['a', 'b'])
+check('再点一下取消', togglePin(['a', 'b'], 'b'), ['a'])
+check('取消再置顶会排到最后（最近置顶的离手最近）', addPin(removePin(['a', 'b'], 'a'), 'a'), ['b', 'a'])
+check('改名时置顶跟着走', renamePin(['a', 'b'], 'a', 'c'), ['c', 'b'])
+check('没置顶的项目改名不影响置顶表', renamePin(['a'], 'b', 'c'), ['a'])
+check('原数组不被改动', (() => {
+  const source = ['a']
+  addPin(source, 'b')
+  return source
+})(), ['a'])
+
 // ---- 不变量：perPage 至少 1，且列数随宽度单调不减 ----
 let prev = 0
 for (const w of [200, 300, 500, 600, 900, 1400, 2000]) {
@@ -88,6 +114,21 @@ for (const w of [200, 300, 500, 600, 900, 1400, 2000]) {
   if (fitGrid(w, H).perPage < 1) {
     failed++
     console.log(`FAIL perPage 恒 >= 1（宽度 ${w}）`)
+  }
+}
+
+
+// ---- 置顶的顺序是稳定的：同名项目重复出现在不同的输入顺序里也要给出同一套结果 ----
+{
+  const once = sortPinned(P('a', 'b', 'c'), ['b'])
+  const twice = sortPinned(P('a', 'b', 'c'), ['b'])
+  if (JSON.stringify(once) !== JSON.stringify(twice)) {
+    failed++
+    console.log('FAIL 同一份输入应当给出同一套排序结果')
+  }
+  if (once.map((p) => p.name).join() !== 'b,a,c') {
+    failed++
+    console.log(`FAIL 置顶排序结果不对：${once.map((p) => p.name).join()}`)
   }
 }
 

@@ -63,6 +63,27 @@
                 :value="option.value"
               />
             </el-select>
+            <!--
+              默认入口：既能从下拉里挑，也能直接敲。候选是**每次打开下拉时现读**的
+              `app/<入口目录>/config` 里的入口 id（见 refreshLaunchOptions）——在入口配置
+              里刚加的那个入口，回来填默认入口时就得能选到，而不是停在打开编辑器那一刻的
+              快照上。
+            -->
+            <el-select
+              v-else-if="field.type === 'entry'"
+              v-model="model.form[field.key]"
+              size="default"
+              class="w-full"
+              filterable
+              allow-create
+              default-first-option
+              :reserve-keyword="false"
+              :loading="launchLoading"
+              :placeholder="t('fields.entryPlaceholder')"
+              @visible-change="onLaunchVisible"
+            >
+              <el-option v-for="id in launchOptions" :key="id" :label="id" :value="id" />
+            </el-select>
             <TagSelect
               v-else-if="field.type === 'list'"
               v-model="model.lists[field.key]"
@@ -79,16 +100,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { QuestionFilled, WarningFilled } from '@element-plus/icons-vue'
 import { Manifest } from '@/utils/manifest'
+import { readFile } from '@/api/endpoints'
+import { entryIds } from '@/utils/entries'
 import { useLayoutStore } from '@/stores/layout'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useEditor, type EditorProps } from '../useEditor'
 import TagSelect from '../TagSelect.vue'
 
-type FieldType = 'input' | 'textarea' | 'switch' | 'select' | 'list'
+type FieldType = 'input' | 'textarea' | 'switch' | 'select' | 'list' | 'entry'
 
 interface FieldDef {
   key: string
@@ -283,7 +306,8 @@ const rows: FieldRow[] = [
   {
     fields: [
       { key: 'desktop_uidir', type: 'input', placeholder: 'ui' },
-      { key: 'desktop_applaunchname', type: 'input' },
+      // 默认入口的候选来自 `app/<入口目录>/config` 的 `.url` 键，点开下拉时现读一次
+      { key: 'desktop_applaunchname', type: 'entry' },
     ],
   },
   // 依赖应用：多选标签要宽度，自己占一整行，紧挨在开关上面
@@ -396,6 +420,52 @@ function listOptions(field: FieldDef): string[] {
   const presets = field.presets ?? []
   return [...presets, ...selected.filter((item) => !presets.includes(item))]
 }
+
+/**
+ * 「默认入口」下拉的候选 = 配置里的入口 id + 当前值。
+ *
+ * 当前值也并进去：这份 manifest 里可能填着一个在 config 里已经不存在（或者还没读出来）
+ * 的 id，不列出来的话 `el-select` 会把它显示成空的样子，用户一保存就把它弄丢了。
+ */
+const launchIds = ref<string[]>([])
+const launchLoading = ref(false)
+const launchOptions = computed(() => {
+  const current = (model.value.form.desktop_applaunchname ?? '').trim()
+  const ids = launchIds.value
+  return current && !ids.includes(current) ? [current, ...ids] : ids
+})
+
+/**
+ * 现读一遍 `app/<入口目录>/config`，把里面的入口 id 当下拉候选。
+ *
+ * 读的是**磁盘上的最新内容**（`readFile`，不走 workspace 的编辑器缓存）：用户常常先在
+ * 「入口配置」里加一个入口，回来才填默认入口，缓存里那份可能还没保存 / 还是旧的。
+ * 读不到（没有 config、路径换了、没权限）就当没有候选——这只是「没得挑」，用户照样能
+ * 手输，所以不弹错。
+ */
+async function refreshLaunchOptions(): Promise<void> {
+  const project = props.project
+  if (!project) return
+  // 入口目录以表单里当前填的为准（默认 ui，见 fieldsHelp.desktop_uidir）
+  const uidir = (model.value.form.desktop_uidir ?? '').trim() || 'ui'
+  launchLoading.value = true
+  try {
+    const res = await readFile(`${project}/app/${uidir}/config`)
+    launchIds.value = entryIds(res.content)
+  } catch {
+    launchIds.value = []
+  } finally {
+    launchLoading.value = false
+  }
+}
+
+/** 下拉展开时才读（点输入框也算展开）。收起那一下不用再读一次。 */
+function onLaunchVisible(visible: boolean): void {
+  if (visible) void refreshLaunchOptions()
+}
+
+// 挂载时先读一次：不点开也能看到候选里有哪几个入口。
+onMounted(() => void refreshLaunchOptions())
 
 /**
  * platform=all 但项目里已经放了架构目录时提醒一下。

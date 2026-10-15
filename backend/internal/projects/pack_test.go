@@ -17,7 +17,8 @@ import (
 //
 // 真 fnpack 不在构建机上，而 Pack 的绝大多数分支（暂存、架构目录替换、产物落地）
 // 都在调它之前或之后，用假脚本就能覆盖到；脚本还会把暂存区 app/server 下的文件清单
-// 写进 $FPKSTUDIO_TEST_STAGE，用来断言「架构目录真的替换了 server 目录」。
+// 写进 $FPKSTUDIO_TEST_STAGE，用来断言「架构目录真的替换了 server 目录」；设了
+// $FPKSTUDIO_TEST_MANIFEST 时再复制一份暂存区的 manifest，用来断言打包前的格式化。
 func fakeFnpack(t *testing.T, appname string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -25,6 +26,7 @@ func fakeFnpack(t *testing.T, appname string) string {
 	script := `#!/bin/sh
 if [ "$1" = "build" ]; then
   find app/server -type f | sort > "$FPKSTUDIO_TEST_STAGE"
+  if [ -n "$FPKSTUDIO_TEST_MANIFEST" ]; then cp manifest "$FPKSTUDIO_TEST_MANIFEST"; fi
   printf 'fake-fpk' > ` + appname + `.fpk
 fi
 exit 0
@@ -312,5 +314,47 @@ func TestPackAllowsVersionWithDashesAndDots(t *testing.T) {
 	}
 	if results[0].File != "demo-1.0.0-beta.2+build7-x86.fpk" {
 		t.Errorf("产物名 = %q", results[0].File)
+	}
+}
+
+// TestPackStripsManifestSpaces：打进 fpk 的 manifest 不带格式空格（`key = value` 收成
+// `key=value`），而**值内部的空格一个都不能少**（`My App` → `MyApp` 就是改了应用名）。
+// 用户项目里那份 manifest 也必须原样留着——打包全程只改暂存副本。
+func TestPackStripsManifestSpaces(t *testing.T) {
+	m, _ := newPackManager(t)
+	src := "appname        = demo\nversion = 1.0.0\ndisplay_name   = My App\nplatform  =  x86\n"
+	seedProjectWithManifest(t, m.ProjectRoot(), src)
+
+	t.Setenv("FPKSTUDIO_TEST_STAGE", filepath.Join(t.TempDir(), "stage.txt"))
+	manifestDump := filepath.Join(t.TempDir(), "manifest.copy")
+	t.Setenv("FPKSTUDIO_TEST_MANIFEST", manifestDump)
+
+	results, err := m.Pack(context.Background(), PackRequest{
+		Name:      "demo",
+		Platforms: []string{"arm"},
+		ServerDir: "app/server",
+	})
+	if err != nil {
+		t.Fatalf("Pack 返回错误: %v", err)
+	}
+	if len(results) != 1 || !results[0].OK {
+		t.Fatalf("打包失败：%+v", results)
+	}
+
+	got, err := os.ReadFile(manifestDump)
+	if err != nil {
+		t.Fatalf("假 fnpack 没有留下 manifest 副本: %v", err)
+	}
+	want := "appname=demo\nversion=1.0.0\ndisplay_name=My App\nplatform=arm\n"
+	if string(got) != want {
+		t.Errorf("包里的 manifest 不对：\n got %q\nwant %q", got, want)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(m.ProjectRoot(), "demo", "manifest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != src {
+		t.Errorf("用户项目里的 manifest 被改了：\n got %q\nwant %q", raw, src)
 	}
 }

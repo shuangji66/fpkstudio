@@ -535,7 +535,15 @@ func inheritMode(fi os.FileInfo) os.FileMode {
 	return perm
 }
 
-// ZipDir 把目录打包成 zip 写到 w（用于「下载整个项目」）。
+// ZipDir 把目录打包成 zip 写到 w（用于「下载整个项目」/「下载目录」）。
+//
+// zip 里**保留一层顶层目录**（名字取 rel 的最后一段）：解压出来是一个目录，而不是把
+// 内容直接撒在解压目标里。项目根里全是 `manifest`、`app/` 这种大众名字，摊平之后
+// 「解压到当前目录」会和用户已有的文件混在一起；有这一层，解压到哪儿都独占一个目录。
+//
+// rel 为 "."（沙箱根本身）时不加这一层：这时没有目录名可取（`path.Base(".")` 就是
+// "."），硬拼出来的 `./manifest` 不是一层目录，反而会让部分解压工具在目标里再建一个
+// 名字可疑的目录。
 func (x *Root) ZipDir(rel string, w io.Writer) error {
 	rel, err := Rel(rel)
 	if err != nil {
@@ -543,6 +551,15 @@ func (x *Root) ZipDir(rel string, w io.Writer) error {
 	}
 	zw := zip.NewWriter(w)
 	base := rel
+	prefix := ""
+	if base != "." {
+		prefix = path.Base(base) + "/"
+		// 顶层目录自己也要有一条记录：源目录为空时整个 zip 就只剩它；少这一条会得到
+		// 一个没有任何成员的「空包」，解压工具直接报错，而不是解出一个空目录。
+		if _, err := zw.Create(prefix); err != nil {
+			return err
+		}
+	}
 	err = x.walk(rel, func(cur string, fi os.FileInfo) error {
 		hdr, err := zip.FileInfoHeader(fi)
 		if err != nil {
@@ -552,7 +569,7 @@ func (x *Root) ZipDir(rel string, w io.Writer) error {
 		if name == "" {
 			return nil
 		}
-		hdr.Name = name
+		hdr.Name = prefix + name
 		if fi.IsDir() {
 			hdr.Name += "/"
 		} else {
