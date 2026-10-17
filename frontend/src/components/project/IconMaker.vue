@@ -164,7 +164,7 @@ const props = defineProps<{
 /** 工作尺寸（取景框输出方图的边长）。项目图标页要拿它算小图缩放，所以做成 v-model。 */
 const size = defineModel<number>('size', { default: 256 })
 
-const emit = defineEmits<{ change: [state: { hasImage: boolean; svg: boolean }] }>()
+const emit = defineEmits<{ change: [state: { hasImage: boolean }] }>()
 
 const { t } = useI18n()
 
@@ -188,6 +188,14 @@ const image = shallowRef<HTMLImageElement | null>(null)
 const imageURL = ref('')
 /** 当前图片的 object URL：换图或离开页面时释放（见 utils/icon.imageFromFile 的说明）。 */
 let objectURL = ''
+
+/**
+ * 底图有没有变化，通知外面。
+ *
+ * 用 watch 而不是在换图的函数里发一次：以后加「清空图片」时这里会自然回到 false，
+ * 首页弹窗的「导出图片」不会停在可点状态（它只认这个布尔值）。
+ */
+watch(image, (img) => emit('change', { hasImage: Boolean(img) }))
 
 /** 取景框状态（位置与缩放），计算规则都在 utils/icon.ts 里。 */
 const view = reactive<CropView>({ x: 0, y: 0, zoom: 1 })
@@ -370,13 +378,15 @@ function applyImage(next: HTMLImageElement, url: string, revokable = '', svg = f
   // 换图后回到「铺满 + 居中」，避免沿用上一张的偏移
   resetView()
   clampRadius()
-  emit('change', { hasImage: true, svg })
 }
 
 /** 载入一个站内地址的图片；调用方按顺序试，用来找项目里的默认底图。 */
 async function loadFromURL(url: string): Promise<boolean> {
   try {
-    applyImage(await imageFromURL(url), url, '', looksSVG(url))
+    const next = await imageFromURL(url)
+    // 解码期间用户可能自己选了一张：默认图这时不能再盖回去
+    if (image.value) return false
+    applyImage(next, url, '', looksSVG(url))
     return true
   } catch {
     return false
@@ -392,7 +402,9 @@ watch(
   async () => {
     if (image.value) return
     for (const url of props.defaultSources ?? []) {
-      if (await loadFromURL(url)) return
+      const loaded = await loadFromURL(url)
+      // 载入失败就试下一个；这期间用户自己选了图也停手（别用默认图盖掉他的选择）
+      if (loaded || image.value) return
     }
   },
   { immediate: true },

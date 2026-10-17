@@ -9,7 +9,7 @@
  *  3. 缩放以指针为锚，锚点底下的图片坐标不跑；
  *  4. 取景框对应的原图矩形始终落在图片范围内；
  *  5. canvas 侧：按源矩形裁剪、圆角半径夹到一半、导出尺寸与文件名正确；
- *     SVG 底色只认十六进制写法，且先垫底再画图；
+ *     SVG 底色只认十六进制写法、先垫底再画图，非方形源也铺满方图；
  *  6. 副入口图标的前缀要真的收进 app/ui/images/ 里（它直接拼进文件名）。
  *
  * canvas 用最小替身，只记录调用参数——这里验的是几何，不是渲染结果。
@@ -190,7 +190,9 @@ const withBg = withBackground(cropped, '#112233')
 check('底色：输出与工作尺寸一致', [withBg.width, withBg.height], [256, 256])
 check('底色：先整张填色', withBg.ctx.ops.find((op) => Array.isArray(op) && op[0] === 'fillRect'), ['fillRect', 0, 0, 256, 256])
 check('底色：填的是规整后的颜色', withBg.ctx.ops.find((op) => Array.isArray(op) && op[0] === 'fillStyle'), ['fillStyle', '#112233'])
-check('底色：再把原图垫在上面', withBg.ctx.calls.map((args) => args.slice(1)), [[0, 0]])
+check('底色：再把原图按方图铺满', withBg.ctx.calls.map((args) => args.slice(1)), [[0, 0, 256, 256]])
+const stretched = withBackground(new FakeImage(800, 400), '#112233')
+check('底色：非方形源也铺满方图', stretched.ctx.calls[0].slice(1), [0, 0, 800, 800])
 
 created.length = 0
 const rounded = roundCorners(cropped, 500)

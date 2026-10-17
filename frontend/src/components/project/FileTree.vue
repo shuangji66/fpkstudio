@@ -134,7 +134,7 @@
               v-model="renameValue"
               class="mono min-w-0 flex-1 rounded border border-sky-400 px-1 text-sm outline-none"
               @click.stop
-              @keydown.enter.stop="commitRename(row.path)"
+              @keydown.enter.stop="onRenameEnter($event, row.path)"
               @keydown.esc.stop="cancelEdit"
               @blur="cancelEdit"
             />
@@ -168,7 +168,7 @@
             v-model="editing.name"
             class="mono min-w-0 flex-1 rounded border border-sky-400 px-1 text-sm outline-none"
             :placeholder="t('tree.namePrompt')"
-            @keydown.enter.stop="commitCreate"
+            @keydown.enter.stop="onCreateEnter($event)"
             @keydown.esc.stop="cancelEdit"
             @blur="cancelEdit"
           />
@@ -240,6 +240,7 @@ import { useDownload } from './useDownload'
 import { useOpenFolder } from './useOpenFolder'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { isArchive } from '@/utils/format'
+import { onEnter } from '@/utils/keyboard'
 
 const props = defineProps<{ project: string }>()
 const emit = defineEmits<{ resizeStart: [event: PointerEvent] }>()
@@ -381,6 +382,20 @@ async function commitRename(path: string) {
 function cancelEdit() {
   editing.value = null
   renaming.value = ''
+}
+
+/**
+ * 回车提交（新建 / 重命名）。
+ *
+ * 组词中的回车是输入法在选词，不能当成提交——名字里带中文时尤其明显
+ * （见 utils/keyboard.ts）。
+ */
+function onCreateEnter(event: Event) {
+  onEnter(event, () => void commitCreate())
+}
+
+function onRenameEnter(event: Event, path: string) {
+  onEnter(event, () => void commitRename(path))
 }
 
 // ---- 右键菜单 ----

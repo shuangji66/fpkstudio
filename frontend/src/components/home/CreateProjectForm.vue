@@ -10,7 +10,7 @@
           class="w-64"
           size="default"
           :placeholder="t('home.create.namePlaceholder')"
-          @keyup.enter="submit"
+          @keydown.enter="onEnterKey"
         />
       </div>
 
@@ -45,6 +45,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { useProjectsStore } from '@/stores/projects'
+import { onEnter } from '@/utils/keyboard'
 import type { ProjectInfo } from '@/api/types'
 
 const emit = defineEmits<{
@@ -61,6 +62,8 @@ const withUi = ref(true)
 const loading = ref(false)
 
 async function submit() {
+  // 回车不看按钮的 loading 态，连按两下会发两次创建请求
+  if (loading.value) return
   const value = name.value.trim()
   if (!value) {
     ElMessage.warning(t('home.create.nameRequired'))
@@ -76,5 +79,10 @@ async function submit() {
   } finally {
     loading.value = false
   }
+}
+
+/** 回车 = 创建（组词中的回车不算，见 utils/keyboard.ts）。 */
+function onEnterKey(event: Event) {
+  onEnter(event, () => void submit())
 }
 </script>

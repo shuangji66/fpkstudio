@@ -19,8 +19,11 @@
     -->
     <IconMaker ref="maker" class="pt-1" @change="onChange" />
 
+    <!--
+      底部只留「导出图片」：关窗有标题栏那个 × 和遮罩 / Esc，不用再摆一个「关闭」——
+      它和 × 做的是同一件事，还占掉一行视觉重量。
+    -->
     <template #footer>
-      <el-button size="default" @click="visible = false">{{ t('common.close') }}</el-button>
       <el-button
         size="default"
         type="primary"

@@ -196,6 +196,10 @@ frontend/src/
   `<script>` → `<template>` → `<style>`。组件超过一个明确职责就拆。
 - **UI 文案全部走 i18n**，不要在组件里硬编码中文（历史遗留：manifest 的
   `platform` 选项直接写在字段表里，改文案时注意两份语言包都要动）。
+- **回车提交先过输入法**：新建文件 / 目录、重命名、新建项目、入口 id 这类输入框的
+  `@keydown.enter` 用 `utils/keyboard.ts` 的 `onEnter(event, run)`，别直接绑提交函数——
+  中文输入法用回车选词时 `isComposing` 为真，直接提交会把还差一半的名字建出去。
+  **必须挂 `keydown`**：组词提交之后那一下 `keyup` 里 `isComposing` 已经是 false，判不到。
 - **界面字号统一 14px**（现在首页和弹窗也是）：带字的控件显式 `size="default"`
   （全局配的是 `size: 'small'` = 12px），`el-tag` 还要 `class="text-sm"`（它的字号
   写死在 `--el-tag-font-size` 里，size 只改高度内边距）；**只有图标**的按钮保持

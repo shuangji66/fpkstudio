@@ -22,7 +22,7 @@
         v-model="newId"
         class="mono my-1 w-40 shrink-0 rounded border border-sky-400 px-1 text-[12px] outline-none"
         placeholder="myapp.main"
-        @keydown.enter="commitAdd"
+        @keydown.enter="onAddEnter"
         @keydown.esc="adding = false"
         @blur="commitAdd"
       />
@@ -76,7 +76,7 @@
                 size="default"
                 class="mono"
                 placeholder="myapp.Application"
-                @keydown.enter="commitId"
+                @keydown.enter="onIdEnter"
                 @blur="commitId"
               />
             </div>
@@ -191,6 +191,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Plus } from '@element-plus/icons-vue'
 import { revealActive, wheelToHorizontal } from '@/utils/scroll'
+import { onEnter } from '@/utils/keyboard'
 import { useLayoutStore } from '@/stores/layout'
 import { parseJSON, stringifyOrdered, useEditor, type EditorProps } from '../useEditor'
 
@@ -367,6 +368,12 @@ function commitId() {
   model.value.urls = next
   selected.value = to
 }
+
+/** 回车提交入口 id；组词中的回车不算（见 utils/keyboard.ts）。 */
+function onIdEnter(event: Event) {
+  onEnter(event, commitId)
+}
+
 const adding = ref(false)
 const newId = ref('')
 const addInput = ref<HTMLInputElement | null>(null)
@@ -389,6 +396,11 @@ function commitAdd() {
   if (!id || model.value.urls[id]) return
   model.value.urls[id] = normalizeEntry({ title: id.split('.')[1] ?? id })
   selected.value = id
+}
+
+/** 回车提交新入口 id；组词中的回车不算（见 utils/keyboard.ts）。 */
+function onAddEnter(event: Event) {
+  onEnter(event, commitAdd)
 }
 
 /**

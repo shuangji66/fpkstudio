@@ -16,7 +16,7 @@
       size="default"
       :placeholder="t('tree.namePrompt')"
       :aria-label="t('tree.namePrompt')"
-      @keyup.enter="submit('file')"
+      @keydown.enter="onEnterKey"
     />
 
     <template #footer>
@@ -36,6 +36,7 @@ import { nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElInput } from 'element-plus'
 import { useLayoutStore } from '@/stores/layout'
+import { onEnter } from '@/utils/keyboard'
 
 /**
  * 「新建」弹窗：**新建目录和新建文件共用一个名字输入框**，动作按钮本身就是「建什么」的
@@ -72,5 +73,10 @@ function focusInput() {
 
 function submit(kind: 'file' | 'dir') {
   emit('submit', kind, name.value)
+}
+
+/** 回车 = 新建文件（组词中的回车不算，见 utils/keyboard.ts）。 */
+function onEnterKey(event: Event) {
+  onEnter(event, () => submit('file'))
 }
 </script>

@@ -247,13 +247,16 @@ export function normalizeHexColor(input: string): string | null {
  *
  * 先填满再画图，顺序不能反：反过来的话底色会盖住图片本身。SVG 的透明区域
  * 由这一层补上，圆角仍在下一步切（四角保持透明，不是涂成底色）。
+ *
+ * 画图时显式给 `side × side` 的目标矩形：源不一定是方图（比如直接传一张
+ * `<img>` 进来），不写尺寸会按自然大小落下去、把方图铺不满。
  */
 export function withBackground(source: Source, color: string): Raster {
   const side = sizeOf(source).w
   return raster(side, (ctx) => {
     ctx.fillStyle = color
     ctx.fillRect(0, 0, side, side)
-    ctx.drawImage(source, 0, 0)
+    ctx.drawImage(source, 0, 0, side, side)
   })
 }
 
