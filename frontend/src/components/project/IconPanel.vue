@@ -2,101 +2,11 @@
   <div class="h-full min-h-0 overflow-y-auto thin-scroll px-4 py-4">
     <div class="mx-auto max-w-3xl space-y-3">
       <div class="flex flex-wrap items-start justify-center gap-6">
-        <!-- 取景框：拖动平移、滚轮/滑块缩放，框内就是将要写出去的方图 -->
-        <div class="shrink-0">
-          <div
-            class="relative mx-auto cursor-grab touch-none overflow-hidden outline-1 outline-dashed transition-colors"
-            :class="[
-              image ? 'outline-amber-400' : 'outline-sky-400 hover:bg-sky-50/60 dark:hover:bg-sky-950/40',
-              dragging ? 'cursor-grabbing' : '',
-            ]"
-            :style="stageStyle"
-            :title="image ? t('iconTab.dragTip') : t('iconTab.pick')"
-            @pointerdown="startDrag"
-            @pointermove="onDrag"
-            @pointerup="endDrag"
-            @pointercancel="endDrag"
-            @wheel.prevent="onWheel"
-            @dragover.prevent
-            @dragenter.prevent="draggingFile = true"
-            @dragleave.prevent="draggingFile = false"
-            @drop.prevent="onDrop"
-            @click="image ? undefined : pick()"
-          >
-            <img
-              v-if="image"
-              :src="imageURL"
-              class="pointer-events-none absolute max-w-none select-none"
-              :style="imageStyle"
-              draggable="false"
-              alt=""
-            />
-            <span
-              v-else
-              class="flex h-full items-center justify-center px-4 text-center text-sm leading-relaxed text-slate-400 dark:text-slate-500"
-            >
-              {{ t('iconTab.pickHint') }}
-            </span>
-
-            <div
-              v-if="draggingFile"
-              class="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-slate-800/80 text-sm text-sky-600 dark:text-sky-400"
-            >
-              {{ t('iconTab.drop') }}
-            </div>
-          </div>
-
-          <p class="mt-2 text-center text-sm text-slate-500 dark:text-slate-400">
-            {{ image ? t('iconTab.cropTip') : t('iconTab.pickTip') }}
-          </p>
-
-          <div
-            class="mx-auto mt-2 grid w-[16rem] grid-cols-[2.5rem_1fr] items-center gap-x-2 gap-y-1.5 text-sm text-slate-600 dark:text-slate-300"
-          >
-            <span>{{ t('iconTab.zoom') }}</span>
-            <el-slider
-              v-model="zoomSlider"
-              size="default"
-              :min="minZoom"
-              :max="maxZoom"
-              :step="0.01"
-              :disabled="!image"
-              :show-tooltip="false"
-              @input="onZoomSlide"
-            />
-
-            <span>{{ t('iconTab.size') }}</span>
-            <el-input-number
-              v-model="workSize"
-              size="default"
-              :min="32"
-              :max="4096"
-              :disabled="!image"
-              controls-position="right"
-              class="w-28"
-              @change="clampRadius"
-            />
-
-            <span>{{ t('iconTab.radius') }}</span>
-            <el-slider
-              v-model="radius"
-              size="default"
-              :min="0"
-              :max="Math.floor(workSize / 2)"
-              :disabled="!image"
-            />
-
-            <span />
-            <div class="flex items-center gap-2">
-              <el-button size="default" :icon="Picture" :disabled="!image" @click="pick">
-                {{ t('iconTab.replace') }}
-              </el-button>
-              <el-button size="default" :disabled="!image" @click="resetView">
-                {{ t('iconTab.resetView') }}
-              </el-button>
-            </div>
-          </div>
-        </div>
+        <!--
+          取景框和输出参数（缩放 / 尺寸 / 圆角 / SVG 底色）在 IconMaker 里：
+          首页的「图标」弹窗也用同一份，两处「框里看到的就是导出的方图」必须是一套换算。
+        -->
+        <IconMaker ref="maker" v-model:size="workSize" :default-sources="defaultSources" />
 
         <!-- 保存目标 -->
         <div class="min-w-[19rem] flex-1 space-y-2">
@@ -195,37 +105,27 @@
       </div>
     </div>
 
-    <input ref="input" type="file" accept="image/*" class="hidden" @change="onPick" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Picture, Plus, Upload } from '@element-plus/icons-vue'
+import { Delete, Plus, Upload } from '@element-plus/icons-vue'
 import { rawURL } from '@/api/client'
 import { listDir } from '@/api/endpoints'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
-  clampView,
-  cropRegion,
   entryIconPath,
   entryIconPrefixes,
   ENTRY_ICON_DIR,
-  fitView,
   ICON_PREFIX_MAX,
   IconError,
-  imageFromFile,
-  imageFromURL,
-  maxZoomOf,
   normalizeIconPrefix,
   rasterToPngFile,
-  roundCorners,
-  viewToSource,
-  zoomView,
-  type CropView,
 } from '@/utils/icon'
+import IconMaker from './IconMaker.vue'
 import IconTargetRow from './IconTargetRow.vue'
 
 const props = defineProps<{ project: string }>()
@@ -244,9 +144,6 @@ function errText(e: unknown): string {
   if (e instanceof IconError) return t(e.key)
   return e instanceof Error ? e.message : String(e)
 }
-
-/** 取景框的屏幕边长。图片按 zoom 缩放后摆在这个方框里，框内即结果。 */
-const STAGE = 256
 
 /** 进页面默认载入的底图：项目里已有的应用大图标。 */
 const DEFAULT_ICON = 'ICON_256.PNG'
@@ -476,35 +373,16 @@ function adoptEntries(fileNames: string[]) {
   }
 }
 
-// ---- 取景框状态 ----
+// ---- 状态 ----
 
-const input = ref<HTMLInputElement | null>(null)
-const draggingFile = ref(false)
-const dragging = ref(false)
+/** 取景框组件（取景 / 缩放 / 尺寸 / 圆角 / SVG 底色都在里面）。 */
+const maker = ref<InstanceType<typeof IconMaker> | null>(null)
+
 const saving = ref(false)
 const progress = reactive({ done: 0, total: 0 })
 
-/**
- * 原图。必须是 shallowRef：HTMLImageElement 被 reactive 包一层代理之后，
- * drawImage 拿到的就不是那张真实的图像了。
- */
-const image = shallowRef<HTMLImageElement | null>(null)
-const imageURL = ref('')
-/** 当前图片的 object URL：换图或离开页面时释放（见 utils/icon.imageFromFile 的说明）。 */
-let objectURL = ''
-
-/** 取景框状态（位置与缩放），计算规则都在 utils/icon.ts 里。 */
-const view = reactive<CropView>({ x: 0, y: 0, zoom: 1 })
-const zoomSlider = ref(1)
-
+/** 工作尺寸（取景框输出方图的边长）：小图缩放按它算。 */
 const workSize = ref(256)
-/**
- * 圆角半径，单位是「工作尺寸」的像素。
- *
- * 取景框固定 256px 显示，所以预览的圆角要按 256/workSize 换算——这和导出时
- * 「先按 workSize 切圆角、再缩到目标尺寸」是同一个比例，所见即所得。
- */
-const radius = ref(0)
 /**
  * 小图缩放。
  *
@@ -513,225 +391,47 @@ const radius = ref(0)
  */
 const smallScale = ref(1)
 
-const imageStyle = computed(() => {
-  const img = image.value
-  if (!img) return {}
-  return {
-    left: `${view.x}px`,
-    top: `${view.y}px`,
-    width: `${img.naturalWidth * view.zoom}px`,
-    height: `${img.naturalHeight * view.zoom}px`,
-  }
-})
-
-const stageStyle = computed(() => ({
-  width: `${STAGE}px`,
-  height: `${STAGE}px`,
-  borderRadius: `${radius.value * (STAGE / workSize.value)}px`,
-}))
-
 function targetSize(target: TargetDef): number {
   if (!target.small) return target.size
   return Math.max(1, Math.round(workSize.value * smallScale.value))
 }
 
-const imageSize = computed(() => ({
-  w: image.value?.naturalWidth ?? 1,
-  h: image.value?.naturalHeight ?? 1,
-}))
-/** 缩放滑块的上下限：最小是「铺满」，最大是铺满后再放大 8 倍。 */
-const minZoom = computed(() => fitView(imageSize.value, STAGE).zoom)
-const maxZoom = computed(() => maxZoomOf(imageSize.value, STAGE))
-
-function applyView(next: CropView) {
-  view.x = next.x
-  view.y = next.y
-  view.zoom = next.zoom
-  zoomSlider.value = next.zoom
-}
-
-/** 复位到「铺满 + 居中」。 */
-function resetView() {
-  if (!image.value) return
-  applyView(fitView(imageSize.value, STAGE))
-}
-
-function clampRadius() {
-  const max = Math.floor(workSize.value / 2)
-  if (radius.value > max) radius.value = max
-}
-
-// ---- 交互 ----
-
-let dragStart = { x: 0, y: 0, viewX: 0, viewY: 0 }
-
-function startDrag(event: PointerEvent) {
-  if (!image.value) return
-  dragging.value = true
-  dragStart = { x: event.clientX, y: event.clientY, viewX: view.x, viewY: view.y }
-  // 指针捕获失败不影响拖动本身（合成事件、或被浏览器拒绝时都会抛），只是为了
-  // 手指/鼠标移出方框后还能继续拖。
-  try {
-    ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  } catch {
-    /* 忽略 */
-  }
-}
-
-function onDrag(event: PointerEvent) {
-  if (!dragging.value) return
-  applyView(
-    clampView(
-      {
-        zoom: view.zoom,
-        x: dragStart.viewX + (event.clientX - dragStart.x),
-        y: dragStart.viewY + (event.clientY - dragStart.y),
-      },
-      imageSize.value,
-      STAGE,
-    ),
-  )
-}
-
-function endDrag(event: PointerEvent) {
-  if (!dragging.value) return
-  dragging.value = false
-  const el = event.currentTarget as HTMLElement
-  try {
-    if (el.hasPointerCapture?.(event.pointerId)) el.releasePointerCapture(event.pointerId)
-  } catch {
-    /* 忽略 */
-  }
-}
-
-function onWheel(event: WheelEvent) {
-  if (!image.value) return
-  // 以指针位置为锚缩放，滚到哪儿放大到哪儿
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1
-  applyView(
-    zoomView(
-      view,
-      imageSize.value,
-      STAGE,
-      view.zoom * factor,
-      event.clientX - rect.left,
-      event.clientY - rect.top,
-    ),
-  )
-}
-
-function onZoomSlide(value: number | number[]) {
-  if (!image.value) return
-  applyView(zoomView(view, imageSize.value, STAGE, Array.isArray(value) ? value[0]! : value))
-}
-
-function pick() {
-  input.value?.click()
-}
-
-function onPick(event: Event) {
-  const files = Array.from((event.target as HTMLInputElement).files ?? [])
-  if (input.value) input.value.value = ''
-  if (files[0]) void load(files[0])
-}
-
-function onDrop(event: DragEvent) {
-  draggingFile.value = false
-  const file = event.dataTransfer?.files?.[0]
-  if (file) void load(file)
-}
-
-async function load(file: File) {
-  if (!file.type.startsWith('image/')) {
-    ElMessage.error(t('iconTab.notImage'))
-    return
-  }
-  try {
-    const loaded = await imageFromFile(file)
-    applyImage(loaded.image, loaded.url, loaded.url)
-  } catch (e) {
-    ElMessage.error(errText(e))
-  }
-}
-
 /**
- * 换一张底图：还掉上一张的 object URL，并复位取景框。
- *
- * `revokable` 只有本地文件（object URL）才有值——默认载入的图标用的是站内地址，
- * 不该也不会被 revoke。
+ * 默认底图：先看包根的 ICON_256.PNG，带桌面入口的项目再退回入口目录里的
+ * icon_256.png（多入口的项目常常只写过入口图标）。都没有就保持空白取景框，
+ * 等用户导入。「按顺序试、失败换下一个」在 IconMaker 里。
  */
-function applyImage(next: HTMLImageElement, url: string, revokable = '') {
-  if (objectURL) URL.revokeObjectURL(objectURL)
-  objectURL = revokable
-  image.value = next
-  imageURL.value = url
-  // 换图后回到「铺满 + 居中」，避免沿用上一张的偏移
-  resetView()
-  clampRadius()
-}
-
-/**
- * 载入默认底图：项目里已有的应用大图标。
- *
- * 先看包根的 ICON_256.PNG，带桌面入口的项目再退回入口目录里的 icon_256.png
- * （多入口的项目常常只写过入口图标）。都没有就保持空白取景框，等用户导入。
- */
-async function loadDefaultIcon() {
-  const candidates = [DEFAULT_ICON]
-  if (state.value.ui) candidates.push(`${ENTRY_ICON_DIR}/icon_256.png`)
-
-  for (const path of candidates) {
-    const url = rawURL('/api/fs/download', { path: `${props.project}/${path}` })
-    try {
-      applyImage(await imageFromURL(url), url)
-      return
-    } catch {
-      /* 这个位置还没有图标，试下一个 */
-    }
+const defaultSources = computed(() => {
+  const list = [rawURL('/api/fs/download', { path: `${props.project}/${DEFAULT_ICON}` })]
+  if (state.value.ui) {
+    list.push(rawURL('/api/fs/download', { path: `${props.project}/${ENTRY_ICON_DIR}/icon_256.png` }))
   }
-}
+  return list
+})
 
 /**
- * 进页面先把项目里已有的应用大图标载进来当底图，而不是从空白开始：
- * 多数时候用户只是想照着现有图标调一调，或者拿它给副入口做一套。
- * 同时列出已有的副入口图标——导入的多入口项目全靠这一步才看得见它们。
+ * 进页面列出已有的副入口图标——导入的多入口项目全靠这一步才看得见它们。
  *
- * 跟着 `state.ui` 走是必要的：形态还没读回来时只知道「先看包根」，读回来是带入口的
- * 项目再补一次（底图可以用入口图标兜底，副入口也在这时候列出来）。
+ * 跟着 `state.ui` 走是必要的：不带入口的项目里 app/ui/images 根本不存在，
+ * 探测它只会拿回一条 no such file，把日志和项目状态弄脏。
  */
 watch(
   () => state.value.ui,
   async (ui) => {
-    // 已经有底图就不动它了：第二次触发时用户可能已经在拖取景框
-    if (!image.value) await loadDefaultIcon()
     const names = await scanIcons()
     if (ui) adoptEntries(names)
   },
   { immediate: true },
 )
 
-onUnmounted(() => {
-  if (objectURL) URL.revokeObjectURL(objectURL)
-})
-
 // ---- 输出 ----
 
-/** 取景框当前覆盖的原图区域 → 按工作尺寸出方图 → 切圆角。 */
-function renderWorking() {
-  const img = image.value
-  if (!img) return null
-  const { sx, sy, side } = viewToSource(view, STAGE)
-  return roundCorners(cropRegion(img, sx, sy, side, workSize.value), radius.value)
-}
-
 async function save() {
-  if (!image.value) {
+  const working = maker.value?.renderWorking()
+  if (!working) {
     ElMessage.warning(t('iconTab.needImage'))
     return
   }
-  const working = renderWorking()
-  if (!working) return
   const list = targets.value.filter((target) => chosen[target.key])
   if (!list.length) {
     ElMessage.warning(t('iconTab.needTarget'))

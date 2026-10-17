@@ -9,6 +9,7 @@
  *  3. 缩放以指针为锚，锚点底下的图片坐标不跑；
  *  4. 取景框对应的原图矩形始终落在图片范围内；
  *  5. canvas 侧：按源矩形裁剪、圆角半径夹到一半、导出尺寸与文件名正确；
+ *     SVG 底色只认十六进制写法，且先垫底再画图；
  *  6. 副入口图标的前缀要真的收进 app/ui/images/ 里（它直接拼进文件名）。
  *
  * canvas 用最小替身，只记录调用参数——这里验的是几何，不是渲染结果。
@@ -22,9 +23,11 @@ import {
   fitZoom,
   ICON_PREFIX_MAX,
   maxZoomOf,
+  normalizeHexColor,
   normalizeIconPrefix,
   roundCorners,
   viewToSource,
+  withBackground,
   zoomView,
 } from '../src/utils/icon.ts'
 
@@ -118,11 +121,15 @@ class FakeCtx {
   set globalCompositeOperation(value) {
     this.ops.push(value)
   }
-  set fillStyle(_) {}
+  set fillStyle(value) {
+    this.ops.push(['fillStyle', value])
+  }
   drawImage(...args) {
     this.calls.push(args.map((a) => (a === this.canvas ? 'self' : a)))
   }
-  fillRect() {}
+  fillRect(...args) {
+    this.ops.push(['fillRect', ...args])
+  }
   beginPath() {}
   moveTo(...args) {
     this.ops.push(['moveTo', ...args])
@@ -169,6 +176,21 @@ const image = new FakeImage(800, 400)
 const cropped = cropRegion(image, 320, 64, 512, 256)
 check('cropRegion：输出边长', [cropped.width, cropped.height], [256, 256])
 check('cropRegion：按源矩形绘制', cropped.ctx.calls[0].slice(1), [320, 64, 512, 512, 0, 0, 256, 256])
+
+// ---- SVG 底色：先垫底再画图，且只认十六进制写法 ----
+check('底色：三位缩写补全', normalizeHexColor('#abc'), '#AABBCC')
+check('底色：不带 # 也认', normalizeHexColor('ff0000'), '#FF0000')
+check('底色：六位大小写归一', normalizeHexColor('#00ff7F'), '#00FF7F')
+check(
+  '底色：非法写法不认（空串 = 不填，由调用方处理）',
+  [normalizeHexColor('#12'), normalizeHexColor('red'), normalizeHexColor('#1234567'), normalizeHexColor('')],
+  [null, null, null, null],
+)
+const withBg = withBackground(cropped, '#112233')
+check('底色：输出与工作尺寸一致', [withBg.width, withBg.height], [256, 256])
+check('底色：先整张填色', withBg.ctx.ops.find((op) => Array.isArray(op) && op[0] === 'fillRect'), ['fillRect', 0, 0, 256, 256])
+check('底色：填的是规整后的颜色', withBg.ctx.ops.find((op) => Array.isArray(op) && op[0] === 'fillStyle'), ['fillStyle', '#112233'])
+check('底色：再把原图垫在上面', withBg.ctx.calls.map((args) => args.slice(1)), [[0, 0]])
 
 created.length = 0
 const rounded = roundCorners(cropped, 500)

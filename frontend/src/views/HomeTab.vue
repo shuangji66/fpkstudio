@@ -32,6 +32,10 @@
         >
           {{ t('home.importFpk') }}
         </el-button>
+        <!-- 图标制作：不依赖项目，和「新建 / 导入」并排 -->
+        <el-button size="default" :icon="Picture" @click="iconOpen = true">
+          {{ t('iconTab.title') }}
+        </el-button>
 
         <span class="flex-1" />
 
@@ -117,6 +121,7 @@
       </div>
     </div>
 
+    <IconDialog v-model="iconOpen" />
     <SettingsDialog v-model="settingsOpen" @saved="onSettingsSaved" />
   </div>
 </template>
@@ -125,8 +130,9 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Grid, Menu, Plus, Search, Setting, Upload } from '@element-plus/icons-vue'
+import { Grid, Menu, Picture, Plus, Search, Setting, Upload } from '@element-plus/icons-vue'
 import CreateProjectForm from '@/components/home/CreateProjectForm.vue'
+import IconDialog from '@/components/home/IconDialog.vue'
 import ImportFpkForm from '@/components/home/ImportFpkForm.vue'
 import ProjectGrid from '@/components/home/ProjectGrid.vue'
 import SettingsDialog from '@/components/home/SettingsDialog.vue'
@@ -144,6 +150,7 @@ const workspace = useWorkspaceStore()
 
 const panel = ref<'create' | 'import' | ''>('')
 const settingsOpen = ref(false)
+const iconOpen = ref(false)
 
 /**
  * 显示方式：`tile` 平铺（卡片铺满宽度、整页滚动）/ `paged` 分页（一页铺满、底部翻页）。

@@ -229,6 +229,35 @@ export function viewToSource(
 }
 
 /**
+ * 规整十六进制颜色。
+ *
+ * 接受 `#RRGGBB` / `RRGGBB` / `#RGB` / `RGB`（大小写不限），统一成大写 `#RRGGBB`；
+ * 空串和非法写法返回 null（调用方据此当作「不填底色」）。SVG 图标常是透明底，
+ * 底色只在这一层合成，不改源文件。
+ */
+export function normalizeHexColor(input: string): string | null {
+  const raw = input.trim().replace(/^#/, '')
+  if (!/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(raw)) return null
+  const full = raw.length === 3 ? raw.split('').map((ch) => ch + ch).join('') : raw
+  return `#${full.toUpperCase()}`
+}
+
+/**
+ * 给透明底的图垫一层纯色。
+ *
+ * 先填满再画图，顺序不能反：反过来的话底色会盖住图片本身。SVG 的透明区域
+ * 由这一层补上，圆角仍在下一步切（四角保持透明，不是涂成底色）。
+ */
+export function withBackground(source: Source, color: string): Raster {
+  const side = sizeOf(source).w
+  return raster(side, (ctx) => {
+    ctx.fillStyle = color
+    ctx.fillRect(0, 0, side, side)
+    ctx.drawImage(source, 0, 0)
+  })
+}
+
+/**
  * 切圆角。
  *
  * 用一个「圆角矩形以外全为不透明」的反向蒙版，以 destination-out 擦掉四角，
