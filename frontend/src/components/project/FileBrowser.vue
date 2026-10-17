@@ -37,23 +37,19 @@
 
       <span class="mx-1 h-4 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
 
+      <!--
+        新建：目录和文件共用一个弹窗（见 NewEntryDialog），所以工具栏也只留一个入口。
+        两个图标各开一个弹窗的话，用户点「新建目录」进去还会看到「新建文件」按钮，
+        反而要先想一下自己点的是哪个。
+      -->
       <el-button
         text
         size="default"
         class="tree-tool"
-        :icon="DocumentAdd"
-        :title="t('tree.newFile')"
-        :aria-label="t('tree.newFile')"
-        @click="create(false)"
-      />
-      <el-button
-        text
-        size="default"
-        class="tree-tool"
-        :icon="FolderAdd"
-        :title="t('tree.newDir')"
-        :aria-label="t('tree.newDir')"
-        @click="create(true)"
+        :icon="Plus"
+        :title="t('tree.new')"
+        :aria-label="t('tree.new')"
+        @click="openCreate"
       />
       <el-button
         text
@@ -150,7 +146,12 @@
       <span class="w-7 shrink-0" />
     </div>
 
-    <div class="min-h-0 flex-1 overflow-auto thin-scroll">
+    <!--
+      滚动容器接住**空白处**的右键：行 / 网格格子自己处理（下面挂 data-fs-entry），
+      其余落点都算对当前目录做事（新建 / 上传 / 粘贴到这里）。不用 `.self` 判断——
+      空白处的形态不止「容器本身」：最后一行下面的留白、网格的行尾、空目录的占位文字。
+    -->
+    <div class="min-h-0 flex-1 overflow-auto thin-scroll" @contextmenu.prevent="onBlankContext">
       <div
         v-if="!entries.length && state.error"
         class="px-3 py-4 text-sm"
@@ -174,6 +175,7 @@
           :key="entry.name"
           class="group flex cursor-pointer items-center gap-2 border-b border-slate-100 px-2 py-1 text-sm hover:bg-slate-100 dark:border-slate-700/60 dark:hover:bg-slate-700"
           :class="cutPath === entryPath(entry) ? 'opacity-50' : ''"
+          data-fs-entry
           @click="open(entry)"
           @contextmenu.prevent="openMenu(entry, $event)"
         >
@@ -208,6 +210,7 @@
           :key="entry.name"
           class="relative flex cursor-pointer flex-col items-center gap-1 rounded-md border border-transparent px-2 py-2 text-center hover:border-slate-200 hover:bg-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-700"
           :class="cutPath === entryPath(entry) ? 'opacity-50' : ''"
+          data-fs-entry
           @click="open(entry)"
           @contextmenu.prevent="openMenu(entry, $event)"
         >
@@ -234,6 +237,8 @@
     </div>
 
     <input ref="fileInput" type="file" multiple class="hidden" @change="onFiles" />
+
+    <NewEntryDialog v-model="newEntryOpen" :busy="creating" @submit="onCreateEntry" />
 
     <div
       v-if="menu.show"
@@ -264,17 +269,17 @@ import {
   ArrowLeft,
   ArrowRight,
   Document,
-  DocumentAdd,
   Fold,
-  FolderAdd,
   FolderOpened,
   Grid,
   List,
   MoreFilled,
+  Plus,
   Refresh,
   UploadFilled,
 } from '@element-plus/icons-vue'
 import type { FsEntry } from '@/api/types'
+import NewEntryDialog from './NewEntryDialog.vue'
 import { useUpload } from './useUpload'
 import { useDownload } from './useDownload'
 import { useOpenFolder } from './useOpenFolder'
@@ -320,7 +325,7 @@ const crumbs = computed(() => {
 })
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const menu = reactive({ show: false, x: 0, y: 0, path: '', dir: false })
+const menu = reactive({ show: false, x: 0, y: 0, path: '', dir: false, blank: false })
 const menuEl = ref<HTMLElement | null>(null)
 
 /** 剪切中的那一项淡一半（和文件树共用同一份剪贴板）。 */
@@ -367,26 +372,43 @@ watch(
 
 // ---- 新建 / 上传 ----
 
-async function create(dir: boolean) {
-  let name = ''
-  try {
-    const res = await ElMessageBox.prompt(
-      t('tree.namePrompt'),
-      dir ? t('tree.newDir') : t('tree.newFile'),
-      {
-        confirmButtonText: t('common.confirm'),
-        cancelButtonText: t('common.cancel'),
-        inputValidator: (value) => (value && value.trim() ? true : t('tree.namePrompt')),
-      },
-    )
-    name = res.value.trim()
-  } catch {
+/** 「新建」弹窗的显隐（目录与文件共用一个弹窗，见 NewEntryDialog）。 */
+const newEntryOpen = ref(false)
+/** 正在建：弹窗按钮先禁掉，免得连点两下建出两个同名文件。 */
+const creating = ref(false)
+
+/** 工具栏按钮和空白处右键菜单共用这一个入口（菜单项点完先把菜单收掉）。 */
+function openCreate() {
+  hideMenu()
+  newEntryOpen.value = true
+}
+
+/**
+ * 弹窗提交：两个按钮只差「建目录还是建文件」，校验与后续动作完全一样。
+ *
+ * 名字里不能带分隔符——那会让文件被建到子目录里，和用户看着的「在这个目录里新建」
+ * 对不上；空名字也在这里挡住。校验不过 / 后端报错（重名、读不到目录）时**弹窗不关**，
+ * 改个名字再点一下就行。
+ */
+async function onCreateEntry(kind: 'file' | 'dir', raw: string) {
+  if (creating.value) return
+  const name = raw.trim()
+  if (!name) {
+    ElMessage.warning(t('tree.namePrompt'))
     return
   }
+  if (/[\\/]/.test(name)) {
+    ElMessage.warning(t('tree.renameInvalid'))
+    return
+  }
+  creating.value = true
   try {
-    await workspace.createEntryAt(props.project, state.value.browserDir, name, dir)
+    await workspace.createEntryAt(props.project, state.value.browserDir, name, kind === 'dir')
+    newEntryOpen.value = false
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    creating.value = false
   }
 }
 
@@ -403,18 +425,39 @@ async function onFiles(event: Event) {
   }
 }
 
-// ---- 行内「···」菜单 ----
+// ---- 右键菜单 ----
 
 const MENU_MARGIN = 8
 
-function openMenu(entry: FsEntry, event: MouseEvent) {
+function showMenu(event: MouseEvent, path: string, dir: boolean, blank: boolean) {
   menu.show = true
   menu.x = event.clientX
   menu.y = event.clientY
-  menu.path = entryPath(entry)
-  menu.dir = entry.dir
+  menu.path = path
+  menu.dir = dir
+  menu.blank = blank
   void nextTick(clampMenu)
   window.setTimeout(() => window.addEventListener('click', hideMenu, { once: true }), 0)
+}
+
+/** 行 / 网格格子上的右键：菜单对那一项做事。 */
+function openMenu(entry: FsEntry, event: MouseEvent) {
+  showMenu(event, entryPath(entry), entry.dir, false)
+}
+
+/**
+ * 空白处右键：菜单对**当前目录**做事（新建 / 上传 / 粘贴到这里）。
+ *
+ * 判据是「落点不在任何一行里」而不是 `.self`：空白处可能是最后一行下面的留白、
+ * 网格的行尾，或者这个目录本身就是空的——那样一个满宽的元素都不是，`.self` 只认
+ * 容器自己被点中的那一种。
+ */
+function onBlankContext(event: MouseEvent) {
+  // 触屏长按也会触发 contextmenu，但这个菜单是桌面右键的语义；移动端的行菜单另有入口
+  if (props.mobile) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('[data-fs-entry]')) return
+  showMenu(event, state.value.browserDir, true, true)
 }
 
 function clampMenu() {
@@ -532,6 +575,19 @@ async function remove() {
 type MenuItem = { label: string; run: () => void; danger?: boolean; disabled?: boolean }
 
 const menuItems = computed<MenuItem[]>(() => {
+  // 空白处：这个菜单是对**当前目录**做事的，只有新建 / 上传 / 粘贴三项。
+  // 粘贴只在剪贴板里有东西时出现（复制 / 剪切在行菜单里），能不能粘由目录判。
+  if (menu.blank) {
+    const items: MenuItem[] = [
+      { label: t('tree.new'), run: openCreate },
+      { label: t('tree.upload'), run: () => pickFiles() },
+    ]
+    if (state.value.clipboard) {
+      items.push({ label: t('tree.paste'), disabled: !canPaste.value, run: () => void paste() })
+    }
+    return items
+  }
+
   const path = menu.path
   const name = path.split('/').pop() ?? path
   const items: MenuItem[] = []

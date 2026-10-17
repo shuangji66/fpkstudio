@@ -16,9 +16,6 @@
           :placeholder="t('home.searchPlaceholder')"
           :prefix-icon="Search"
         />
-        <el-button size="default" :icon="Refresh" @click="projects.refresh()">
-          {{ t('common.refresh') }}
-        </el-button>
         <el-button
           size="default"
           :type="panel === 'create' ? 'primary' : 'default'"
@@ -128,7 +125,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Grid, Menu, Plus, Refresh, Search, Setting, Upload } from '@element-plus/icons-vue'
+import { Grid, Menu, Plus, Search, Setting, Upload } from '@element-plus/icons-vue'
 import CreateProjectForm from '@/components/home/CreateProjectForm.vue'
 import ImportFpkForm from '@/components/home/ImportFpkForm.vue'
 import ProjectGrid from '@/components/home/ProjectGrid.vue'
