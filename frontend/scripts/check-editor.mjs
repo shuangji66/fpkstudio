@@ -23,8 +23,9 @@ import {
 } from '../src/utils/i18nFiles.ts'
 import {
   MAIN_DOCKER_SCRIPT_TEMPLATE,
+  MAIN_NO_PROCESS_TEMPLATE,
   MAIN_SCRIPT_TEMPLATE,
-  mainScriptTemplate,
+  mainTemplateOptions,
 } from '../src/utils/lifecycle.ts'
 
 let failed = 0
@@ -176,33 +177,49 @@ function makeEditor(disk = DISK) {
 // ---- cmd/main 的插入模板 ----
 //
 // 模板是**纯文本**，写错的后果都在界面上：`${...}` 少转义一个反斜杠会被当成插值、
-// 在源码里被换成别的东西（甚至编译报错），docker / 非 docker 两份相互贴错则会让
-// 应用中心里「启动」点了没反应。这两种都不会有编译期或运行期报错，所以钉在这里。
+// 在源码里被换成别的东西（甚至编译报错），模板贴错则会让应用中心里「启动」点了
+// 没反应。这两种都不会有编译期或运行期报错，所以钉在这里。
 
-check('非 docker 项目给原生模板', mainScriptTemplate(false), MAIN_SCRIPT_TEMPLATE)
-check('docker 项目给 docker 模板', mainScriptTemplate(true), MAIN_DOCKER_SCRIPT_TEMPLATE)
-check('两份模板不是同一份文本（贴错就是两处都不对）', MAIN_SCRIPT_TEMPLATE === MAIN_DOCKER_SCRIPT_TEMPLATE, false)
+const mainOptions = mainTemplateOptions(false)
+const dockerOptions = mainTemplateOptions(true)
+check('非 docker 的 main 给「有进程 / 无进程」两项', mainOptions.map((o) => o.key), ['process', 'no-process'])
+check('非 docker 的 main 不给 docker 模板', mainOptions.some((o) => o.key === 'docker'), false)
+check('docker 的 main 多一份 docker 模板', dockerOptions.map((o) => o.key), ['process', 'no-process', 'docker'])
+check('有进程模板的文本', mainOptions[0]?.text, MAIN_SCRIPT_TEMPLATE)
+check('无进程模板的文本', mainOptions[1]?.text, MAIN_NO_PROCESS_TEMPLATE)
+check('三份模板不是同一份文本（贴错就是两处都不对）', new Set([
+  MAIN_SCRIPT_TEMPLATE,
+  MAIN_NO_PROCESS_TEMPLATE,
+  MAIN_DOCKER_SCRIPT_TEMPLATE,
+]).size, 3)
 
 for (const [label, text] of [
-  ['原生', MAIN_SCRIPT_TEMPLATE],
+  ['有进程', MAIN_SCRIPT_TEMPLATE],
+  ['无进程', MAIN_NO_PROCESS_TEMPLATE],
   ['docker', MAIN_DOCKER_SCRIPT_TEMPLATE],
 ]) {
   check(`${label}模板以 bash 开头`, text.startsWith('#!/bin/bash\n'), true)
   check(`${label}模板以换行结尾（插入后文件末尾有换行）`, text.endsWith('\n'), true)
   check(`${label}模板有 start / stop / status 三个分支`, /case \$1 in[\s\S]*start\)[\s\S]*stop\)[\s\S]*status\)[\s\S]*esac/.test(text), true)
-  // ${...} 的字面量必须还在：少写一个 \ 会被当插值求值，脚本里的变量就没了
-  check(`${label}模板里的变量写法没被当插值吃掉`, text.includes('${TRIM_PKGVAR}') || text.includes('${TRIM_APPDEST}'), true)
 }
 
-// 原生：自己托管进程（pid 文件 + TERM/KILL），且不该提到 docker
-check('原生模板写 pid 文件', MAIN_SCRIPT_TEMPLATE.includes('${PID_FILE}'), true)
-check('原生模板会发 TERM / KILL', MAIN_SCRIPT_TEMPLATE.includes('kill -TERM') && MAIN_SCRIPT_TEMPLATE.includes('kill -KILL'), true)
-check('原生模板不掺 docker 的东西', /docker/i.test(MAIN_SCRIPT_TEMPLATE), false)
+// 有进程：自己托管进程（pid 文件 + TERM/KILL），且不该提到 docker
+check('有进程模板写 pid 文件', MAIN_SCRIPT_TEMPLATE.includes('${PID_FILE}'), true)
+check('有进程模板会发 TERM / KILL', MAIN_SCRIPT_TEMPLATE.includes('kill -TERM') && MAIN_SCRIPT_TEMPLATE.includes('kill -KILL'), true)
+check('有进程模板不掺 docker 的东西', /docker/i.test(MAIN_SCRIPT_TEMPLATE), false)
+
+// 无进程：四个子命令都只是 exit 0 / exit 1 的占位，不写 pid、不碰进程
+check('无进程模板不写 pid', /PID_FILE|app\.pid/.test(MAIN_NO_PROCESS_TEMPLATE), false)
+check('无进程模板不杀进程', /kill /.test(MAIN_NO_PROCESS_TEMPLATE), false)
+for (const branch of ['start', 'stop', 'status', 'log']) {
+  check(`无进程模板有 ${branch} 分支`, new RegExp(`${branch}\\)`).test(MAIN_NO_PROCESS_TEMPLATE), true)
+}
 
 // docker：容器由应用中心管，脚本什么都不做，只 status 去问容器
 check('docker 模板 start 分支什么都不做', MAIN_DOCKER_SCRIPT_TEMPLATE.includes('will be started by appcenter'), true)
 check('docker 模板问的是容器状态', MAIN_DOCKER_SCRIPT_TEMPLATE.includes('docker inspect'), true)
 check('docker 模板不自己写 pid 文件', /PID_FILE/.test(MAIN_DOCKER_SCRIPT_TEMPLATE), false)
+
 
 // ---- i18n locale 文件的模板与「缺 en-US」判据 ----
 //

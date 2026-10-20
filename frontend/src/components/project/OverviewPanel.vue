@@ -137,20 +137,31 @@
               <div class="ml-auto flex shrink-0 items-center gap-2">
                 <span class="text-sm text-slate-400 dark:text-slate-500">{{ item.sizeRaw }}</span>
                 <span class="text-sm text-slate-400 dark:text-slate-500">{{ item.modTime }}</span>
-                <el-button
-                  text
-                  size="small"
-                  :icon="FolderOpened"
-                  :disabled="!hostAvailable"
-                  :title="hostAvailable ? t('pack.openFolder') : t('trim.error.hostUnavailable')"
-                  @click="openFolder(item)"
-                />
-                <el-button
-                  text
-                  size="small"
-                  :icon="Download"
-                  @click="download(getDownloadPath(item))"
-                />
+                <div class="artifact-actions flex items-center gap-1">
+                  <el-button
+                    text
+                    size="small"
+                    :icon="FolderOpened"
+                    :disabled="!hostAvailable"
+                    :title="hostAvailable ? t('pack.openFolder') : t('trim.error.hostUnavailable')"
+                    @click="openFolder(item)"
+                  />
+                  <el-button
+                    text
+                    size="small"
+                    :icon="Download"
+                    :title="t('common.download')"
+                    @click="download(getDownloadPath(item))"
+                  />
+                  <el-button
+                    text
+                    type="danger"
+                    size="small"
+                    :icon="Delete"
+                    :title="t('common.delete')"
+                    @click="removeArtifact(item)"
+                  />
+                </div>
               </div>
             </li>
           </ul>
@@ -216,10 +227,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
-import { Box, Download, EditPen, FolderOpened, Refresh } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Box, Delete, Download, EditPen, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { readFile } from '@/api/endpoints'
+import { deleteArtifact, readFile } from '@/api/endpoints'
 import { useDownload } from './useDownload'
 import type { Artifact } from '@/api/types'
 import { humanSize } from '@/utils/format'
@@ -336,6 +347,26 @@ async function openFolder(item: Artifact) {
     await openInFileManager(dir)
   } catch (e) {
     ElMessage.error(trimErrorMessage(t, te, e))
+  }
+}
+
+/** 删除一条产物（确认一次；删完刷新列表，别的行 / 计数也跟着更新）。 */
+async function removeArtifact(item: Artifact) {
+  try {
+    await ElMessageBox.confirm(t('pack.confirmDeleteArtifact', { name: item.name }), t('common.tip'), {
+      type: 'warning',
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteArtifact(props.project, item.name, item.scope)
+    await workspace.reloadPackageInfo(props.project)
+    ElMessage.success(t('pack.artifactDeleted', { name: item.name }))
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
   }
 }
 

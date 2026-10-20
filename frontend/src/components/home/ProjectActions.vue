@@ -126,9 +126,13 @@ function run(command: string) {
  *
  * 走后端现压缩这条路，所以挂 `zip: true`：稍大的项目能压好几秒，得先告诉用户「在动」，
  * 否则看起来像没点中（见 `useDownload`）。
+ *
+ * `package: true` 按 fpk 包的白名单导出（`layout=package`）：只留 manifest、图标和
+ * app / cmd / config / wizard / i18n 这些包内容，`building/`（各架构产物）、`.git`、
+ * README 之类都不进 zip——和 fnpack 真正打进 fpk 的那批文件保持一致。
  */
 function exportProject() {
-  void download(props.item.name, { zip: true })
+  void download(props.item.name, { zip: true, package: true })
 }
 
 async function rename() {

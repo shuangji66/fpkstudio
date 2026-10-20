@@ -6,11 +6,12 @@
  * pid 文件、僵尸 pid、TERM 之后等不到退出这些边角，表现是「应用中心里的启动按钮点了没反应，
  * 或者停了之后状态还是运行中」。
  *
- * docker 项目和非 docker 项目是**两套完全不同的写法**，所以按项目类型给不同的模板
- * （`mainScriptTemplate`）：非 docker 的由脚本自己托管进程（写 pid 文件、发 TERM / KILL），
- * 而 docker 应用是应用中心拉起的容器，脚本什么都不用做，只要 status 去问 docker 那个容器。
+ * 界面上的「插入模板」对 `cmd/main` 是下拉（`mainTemplateOptions`）：有进程 / 无进程
+ * 两份基础模板，docker 项目再多一份「应用中心托管」——容器由应用中心拉起，脚本只需
+ * status 去问 docker 那个容器。**其余生命周期脚本一律不给模板**——那个按钮不出现，
+ * 空脚本由用户自己写（只有 main 和 uninstall_callback 有官方骨架可插）。
  *
- * 两份都是**官方脚手架的原样文本**，不要顺手「优化」里面的写法：用户会拿它跟飞牛的文档、
+ * 这些都是**官方脚手架的原样文本**，不要顺手「优化」里面的写法：用户会拿它跟飞牛的文档、
  * 跟别人的项目对照，改一个字就对不上了。模板只写进编辑器（插进去之后要不要保存由用户决定），
  * 落地时不碰用户的文件。
  */
@@ -183,12 +184,55 @@ esac
 `
 
 /**
- * 按项目类型挑启停脚本模板。
+ * `cmd/main` 的「无进程」写法：应用自己不托管进程，start / stop / status 只是
+ * 应用中心调用协议里的三个占位分支（status 恒为 0，表示由外部保证在跑）。
+ *
+ * 有进程的模板在上面（自己写 pid、发 TERM / KILL）。两份都出现在「插入模板」的
+ * 下拉里，由用户按应用形态自己选；docker 项目再多一份 docker 模板。
+ */
+export const MAIN_NO_PROCESS_TEMPLATE = `#!/bin/bash
+case $1 in
+start)
+    # run start command. exit 0 if success, exit 1 if failed
+    exit 0
+    ;;
+stop)
+    # run stop command. exit 0 if success, exit 1 if failed
+    exit 0
+    ;;
+status)
+    # check application status command. exit 0 if running, exit 3 if not running
+    exit 0
+    ;;
+log)
+    exit 0
+    ;;
+*)
+    exit 1
+    ;;
+esac
+`
+
+/** `cmd/main` 下拉里的一项；`key` 只用来在界面层找文案。 */
+export type MainTemplateKey = 'process' | 'no-process' | 'docker'
+
+export interface MainTemplateOption {
+  key: MainTemplateKey
+  text: string
+}
+
+/**
+ * `cmd/main` 的可选模板：有进程 / 无进程；docker 项目再多一份「应用中心托管」。
  *
  * 判据只有「是不是 docker 项目」这一条（`ProjectInfo.docker`，后端按
- * `app/docker/docker-compose.yaml` 是否存在判定），所以这里只收一个布尔值：调用方把
- * 「项目信息还没读回来」这种情况交给那个布尔值自己的默认值（非 docker），模板层不再猜一遍。
+ * `app/docker/docker-compose.yaml` 是否存在判定）。非 docker 项目不给 docker 模板
+ * ——贴上去脚本语法没问题，但应用中心不会去拉容器，start 等于什么都不做。
  */
-export function mainScriptTemplate(docker: boolean): string {
-  return docker ? MAIN_DOCKER_SCRIPT_TEMPLATE : MAIN_SCRIPT_TEMPLATE
+export function mainTemplateOptions(docker: boolean): MainTemplateOption[] {
+  const options: MainTemplateOption[] = [
+    { key: 'process', text: MAIN_SCRIPT_TEMPLATE },
+    { key: 'no-process', text: MAIN_NO_PROCESS_TEMPLATE },
+  ]
+  if (docker) options.push({ key: 'docker', text: MAIN_DOCKER_SCRIPT_TEMPLATE })
+  return options
 }

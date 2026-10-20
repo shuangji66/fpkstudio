@@ -26,6 +26,8 @@ import {
   normalizeHexColor,
   normalizeIconPrefix,
   roundCorners,
+  svgViewBoxSize,
+  svgWithIntrinsicSize,
   viewToSource,
   withBackground,
   zoomView,
@@ -237,6 +239,25 @@ check('副入口发现：去重 + 排序', entryIconPrefixes(['b_64.png', 'a_256
 check('副入口发现：排掉默认入口 icon（含大小写）', entryIconPrefixes(['icon_64.png', 'icon_256.png', 'ICON_256.PNG']), [])
 check('副入口发现：不是入口图标的文件名不算', entryIconPrefixes(['niubi.png', '_64.png', 'niubi_256.jpg', 'niubi_256.png.bak']), [])
 check('副入口发现：前缀里带下划线也认得', entryIconPrefixes(['my_app_256.png', 'my_app_64.png']), ['my_app'])
+
+// ---- SVG 固有尺寸：只写 viewBox 的小图标要能铺满取景框 ----
+check('SVG 尺寸：从 viewBox 取宽高', svgViewBoxSize('<svg viewBox="0 0 16 16"></svg>'), { w: 16, h: 16 })
+check('SVG 尺寸：逗号分隔的 viewBox', svgViewBoxSize("<svg viewBox='0, 0, 24, 12'></svg>"), { w: 24, h: 12 })
+check('SVG 尺寸：没有 viewBox 返回 null', svgViewBoxSize('<svg width="16" height="16"></svg>'), null)
+check('SVG 尺寸：viewBox 非法返回 null', svgViewBoxSize('<svg viewBox="0 0 0 16"></svg>'), null)
+
+{
+  const fixed = svgWithIntrinsicSize('<svg viewBox="0 0 24 12"><path d="M0 0"/></svg>')
+  check('SVG 尺寸：补上 viewBox 的宽高', [fixed?.includes('width="24"'), fixed?.includes('height="12"')], [true, true])
+  const overwritten = svgWithIntrinsicSize('<svg width="100%" height="100%" viewBox="0 0 24 24"></svg>')
+  check(
+    'SVG 尺寸：覆盖百分比宽高',
+    [overwritten?.includes('width="24"'), overwritten?.includes('height="24"'), overwritten?.includes('100%')],
+    [true, true, false],
+  )
+  check('SVG 尺寸：没有 viewBox 时不改', svgWithIntrinsicSize('<svg width="16" height="16"></svg>'), null)
+  check('SVG 尺寸：本来就一致时不重复写', svgWithIntrinsicSize('<svg width="16" height="16" viewBox="0 0 16 16"></svg>'), null)
+}
 
 console.log(failed ? `\n${failed} 项不通过` : '\n取景框与图标处理检查全部通过')
 process.exit(failed ? 1 : 0)

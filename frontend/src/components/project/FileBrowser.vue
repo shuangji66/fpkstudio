@@ -151,7 +151,11 @@
       其余落点都算对当前目录做事（新建 / 上传 / 粘贴到这里）。不用 `.self` 判断——
       空白处的形态不止「容器本身」：最后一行下面的留白、网格的行尾、空目录的占位文字。
     -->
-    <div class="min-h-0 flex-1 overflow-auto thin-scroll" @contextmenu.prevent="onBlankContext">
+    <div
+      class="min-h-0 flex-1 overflow-auto thin-scroll"
+      @click="onBlankClick"
+      @contextmenu.prevent="onBlankContext"
+    >
       <div
         v-if="!entries.length && state.error"
         class="px-3 py-4 text-sm"
@@ -174,9 +178,14 @@
           v-for="entry in entries"
           :key="entry.name"
           class="group flex cursor-pointer items-center gap-2 border-b border-slate-100 px-2 py-1 text-sm hover:bg-slate-100 dark:border-slate-700/60 dark:hover:bg-slate-700"
-          :class="cutPath === entryPath(entry) ? 'opacity-50' : ''"
+          :class="[
+            cutPaths.has(entryPath(entry)) ? 'opacity-50' : '',
+            isSelected(entryPath(entry))
+              ? 'bg-sky-50 dark:bg-sky-950/40 ring-1 ring-inset ring-sky-200 dark:ring-sky-800'
+              : '',
+          ]"
           data-fs-entry
-          @click="open(entry)"
+          @click="onEntryClick(entry, $event)"
           @contextmenu.prevent="openMenu(entry, $event)"
         >
           <el-icon class="shrink-0" :class="iconClass(entry)">
@@ -209,9 +218,14 @@
           v-for="entry in entries"
           :key="entry.name"
           class="relative flex cursor-pointer flex-col items-center gap-1 rounded-md border border-transparent px-2 py-2 text-center hover:border-slate-200 hover:bg-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-700"
-          :class="cutPath === entryPath(entry) ? 'opacity-50' : ''"
+          :class="[
+            cutPaths.has(entryPath(entry)) ? 'opacity-50' : '',
+            isSelected(entryPath(entry))
+              ? 'bg-sky-50 dark:bg-sky-950/40 ring-1 ring-inset ring-sky-200 dark:ring-sky-800'
+              : '',
+          ]"
           data-fs-entry
-          @click="open(entry)"
+          @click="onEntryClick(entry, $event)"
           @contextmenu.prevent="openMenu(entry, $event)"
         >
           <el-icon class="text-2xl" :class="iconClass(entry)">
@@ -283,16 +297,22 @@ import NewEntryDialog from './NewEntryDialog.vue'
 import { useUpload } from './useUpload'
 import { useDownload } from './useDownload'
 import { useOpenFolder } from './useOpenFolder'
-import { useWorkspaceStore } from '@/stores/workspace'
+import { useTabsStore } from '@/stores/tabs'
+import { FILES_TAB, useWorkspaceStore } from '@/stores/workspace'
+import { useFileClipboard } from './useFileClipboard'
+import { dropNestedPaths, useEntrySelection } from './useEntrySelection'
 import { formatTime, humanSize, isArchive } from '@/utils/format'
+import { hasOpenOverlay, isTypingTarget } from '@/utils/keyboard'
 
 const props = defineProps<{ project: string; mobile?: boolean }>()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const tabs = useTabsStore()
 const { upload, cancel: cancelUpload, busy: uploading, percent: uploadPercent } = useUpload()
 const { download } = useDownload()
 const { canOpenFolder, openFolder } = useOpenFolder(() => props.project)
+const { copy: copyPaths, paste: pasteAt, undo } = useFileClipboard(() => props.project)
 
 const state = computed(() => workspace.state(props.project))
 
@@ -325,14 +345,29 @@ const crumbs = computed(() => {
 })
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const menu = reactive({ show: false, x: 0, y: 0, path: '', dir: false, blank: false })
+const menu = reactive({ show: false, x: 0, y: 0, path: '', dir: false, blank: false, multi: false })
 const menuEl = ref<HTMLElement | null>(null)
 
-/** 剪切中的那一项淡一半（和文件树共用同一份剪贴板）。 */
-const cutPath = computed(() => (state.value.clipboard?.cut ? state.value.clipboard.path : ''))
+/** 剪切中的那些项淡一半（和文件树共用同一份剪贴板）。 */
+const cutPaths = computed(
+  () => new Set(state.value.clipboard?.cut ? state.value.clipboard.paths : []),
+)
 
-/** 条目在当前目录里的完整路径：列表、网格、菜单都用它。 */
+/**
+ * 条目在当前目录里的完整路径：列表、网格、菜单都用它。
+ *
+ * 多选也按这个路径记：目录刷新只是换了一份 entries，路径本身还是同一套写法。
+ */
 const entryPath = (entry: FsEntry) => `${state.value.browserDir}/${entry.name}`
+
+const {
+  selected,
+  isSelected,
+  clear: clearSelection,
+  click: selectClick,
+  context: contextSelect,
+  prune: pruneSelection,
+} = useEntrySelection(() => entries.value.map((entry) => entryPath(entry)))
 
 function iconClass(entry: FsEntry): string {
   return entry.dir
@@ -351,6 +386,18 @@ function open(entry: FsEntry) {
   void workspace.openFile(props.project, entryPath(entry))
 }
 
+/** 单击：带 Ctrl / Cmd / Shift 时只改选择，不打开（多选时不该开出一堆文件标签）。 */
+function onEntryClick(entry: FsEntry, event: MouseEvent) {
+  selectClick(entryPath(entry), event, () => open(entry))
+}
+
+/** 点空白处取消选择（行 / 格子上的点击有自己的处理，先挡掉）。 */
+function onBlankClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('[data-fs-entry]')) return
+  clearSelection()
+}
+
 function go(dir: string) {
   workspace.browseTo(props.project, dir)
 }
@@ -366,9 +413,15 @@ function toTree() {
 // 切目录就拉一次内容；切回来时缓存里有就不再请求（loadDir 自己会跳过）。
 watch(
   () => state.value.browserDir,
-  () => void workspace.loadBrowserDir(props.project),
+  () => {
+    clearSelection()
+    void workspace.loadBrowserDir(props.project)
+  },
   { immediate: true },
 )
+
+// 目录刷新后丢掉已经不在列表里的选择（删除、外部改动都会走到这里）。
+watch(entries, () => pruneSelection())
 
 // ---- 新建 / 上传 ----
 
@@ -429,20 +482,23 @@ async function onFiles(event: Event) {
 
 const MENU_MARGIN = 8
 
-function showMenu(event: MouseEvent, path: string, dir: boolean, blank: boolean) {
+function showMenu(event: MouseEvent, path: string, dir: boolean, blank: boolean, multi = false) {
   menu.show = true
   menu.x = event.clientX
   menu.y = event.clientY
   menu.path = path
   menu.dir = dir
   menu.blank = blank
+  menu.multi = multi
   void nextTick(clampMenu)
   window.setTimeout(() => window.addEventListener('click', hideMenu, { once: true }), 0)
 }
 
-/** 行 / 网格格子上的右键：菜单对那一项做事。 */
+/** 行 / 网格格子上的右键：点在已选中的一项上时菜单对整批选择做事。 */
 function openMenu(entry: FsEntry, event: MouseEvent) {
-  showMenu(event, entryPath(entry), entry.dir, false)
+  const path = entryPath(entry)
+  contextSelect(path)
+  showMenu(event, path, entry.dir, false, selected.value.length > 1)
 }
 
 /**
@@ -480,21 +536,30 @@ const menuDir = computed(() =>
 const canPaste = computed(() => workspace.canPasteTo(props.project, menuDir.value))
 
 async function paste() {
-  const clip = state.value.clipboard
-  if (!clip) return
   const destDir = menuDir.value
-  const name = clip.path.split('/').pop() ?? ''
   hideMenu()
-  try {
-    const outcome = await workspace.pasteInto(props.project, destDir)
-    if (outcome === 'exists') ElMessage.warning(t('tree.pasteExists', { name }))
-    else if (outcome === 'same') ElMessage.info(t('tree.pasteSame', { name }))
-    else if (outcome === 'unreadable') {
-      ElMessage.error(t('tree.pasteListFailed', { name: destDir.split('/').pop() ?? destDir }))
-    }
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
-  }
+  await pasteAt(destDir)
+}
+
+/** 复制 / 剪切选中的那一批（菜单和键盘共用）。 */
+function copySelection(cut: boolean) {
+  copyPaths(selected.value, cut)
+}
+
+/** Ctrl / Cmd + X / C / V / Z：只处理文件管理器的快捷键。 */
+function onKeydown(event: KeyboardEvent) {
+  if (tabs.activeProject !== props.project) return
+  if (props.mobile || state.value.viewMode !== 'tabs' || state.value.activeTab !== FILES_TAB) return
+  if (hasOpenOverlay()) return
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+  if (isTypingTarget(event)) return
+  const key = event.key.toLowerCase()
+  if (key !== 'c' && key !== 'x' && key !== 'v' && key !== 'z') return
+  event.preventDefault()
+  if (key === 'c') copySelection(false)
+  else if (key === 'x') copySelection(true)
+  else if (key === 'v') void pasteAt(state.value.browserDir)
+  else void undo()
 }
 
 async function extract() {
@@ -572,9 +637,74 @@ async function remove() {
   }
 }
 
+/**
+ * 删除选中的那一批（Ctrl / Shift 多选后从右键菜单进入）。
+ *
+ * 先把「父目录 + 它里面的子项」收敛掉（见 `dropNestedPaths`）：否则删完父目录，
+ * 后面那条子路径已经不存在了。确认只弹一次——逐条问是让人不敢动手的那种交互。
+ */
+async function removeSelected() {
+  const paths = dropNestedPaths(selected.value)
+  if (!paths.length) return
+  hideMenu()
+  try {
+    await ElMessageBox.confirm(t('tree.confirmDeleteMany', { count: paths.length }), t('common.tip'), {
+      type: 'warning',
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
+    })
+  } catch {
+    return
+  }
+  const dirOf = (path: string) =>
+    entries.value.some((entry) => entryPath(entry) === path && entry.dir)
+  clearSelection()
+  for (const path of paths) {
+    try {
+      await workspace.removeEntryAt(props.project, path, dirOf(path))
+      workspace.clearClipboard(props.project, path)
+    } catch (e) {
+      ElMessage.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+}
+
 type MenuItem = { label: string; run: () => void; danger?: boolean; disabled?: boolean }
 
 const menuItems = computed<MenuItem[]>(() => {
+  // 右键落在多选中的某一项上：这一份菜单对整批选择做事，列出单个文件的重命名 /
+  // 下载没有意义（总不能把十项都重命名成同一个名字）。
+  if (!menu.blank && menu.multi) {
+    return [
+      {
+        label: t('tree.copy'),
+        run: () => {
+          hideMenu()
+          copySelection(false)
+        },
+      },
+      {
+        label: t('tree.cut'),
+        run: () => {
+          hideMenu()
+          copySelection(true)
+        },
+      },
+      {
+        label: t('common.delete'),
+        danger: true,
+        run: () => void removeSelected(),
+      },
+      {
+        label: t('tree.clearSelection'),
+        run: () => {
+          hideMenu()
+          clearSelection()
+        },
+      },
+    ]
+  }
+
   // 空白处：这个菜单是对**当前目录**做事的，只有新建 / 上传 / 粘贴三项。
   // 粘贴只在剪贴板里有东西时出现（复制 / 剪切在行菜单里），能不能粘由目录判。
   if (menu.blank) {
@@ -600,17 +730,8 @@ const menuItems = computed<MenuItem[]>(() => {
   // 重命名在文件树里是行内输入框，这里是列表 / 网格、没有「正在编辑的那一行」可用，
   // 所以走弹窗。少了这一条的话，标签页模式下用户根本改不了文件名。
   items.push({ label: t('common.rename'), run: () => void rename() })
-  items.push({
-    label: t('tree.copy'),
-    run: () => {
-      workspace.copyToClipboard(props.project, path, false)
-      ElMessage.success(t('tree.copied', { name }))
-    },
-  })
-  items.push({
-    label: t('tree.cut'),
-    run: () => workspace.copyToClipboard(props.project, path, true),
-  })
+  items.push({ label: t('tree.copy'), run: () => copySelection(false) })
+  items.push({ label: t('tree.cut'), run: () => copySelection(true) })
   items.push({
     label: t('common.delete'),
     danger: true,
@@ -626,7 +747,11 @@ const menuItems = computed<MenuItem[]>(() => {
 
 onMounted(() => {
   void workspace.ensure(props.project)
+  window.addEventListener('keydown', onKeydown)
 })
 
-onUnmounted(hideMenu)
+onUnmounted(() => {
+  hideMenu()
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>

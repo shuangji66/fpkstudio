@@ -47,7 +47,32 @@
           {{ t(mode === 'form' ? 'editor.form' : 'editor.source') }}
         </el-button>
 
-        <el-button v-if="templateText" size="default" @click="insertTemplate">
+        <!--
+          cmd/main 最多三份（有进程 / 无进程 / docker），用下拉让用户选；其余有模板的
+          文件只有一份，仍是普通按钮。下拉的 trigger=click：和上面「覆盖其他向导」
+          一样，鼠标点开、触屏也点得开。
+        -->
+        <el-dropdown
+          v-if="templateOptions.length > 1"
+          trigger="click"
+          @command="insertTemplate"
+        >
+          <el-button size="default">
+            {{ t('cmdEditor.template') }}<el-icon class="ml-1"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="option in templateOptions" :key="option.key" :command="option.key">
+                {{ t(option.labelKey) }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button
+          v-else-if="templateOptions.length === 1"
+          size="default"
+          @click="insertTemplate(templateOptions[0]!.key)"
+        >
           {{ t('cmdEditor.template') }}
         </el-button>
         <el-button v-if="isLifecycle" size="default" :icon="MessageBox" @click="envOpen = true">
@@ -133,7 +158,7 @@ import EnvVarsDialog from './EnvVarsDialog.vue'
 import { resolveEditor } from './registry'
 import { handoffText } from '@/utils/handoff'
 import { i18nTemplateFor } from '@/utils/i18nFiles'
-import { mainScriptTemplate } from '@/utils/lifecycle'
+import { mainTemplateOptions } from '@/utils/lifecycle'
 import type { EditorApi, EditorContent } from './useEditor'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -266,32 +291,14 @@ function onDirty(value: boolean) {
   workspace.setDirty(props.project, props.path, value)
 }
 
-/**
- * 「插入模板」的内容按路径给，没有就说明这份文件没有通用模板，按钮不出现。
- *
- * 启停脚本（`cmd/main`）：**按项目类型给两份模板**——docker 应用是应用中心拉起的容器，
- * 脚本只要 status 去问容器；非 docker 由脚本自己托管进程（pid 文件、TERM / KILL 那套）。
- * 给错了的表现很隐蔽：脚本语法没问题，但应用中心里「启动」点了没反应。两份文本在
- * `utils/lifecycle.ts`（官方脚手架原样，别在这里改写法）。
- * 卸载回调脚本：fnOS 卸载时会调用它，并按向导里收集的 $wizard_data_action 决定
- * 删不删数据；这份骨架就是那个标准写法。其他 cmd 脚本（install/upgrade…）各写各的。
- * 卸载向导：它和上面那个脚本是一对——向导收集 wizard_data_action，脚本照着执行，
- * 所以给一份配套的向导骨架（数据保留 / 删除二选一）。
- * locale 文案（`i18n/en-US`、`i18n/zh-CN`）：官方那套 section / key 的骨架、值留空
- * （见 `utils/i18nFiles.ts`）。其他语言不给模板，按钮照常不出现。
- */
-function templateFor(path: string, docker: boolean): string {
-  // 写成函数而不是常量表：模板常量在下面，常量表会在求值时就踩到 TDZ。
-  if (path === 'cmd/main') return mainScriptTemplate(docker)
-  if (path === 'cmd/uninstall_callback') return UNINSTALL_SCRIPT
-  if (path === 'wizard/uninstall') return UNINSTALL_WIZARD
-  const locale = i18nTemplateFor(path)
-  if (locale) return locale
-  return ''
+interface TemplateOption {
+  key: string
+  labelKey: string
+  text: string
 }
 
 /**
- * 当前项目是不是 docker 应用：决定 `cmd/main` 该插哪一份模板。
+ * 当前项目是不是 docker 应用：`cmd/main` 的下拉里要不要多给一份 docker 模板。
  *
  * 取 `workspace` 的状态而不是项目列表里的 `ProjectInfo`：这份布尔值由 `ensure()` 里的
  * `reloadShape()` 用 `/api/projects/exists` 填好（后端按 `app/docker/docker-compose.yaml`
@@ -300,7 +307,44 @@ function templateFor(path: string, docker: boolean): string {
  */
 const dockerProject = computed(() => workspace.state(props.project)?.docker === true)
 
-const templateText = computed(() => templateFor(props.path, dockerProject.value))
+const MAIN_LABEL: Record<string, string> = {
+  process: 'cmdEditor.templateProcess',
+  'no-process': 'cmdEditor.templateNoProcess',
+  docker: 'cmdEditor.templateDocker',
+}
+
+/**
+ * 「插入模板」的可选项，空数组表示这份文件没有通用模板、按钮不出现。
+ *
+ * - `cmd/main`：有进程 / 无进程（docker 项目多一份「应用中心托管」），用下拉选。
+ * - `cmd/uninstall_callback`：fnOS 卸载时按向导里收集的 `$wizard_data_action` 决定
+ *   删不删数据，这份骨架就是那个标准写法。
+ * - 其余 `cmd/*`：**没有模板**（按钮不出现）。只有 main / uninstall_callback 有骨架。
+ * - `wizard/uninstall`：和卸载回调配套的向导骨架（数据保留 / 删除二选一）。
+ * - `i18n/en-US`、`i18n/zh-CN`：官方 section / key 骨架、值留空。
+ *
+ * 模板文本都在 `utils/lifecycle.ts` / `utils/i18nFiles.ts`（纯文本，官方脚手架原样，
+ * 别在这里改写法）。写成 computed 而不是常量表：模板常量在下面，常量表会在求值时就踩到 TDZ。
+ */
+const templateOptions = computed<TemplateOption[]>(() => {
+  const path = props.path
+  if (path === 'cmd/main') {
+    return mainTemplateOptions(dockerProject.value).map((option) => ({
+      key: option.key,
+      labelKey: MAIN_LABEL[option.key] ?? 'cmdEditor.template',
+      text: option.text,
+    }))
+  }
+  if (path === 'cmd/uninstall_callback') {
+    return [{ key: 'uninstall', labelKey: 'cmdEditor.template', text: UNINSTALL_SCRIPT }]
+  }
+  if (path === 'wizard/uninstall') {
+    return [{ key: 'uninstall-wizard', labelKey: 'cmdEditor.template', text: UNINSTALL_WIZARD }]
+  }
+  const locale = i18nTemplateFor(path)
+  if (locale) return [{ key: 'locale', labelKey: 'cmdEditor.template', text: locale }]
+  return []
+})
 
 /**
  * 生命周期脚本（cmd/ 下的安装、卸载、升级、配置、启停脚本）。
@@ -456,10 +500,12 @@ const UNINSTALL_WIZARD = `[
 ]
 `
 
-async function insertTemplate() {
+async function insertTemplate(key: string) {
+  const option = templateOptions.value.find((item) => item.key === key) ?? templateOptions.value[0]
+  if (!option) return
   const editor = inner.value
   if (!editor?.setContent) return
-  editor.setContent(templateText.value)
+  editor.setContent(option.text)
   await nextTick()
   onDirty(editor.isDirty?.() ?? false)
 }

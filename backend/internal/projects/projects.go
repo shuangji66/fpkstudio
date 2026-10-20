@@ -383,6 +383,20 @@ func (m *Manager) copyIntoRoot(root *fsx.Root, rel string, srcAbs string) error 
 // 不校验「符合 fnpack 的 appname 规则」（3–32 位、字母数字开头结尾）：那是 fnpack
 // 的判断，它自己会报错；这里只负责「拼出来的名字不会跑出目录」。
 func safeArtifactPart(kind, value string) (string, error) {
+	return safeArtifactName(kind, value, 64)
+}
+
+// safeArtifactFileName 校验一个完整的产物文件名。
+//
+// 不能复用 safeArtifactPart 的 64 字节上限：那个上限是给 appname / version /
+// platform 单个成分的，而完整文件名是三者拼起来的（`<appname>-<version>-<platform>.fpk`），
+// 合法组合完全可能超过 64 字节。按文件系统的常见上限（255）校验，避免「列表里看得见、
+// 点删除却报名字过长」。
+func safeArtifactFileName(kind, value string) (string, error) {
+	return safeArtifactName(kind, value, 255)
+}
+
+func safeArtifactName(kind, value string, max int) (string, error) {
 	v := strings.TrimSpace(value)
 	if v == "" {
 		return "", fmt.Errorf("%w：%s 不能为空", ErrInvalidInput, kind)
@@ -398,8 +412,8 @@ func safeArtifactPart(kind, value string) (string, error) {
 			return "", fmt.Errorf("%w：%s 不能包含控制字符：%q", ErrInvalidInput, kind, v)
 		}
 	}
-	if len(v) > 64 {
-		return "", fmt.Errorf("%w：%s 过长（%d 字节，上限 64）：%q", ErrInvalidInput, kind, len(v), v)
+	if len(v) > max {
+		return "", fmt.Errorf("%w：%s 过长（%d 字节，上限 %d）：%q", ErrInvalidInput, kind, len(v), max, v)
 	}
 	return v, nil
 }
@@ -632,12 +646,7 @@ func (m *Manager) Artifacts(name string) ([]Artifact, error) {
 		return nil, err
 	}
 	s := m.snap()
-	appname := name
-	if data, err := s.prj.ReadFile(rel + "/manifest"); err == nil {
-		if a := strings.TrimSpace(parseManifest(string(data))["appname"]); a != "" {
-			appname = a
-		}
-	}
+	appname := artifactAppname(s, rel, name)
 
 	out := make([]Artifact, 0, 4)
 	collect := func(root *fsx.Root, dirRel, scope string, filter func(string) bool) {
@@ -677,6 +686,58 @@ func (m *Manager) Artifacts(name string) ([]Artifact, error) {
 
 	sort.Slice(out, func(i, j int) bool { return out[i].ModTime > out[j].ModTime })
 	return out, nil
+}
+
+// artifactAppname 返回项目 manifest 里的 appname；读不到就退回项目目录名。
+//
+// 产物列表和输出目录删除都按这个值判断「是不是本项目的产物」，两处必须用同一份
+// 判据：列表能看到的、删除才允许删。
+func artifactAppname(s *rootsSnapshot, rel, fallback string) string {
+	if data, err := s.prj.ReadFile(rel + "/manifest"); err == nil {
+		if a := strings.TrimSpace(parseManifest(string(data))["appname"]); a != "" {
+			return a
+		}
+	}
+	return fallback
+}
+
+// DeleteArtifact 删除一条产物。
+//
+// scope 是产物列表里的来源（project / output）：项目内那份在项目根下，输出目录
+// 那份在输出目录根下（两个目录重合时仍按项目根处理）。文件名走
+// safeArtifactFileName 校验，只接受一个文件名——前端递上来的东西不能把删除带出
+// 这两个目录。输出目录是共享的，还要确认文件名属于本项目的 appname，不能拿一个
+// 别的项目的产物名把文件删掉。
+func (m *Manager) DeleteArtifact(name, scope, file string) error {
+	rel, err := projectPath(name)
+	if err != nil {
+		return err
+	}
+	file, err = safeArtifactFileName("产物名", file)
+	if err != nil {
+		return err
+	}
+	if !strings.HasSuffix(strings.ToLower(file), ".fpk") {
+		return fmt.Errorf("%w：不是 fpk 产物", ErrInvalidInput)
+	}
+	s := m.snap()
+	if scope == "output" {
+		appname := artifactAppname(s, rel, name)
+		if file != appname+".fpk" && !strings.HasPrefix(file, appname+"-") {
+			return fmt.Errorf("%w：不是本项目（%s）的产物：%q", ErrInvalidInput, appname, file)
+		}
+	}
+	switch scope {
+	case "project":
+		return s.prj.Remove(rel+"/"+file, false)
+	case "output":
+		if outputIsProject(s) {
+			return s.prj.Remove(rel+"/"+file, false)
+		}
+		return s.output.Remove(file, false)
+	default:
+		return fmt.Errorf("%w：未知的产物来源 %q", ErrInvalidInput, scope)
+	}
 }
 
 // GetSettings 读取打包偏好，文件不存在时返回默认值。

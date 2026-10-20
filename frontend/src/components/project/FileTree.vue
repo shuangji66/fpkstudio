@@ -30,6 +30,7 @@
         :aria-label="t('files.switchToTabs')"
         @click="toTabs"
       />
+
       <!--
         在飞牛的文件管理器里打开项目目录（宿主能力，独立浏览器页面里置灰并说明原因）。
         说明挂原生 title：工具栏按钮不用 el-tooltip（触屏上点一下就挂着挡内容）。
@@ -82,7 +83,7 @@
 
     <div
       class="min-h-0 flex-1 overflow-auto thin-scroll py-1 text-sm"
-      @click.self="selected = project"
+      @click.self="clearSelection"
       @contextmenu.self.prevent="openMenu(project, true, $event)"
     >
       <div
@@ -106,12 +107,12 @@
         <div
           class="group flex cursor-pointer items-center gap-1 rounded px-1.5 py-[3px] hover:bg-slate-100 dark:hover:bg-slate-700"
           :class="[
-            selected === row.path
+            isSelected(row.path)
               ? 'bg-sky-50 dark:bg-sky-950/40 ring-1 ring-inset ring-sky-200 dark:ring-sky-800'
               : '',
-            cutPath === row.path ? 'opacity-50' : '',
+            cutPaths.has(row.path) ? 'opacity-50' : '',
           ]"
-          @click="onClick(row)"
+          @click="onClick(row, $event)"
           @contextmenu.prevent="openMenu(row.path, row.dir, $event)"
         >
           <span :style="{ width: `${row.depth * 12}px` }" class="shrink-0" />
@@ -146,7 +147,7 @@
           <!-- 和右键菜单同一个入口：常驻但低调，省得靠猜（右键仍然可用） -->
           <el-icon
             class="shrink-0 rounded p-1 text-lg transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200"
-            :class="selected === row.path ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'"
+            :class="isSelected(row.path) ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'"
             :title="t('tree.more')"
             @click.stop="openMenu(row.path, row.dir, $event)"
           >
@@ -219,7 +220,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -238,18 +239,23 @@ import {
 import { useUpload } from './useUpload'
 import { useDownload } from './useDownload'
 import { useOpenFolder } from './useOpenFolder'
+import { useTabsStore } from '@/stores/tabs'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { isArchive } from '@/utils/format'
-import { onEnter } from '@/utils/keyboard'
+import { hasOpenOverlay, isTypingTarget, onEnter } from '@/utils/keyboard'
+import { useFileClipboard } from './useFileClipboard'
+import { dropNestedPaths, useEntrySelection } from './useEntrySelection'
 
 const props = defineProps<{ project: string }>()
 const emit = defineEmits<{ resizeStart: [event: PointerEvent] }>()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const tabs = useTabsStore()
 const { upload, cancel: cancelUpload, busy: uploading, percent: uploadPercent } = useUpload()
 const { download } = useDownload()
 const { canOpenFolder, openFolder } = useOpenFolder(() => props.project)
+const { copy: copyPaths, paste: pasteAt, undo } = useFileClipboard(() => props.project)
 
 const state = computed(() => workspace.state(props.project))
 
@@ -266,7 +272,19 @@ const rows = computed(() => {
   return out
 })
 
-const selected = ref(props.project)
+const {
+  selected,
+  isSelected,
+  clear: clearSelection,
+  click: selectClick,
+  context: contextSelect,
+  prune: pruneSelection,
+} = useEntrySelection(() => rows.value.map((row) => row.path))
+
+// 收起目录 / 刷新之后，把已经不在树上的路径从选择里丢掉。放在解构之后再注册：
+// 回调里用到的 `pruneSelection` 这时已经初始化（以后有人加 immediate 也不会踩 TDZ）。
+watch(rows, () => pruneSelection())
+
 const renaming = ref('')
 const renameValue = ref('')
 const editing = ref<{ parent: string; name: string; dir: boolean } | null>(null)
@@ -284,7 +302,7 @@ function firstEl(
   return Array.isArray(target) ? (target[0] ?? null) : target
 }
 
-const menu = reactive({ show: false, x: 0, y: 0, path: '', dir: false })
+const menu = reactive({ show: false, x: 0, y: 0, path: '', dir: false, multi: false })
 const menuEl = ref<HTMLElement | null>(null)
 
 /** 上传目标目录：菜单里点「上传文件」时记下来，选完文件才真的发请求。 */
@@ -302,8 +320,18 @@ function onResizeStart(event: PointerEvent) {
   emit('resizeStart', event)
 }
 
-async function onClick(row: { path: string; dir: boolean }) {
-  selected.value = row.path
+/**
+ * 单击：普通点击照旧展开 / 打开；Ctrl / Cmd 只切选择、Shift 选一段。
+ *
+ * 带修饰键时不展开目录也不打开文件——多选时每点一下就多开一个标签，选中的东西会被
+ * 标签页盖住，等于没法用。
+ */
+async function onClick(row: { path: string; dir: boolean }, event: MouseEvent) {
+  if (event.shiftKey || event.ctrlKey || event.metaKey) {
+    selectClick(row.path, event, () => undefined)
+    return
+  }
+  selectClick(row.path, event, () => undefined)
   if (row.dir) {
     await workspace.toggleDir(props.project, row.path)
   } else {
@@ -404,12 +432,15 @@ function onRenameEnter(event: Event, path: string) {
 const MENU_MARGIN = 8
 
 function openMenu(path: string, dir: boolean, event: MouseEvent) {
-  selected.value = path
+  // 项目根不是一行、也不能删：右键空白处时先把选择收掉，不能让它进入批量删除。
+  if (path === props.project) clearSelection()
+  else contextSelect(path)
   menu.show = true
   menu.x = event.clientX
   menu.y = event.clientY
   menu.path = path
   menu.dir = dir
+  menu.multi = selected.value.length > 1
   // 位置先按指针摆好，渲染出来量到真实尺寸后再夹回窗口内（一帧之内，看不出来）
   void nextTick(clampMenu)
   window.setTimeout(() => window.addEventListener('click', hideMenu, { once: true }), 0)
@@ -435,30 +466,54 @@ const menuDir = computed(() => {
   return menu.dir ? path : path.slice(0, path.lastIndexOf('/'))
 })
 
-/** 剪切中的那一项（在树里淡一半，粘完就没了） */
-const cutPath = computed(() => (clipboard.value?.cut ? clipboard.value.path : ''))
+/** 剪切中的那些项（在树里淡一半，粘完就没了） */
+const cutPaths = computed(
+  () => new Set(clipboard.value?.cut ? clipboard.value.paths : []),
+)
 
 const canPaste = computed(() => workspace.canPasteTo(props.project, menuDir.value))
 
 /** 粘贴到菜单指向的目录；目标重名时复制换名字、剪切直接拒绝。 */
 async function paste() {
-  const clip = clipboard.value
-  if (!clip) return
   const destDir = menuDir.value
-  const name = clip.path.split('/').pop() ?? ''
   hideMenu()
-  try {
-    const outcome = await workspace.pasteInto(props.project, destDir)
-    if (outcome === 'exists') {
-      ElMessage.warning(t('tree.pasteExists', { name }))
-    } else if (outcome === 'same') {
-      ElMessage.info(t('tree.pasteSame', { name }))
-    } else if (outcome === 'unreadable') {
-      ElMessage.error(t('tree.pasteListFailed', { name: destDir.split('/').pop() ?? destDir }))
-    }
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
+  await pasteAt(destDir)
+}
+
+/** 复制 / 剪切选中的那一批（菜单和键盘共用）。 */
+function copySelection(cut: boolean) {
+  copyPaths(selected.value, cut)
+}
+
+/**
+ * 键盘粘贴的目标目录：
+ * 只选中了一个目录就粘进它；选中了文件（或跨目录多选）就粘到第一项所在的目录；
+ * 什么都没选时粘到项目根。
+ */
+const pasteDir = computed(() => {
+  const first = selected.value[0]
+  if (!first) return props.project
+  if (selected.value.length === 1) {
+    const row = rows.value.find((item) => item.path === first)
+    if (row?.dir) return first
   }
+  const cut = first.lastIndexOf('/')
+  return cut > 0 ? first.slice(0, cut) : props.project
+})
+
+/** Ctrl / Cmd + X / C / V / Z：文件树只在桌面（非移动）出现，直接挂在窗口上。 */
+function onKeydown(event: KeyboardEvent) {
+  if (tabs.activeProject !== props.project) return
+  if (hasOpenOverlay()) return
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+  if (isTypingTarget(event)) return
+  const key = event.key.toLowerCase()
+  if (key !== 'c' && key !== 'x' && key !== 'v' && key !== 'z') return
+  event.preventDefault()
+  if (key === 'c') copySelection(false)
+  else if (key === 'x') copySelection(true)
+  else if (key === 'v') void pasteAt(pasteDir.value)
+  else void undo()
 }
 
 // ---- 上传 ----
@@ -519,9 +574,73 @@ async function remove(path: string, dir: boolean) {
   }
 }
 
+/**
+ * 批量删除（Ctrl / Shift 多选后的入口）。
+ *
+ * 先把「父目录 + 它里面的子项」收敛掉：树里可以同时选中 `building/` 和它下面的
+ * 目录，逐条删的话第二条会对着一个已经不存在的路径发请求。确认只弹一次。
+ */
+async function removeSelected() {
+  // 项目根本身永远不参与批量删除（它是「打开着的项目」，不是树里的一项）。
+  const paths = dropNestedPaths(selected.value).filter((path) => path !== props.project)
+  if (!paths.length) return
+  hideMenu()
+  const dirOf = (path: string) => rows.value.some((row) => row.path === path && row.dir)
+  try {
+    await ElMessageBox.confirm(t('tree.confirmDeleteMany', { count: paths.length }), t('common.tip'), {
+      type: 'warning',
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
+    })
+  } catch {
+    return
+  }
+  clearSelection()
+  for (const path of paths) {
+    try {
+      await workspace.removeEntryAt(props.project, path, dirOf(path))
+      workspace.clearClipboard(props.project, path)
+    } catch (e) {
+      ElMessage.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+}
+
 type MenuItem = { label: string; run: () => void; danger?: boolean; disabled?: boolean }
 
 const menuItems = computed<MenuItem[]>(() => {
+  // 右键落在多选中的某一项上：对整批选择做事（重命名 / 解压这些只对单条有意义）。
+  if (menu.multi) {
+    return [
+      {
+        label: t('tree.copy'),
+        run: () => {
+          hideMenu()
+          copySelection(false)
+        },
+      },
+      {
+        label: t('tree.cut'),
+        run: () => {
+          hideMenu()
+          copySelection(true)
+        },
+      },
+      {
+        label: t('common.delete'),
+        danger: true,
+        run: () => void removeSelected(),
+      },
+      {
+        label: t('tree.clearSelection'),
+        run: () => {
+          hideMenu()
+          clearSelection()
+        },
+      },
+    ]
+  }
+
   const path = menu.path
   const isRoot = path === props.project
   const dir = menuDir.value
@@ -543,17 +662,8 @@ const menuItems = computed<MenuItem[]>(() => {
   if (isRoot) return items
 
   items.push({ label: t('common.rename'), run: () => startRename(path) })
-  items.push({
-    label: t('tree.copy'),
-    run: () => {
-      workspace.copyToClipboard(props.project, path, false)
-      ElMessage.success(t('tree.copied', { name }))
-    },
-  })
-  items.push({
-    label: t('tree.cut'),
-    run: () => workspace.copyToClipboard(props.project, path, true),
-  })
+  items.push({ label: t('tree.copy'), run: () => copySelection(false) })
+  items.push({ label: t('tree.cut'), run: () => copySelection(true) })
   // 目录是后端现打的 zip（`zip: true` 挂一条「正在打包」的提示），文件是直传
   items.push({ label: t('common.download'), run: () => void download(path, { zip: menu.dir }) })
   if (!menu.dir && isArchive(name)) {
@@ -569,7 +679,11 @@ const menuItems = computed<MenuItem[]>(() => {
 
 onMounted(() => {
   void workspace.ensure(props.project)
+  window.addEventListener('keydown', onKeydown)
 })
 
-onUnmounted(hideMenu)
+onUnmounted(() => {
+  hideMenu()
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>

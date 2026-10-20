@@ -132,6 +132,29 @@ func (s *Server) handleProjectArtifacts(w http.ResponseWriter, r *http.Request) 
 	return writeJSON(w, map[string]any{"list": list, "outputDir": s.prj.OutputDir()})
 }
 
+// handleProjectArtifactDelete 删除一条打包产物。
+func (s *Server) handleProjectArtifactDelete(w http.ResponseWriter, r *http.Request) error {
+	if err := requireMethods(r, http.MethodPost); err != nil {
+		return err
+	}
+	var req struct {
+		Name  string `json:"name"`
+		Scope string `json:"scope"`
+		File  string `json:"file"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	if err := s.prj.DeleteArtifact(req.Name, req.Scope, req.File); err != nil {
+		if errors.Is(err, projects.ErrInvalidName) || errors.Is(err, projects.ErrInvalidInput) {
+			return badRequest("%v", err)
+		}
+		return fsError("删除产物失败", err)
+	}
+	s.log.Infof("删除产物 %s（%s）", req.File, req.Scope)
+	return writeJSON(w, map[string]any{"ok": true})
+}
+
 // handleProjectImport 接收上传的 fpk，解包成项目。
 func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request) error {
 	if err := requireMethods(r, http.MethodPost); err != nil {

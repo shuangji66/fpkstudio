@@ -83,6 +83,7 @@ func (s *Server) routes() {
 	s.api("/api/projects/import-path", s.handleProjectImportPath)
 	s.api("/api/projects/pack", s.handleProjectPack)
 	s.api("/api/projects/artifacts", s.handleProjectArtifacts)
+	s.api("/api/projects/artifacts/delete", s.handleProjectArtifactDelete)
 
 	s.api("/api/fs/list", s.handleFsList)
 	s.api("/api/fs/read", s.handleFsRead)

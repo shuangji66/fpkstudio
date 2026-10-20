@@ -107,6 +107,12 @@ export const getArtifacts = async (
   return { list: res.list ?? [], outputDir: res.outputDir }
 }
 
+/** 删除一条产物：scope 是列表里的 project / output，file 是产物文件名。 */
+export const deleteArtifact = (name: string, file: string, scope: string) =>
+  request<{ ok: boolean }>('/api/projects/artifacts/delete', {
+    json: { name, file, scope },
+  })
+
 export const packProject = (
   name: string,
   platforms: string[],
@@ -187,7 +193,18 @@ export const uploadFiles = (
   )
 }
 
-export const downloadEntry = (path: string) => download('/api/fs/download', { path })
+/**
+ * 下载文件 / 目录。
+ *
+ * `package: true` 走 `layout=package`：后端按 fpk 包的白名单只导出 manifest、图标和
+ * app / cmd / config / wizard / i18n 这几个脚手架目录（首页「导出」用它），
+ * building 工作区、.git、README 之类都不进 zip。普通下载不传，行为不变。
+ */
+export const downloadEntry = (path: string, opts: { package?: boolean } = {}) =>
+  download('/api/fs/download', {
+    path,
+    layout: opts.package ? 'package' : undefined,
+  })
 
 // ---- 日志 ----
 

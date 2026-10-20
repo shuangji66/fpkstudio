@@ -6,16 +6,29 @@
     -->
     <div class="shrink-0 border-b border-slate-200 dark:border-slate-700 px-4 py-3">
       <!-- 项目计数不在这儿：它和称号一起在项目列表最后一行下面（见下面的 footer） -->
-      <div class="flex flex-wrap items-center gap-3">
-        <!-- 搜索框刻意窄：敲两三个字母筛项目就够了，占一大条只会把按钮挤到后面 -->
+      <div class="home-actions flex flex-wrap items-center gap-3">
+        <!--
+          搜索框按内容自适应宽度（`.home-search`，见 style.css）：placeholder / 关键字
+          长了就跟着变宽，和旁边那排「图标 + 文字」的按钮一样不写死像素。
+          工具条只用父级的 gap 排间距，按钮之间不再叠 Element Plus 的相邻外边距
+          （`.home-actions` 那条规则），所有间隔和「搜索 → 新建」保持一致。
+        -->
         <el-input
           v-model="projects.keyword"
-          class="w-28"
+          class="home-search"
           size="default"
           clearable
           :placeholder="t('home.searchPlaceholder')"
           :prefix-icon="Search"
         />
+        <el-button
+          size="default"
+          :icon="Refresh"
+          :loading="projects.loading"
+          @click="projects.refresh()"
+        >
+          {{ t('common.refresh') }}
+        </el-button>
         <el-button
           size="default"
           :type="panel === 'create' ? 'primary' : 'default'"
@@ -130,7 +143,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Grid, Menu, Picture, Plus, Search, Setting, Upload } from '@element-plus/icons-vue'
+import { Grid, Menu, Picture, Plus, Refresh, Search, Setting, Upload } from '@element-plus/icons-vue'
 import CreateProjectForm from '@/components/home/CreateProjectForm.vue'
 import IconDialog from '@/components/home/IconDialog.vue'
 import ImportFpkForm from '@/components/home/ImportFpkForm.vue'

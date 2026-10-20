@@ -11,54 +11,39 @@
     @open="onOpen"
   >
     <div class="flex flex-col gap-5">
-      <!-- 主题 -->
-      <section>
-        <p class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">{{ t('settings.theme.title') }}</p>
-        <!-- 三个主题各是一个独立按钮（不是连成一排的分段控件） -->
-        <div class="flex flex-wrap items-center gap-2">
-          <el-button
-            v-for="mode in THEME_MODES"
-            :key="mode"
-            size="default"
-            :type="theme.mode === mode ? 'primary' : 'default'"
-            @click="onTheme(mode)"
-          >
-            {{ t(`settings.theme.${mode}`) }}
+      <!--
+        主题 / 语言 / 界面形态：三项并排一行，各自「标题一行、一个按钮一行」。
+        每项只有一个循环按钮——点一下切到下一个值，按钮上写当前值；三档的全部
+        取值循环，不再排三个按钮（三行各三格太占地方，也容易看成三组独立开关）。
+      -->
+      <div class="grid grid-cols-3 gap-3">
+        <section class="min-w-0">
+          <p class="mb-2 truncate text-sm font-medium text-slate-500 dark:text-slate-400">
+            {{ t('settings.theme.title') }}
+          </p>
+          <el-button size="default" class="w-full" @click="cycleTheme">
+            {{ t(`settings.theme.${theme.mode}`) }}
           </el-button>
-        </div>
-      </section>
+        </section>
 
-      <!-- 语言 -->
-      <section>
-        <p class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">{{ t('settings.locale.title') }}</p>
-        <div class="flex flex-wrap items-center gap-2">
-          <el-button
-            v-for="item in LOCALE_MODES"
-            :key="item.value"
-            size="default"
-            :type="language.mode === item.value ? 'primary' : 'default'"
-            @click="language.setMode(item.value)"
-          >
-            {{ t(item.labelKey) }}
+        <section class="min-w-0">
+          <p class="mb-2 truncate text-sm font-medium text-slate-500 dark:text-slate-400">
+            {{ t('settings.locale.title') }}
+          </p>
+          <el-button size="default" class="w-full" @click="cycleLocale">
+            {{ t(localeLabelKey) }}
           </el-button>
-        </div>
-      </section>
+        </section>
 
-      <!-- 界面形态 -->
-      <section>
-        <p class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-2">{{ t('settings.layout.title') }}</p>
-        <div class="flex flex-wrap items-center gap-2">
-          <el-button
-            v-for="mode in LAYOUT_MODES"
-            :key="mode"
-            size="default"
-            :type="layout.mode === mode ? 'primary' : 'default'"
-            @click="layout.setMode(mode)"
-          >
-            {{ t(`settings.layout.${mode}`) }}
+        <section class="min-w-0">
+          <p class="mb-2 truncate text-sm font-medium text-slate-500 dark:text-slate-400">
+            {{ t('settings.layout.title') }}
+          </p>
+          <el-button size="default" class="w-full" @click="cycleLayout">
+            {{ t(`settings.layout.${layout.mode}`) }}
           </el-button>
-        </div>
-      </section>
+        </section>
+      </div>
 
       <!-- 目录设置 -->
       <section>
@@ -170,8 +155,7 @@ import { useLayoutStore, type LayoutMode } from '@/stores/layout'
 
 type Slot = 'projectRoot' | 'outputDir'
 
-/** 主题按钮的取值顺序，文案走 i18n 的 settings.theme.<mode>。 */
-/** 主题的三档（按钮顺序）。 */
+/** 主题的循环顺序，文案走 i18n 的 settings.theme.<mode>。 */
 const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system']
 
 /** 语言的三档；「跟随系统」是默认值，也是没存过偏好时的落点。 */
@@ -182,9 +166,9 @@ const LOCALE_MODES: { value: LocaleMode; labelKey: string }[] = [
 ]
 
 /**
- * 界面形态的取值顺序（文案走 i18n 的 `settings.layout.<mode>`）。
+ * 界面形态的循环顺序（文案走 i18n 的 `settings.layout.<mode>`）。
  *
- * 「自动」放最后：和主题、语言那两组的第三格对齐（具体值在前，跟随 / 自动那类兜底项在后）。
+ * 「自动」放最后：和主题、语言那两档一致（具体值在前，跟随 / 自动那类兜底项在后）。
  */
 const LAYOUT_MODES: LayoutMode[] = ['desktop', 'mobile', 'auto']
 
@@ -224,8 +208,29 @@ async function openFolder(path: string | undefined) {
   }
 }
 
-function onTheme(mode: ThemeMode) {
-  theme.setMode(mode)
+/** 三档循环：找不到当前值时从头开始（本地偏好被手工改坏也不会卡住）。 */
+function nextOf<T>(modes: readonly T[], current: T): T {
+  const index = modes.indexOf(current)
+  return modes[(index + 1) % modes.length]!
+}
+
+function cycleTheme() {
+  theme.setMode(nextOf(THEME_MODES, theme.mode))
+}
+
+/** 语言按钮上写的是当前那一档的文案（「自动」也要能显示出来）。 */
+const localeLabelKey = computed(
+  () => LOCALE_MODES.find((item) => item.value === language.mode)?.labelKey ?? 'settings.locale.system',
+)
+
+function cycleLocale() {
+  const index = LOCALE_MODES.findIndex((item) => item.value === language.mode)
+  const next = LOCALE_MODES[(index + 1) % LOCALE_MODES.length]!
+  language.setMode(next.value)
+}
+
+function cycleLayout() {
+  layout.setMode(nextOf(LAYOUT_MODES, layout.mode))
 }
 
 const semanticOf = (slot: Slot): string => {

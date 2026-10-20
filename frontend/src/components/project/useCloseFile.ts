@@ -13,8 +13,13 @@ export function useCloseFile() {
   const { t } = useI18n()
   const workspace = useWorkspaceStore()
 
-  /** 关掉这个文件标签；有未保存改动时先弹确认，用户取消就什么都不做。 */
-  async function closeFile(project: string, path: string) {
+  /**
+   * 关掉这个文件标签；有未保存改动时先弹确认，用户取消就什么都不做。
+   *
+   * `adjacent` 只在桌面的标签栏传：关掉之后停在左边的相邻标签上（由 store 决定），
+   * 移动端子页面的「后退」不传，仍旧退回打开文件之前的位置。
+   */
+  async function closeFile(project: string, path: string, opts: { adjacent?: boolean } = {}) {
     const file = workspace.state(project).files.find((f) => f.path === path)
     if (file?.dirty) {
       try {
@@ -27,7 +32,7 @@ export function useCloseFile() {
         return
       }
     }
-    workspace.closeFile(project, path)
+    workspace.closeFile(project, path, opts.adjacent === true)
   }
 
   return { closeFile }

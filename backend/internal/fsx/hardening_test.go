@@ -249,6 +249,52 @@ func TestZipDirKeepsTopLevelDir(t *testing.T) {
 	}
 }
 
+// TestZipDirExceptSkipsSubtree：项目导出要排除 building/，而且只排除指定子树
+// （同名目录出现在别处不能跟着消失）。
+func TestZipDirExceptSkipsSubtree(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"demo/building/platform/arm", "demo/app/building"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"demo/manifest", "demo/building/platform/arm/main", "demo/app/building/keep.txt"} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(file)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	x, err := Open(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Close()
+
+	var buf bytes.Buffer
+	skip := func(p string) bool { return p == "demo/building" || strings.HasPrefix(p, "demo/building/") }
+	if err := x.ZipDirExcept("demo", &buf, skip); err != nil {
+		t.Fatalf("ZipDirExcept 失败: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(zr.File))
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	joined := strings.Join(names, " ")
+	for _, want := range []string{"demo/", "demo/manifest", "demo/app/building/", "demo/app/building/keep.txt"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("zip 里缺少条目 %q：%v", want, names)
+		}
+	}
+	for _, gone := range []string{"demo/building", "demo/building/platform", "demo/building/platform/arm/main"} {
+		if strings.Contains(joined, gone) {
+			t.Errorf("被排除的子树 %q 仍在 zip 里：%v", gone, names)
+		}
+	}
+}
+
 // TestZipDirReportsUnreadableFile：读不了的文件必须让 ZipDir 报错（调用方据此回一句
 // 人话，而不是发一个「里面是 0 字节条目」的残包）。
 func TestZipDirReportsUnreadableFile(t *testing.T) {

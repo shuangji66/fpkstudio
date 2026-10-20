@@ -34,6 +34,8 @@ const files = new Map([
   ['demo/dir/inner.txt', 'INNER\n'],
 ])
 const calls = []
+/** 让下一次重命名指定路径失败，用来模拟剪切中途失败。 */
+let failRenameOnce = ''
 
 globalThis.fetch = async (url, init = {}) => {
   const route = String(url).split('?')[0]
@@ -72,6 +74,10 @@ globalThis.fetch = async (url, init = {}) => {
     return json({ ok: true, path: body.path, size: body.content.length })
   }
   if (route.endsWith('/api/fs/rename')) {
+    if (body.path === failRenameOnce) {
+      failRenameOnce = ''
+      return json({ error: '模拟重命名失败' }, 500)
+    }
     if (files.has(body.path)) {
       files.set(body.to, files.get(body.path))
       files.delete(body.path)
@@ -86,6 +92,25 @@ globalThis.fetch = async (url, init = {}) => {
       }
     }
     return json({ ok: true, path: body.to })
+  }
+  if (route.endsWith('/api/fs/copy')) {
+    if (files.has(body.path)) {
+      files.set(body.to, files.get(body.path))
+    } else {
+      const prefix = `${body.path}/`
+      const copying = [...files.keys()].filter((path) => path.startsWith(prefix))
+      if (!copying.length) return json({ error: 'not found' }, 404)
+      for (const path of copying) files.set(body.to + path.slice(body.path.length), files.get(path))
+    }
+    return json({ ok: true, path: body.to })
+  }
+  if (route.endsWith('/api/fs/delete')) {
+    if (files.has(body.path)) files.delete(body.path)
+    else {
+      const prefix = `${body.path}/`
+      for (const path of [...files.keys()]) if (path.startsWith(prefix)) files.delete(path)
+    }
+    return json({ ok: true })
   }
   if (route.endsWith('/api/projects/exists')) return json({ exists: true, docker: false, ui: false })
   if (route.endsWith('/api/projects/platforms')) return json({ platforms: [] })
@@ -116,7 +141,7 @@ async function rejects(name, run) {
 }
 
 setActivePinia(createPinia())
-const { useWorkspaceStore } = await import('@/stores/workspace.ts')
+const { useWorkspaceStore, FILES_TAB, DEFAULT_TAB } = await import('@/stores/workspace.ts')
 const workspace = useWorkspaceStore()
 const tabOf = (project, path) => workspace.state(project).files.find((f) => f.path === path)
 
@@ -212,7 +237,7 @@ const tabOf = (project, path) => workspace.state(project).files.find((f) => f.pa
   workspace.copyToClipboard('demo', 'demo/dir3/inner.txt', true)
   await workspace.renameEntryAt('demo', 'demo/dir3/inner.txt', 'demo/dir3/renamed.txt')
   // 剪贴板里存的是「含项目名的完整路径」（和 FileTree / FileBrowser 传进来的一致）
-  check('重命名后剪贴板路径跟着换', workspace.state('demo').clipboard?.path, 'demo/dir3/renamed.txt')
+  check('重命名后剪贴板路径跟着换', workspace.state('demo').clipboard?.paths[0], 'demo/dir3/renamed.txt')
 
   // 删掉目录：缓存、展开状态、剪贴板里那条（在删除的子树里）都要清干净
   await workspace.removeEntryAt('demo', 'demo/dir3', true)
@@ -263,7 +288,7 @@ const tabOf = (project, path) => workspace.state(project).files.find((f) => f.pa
   const same = await workspace.pasteInto('demo', 'demo/dirB')
   check('同目录粘贴返回 same', same, 'same')
   check('同目录粘贴不动文件', files.has('demo/dirB/move-me.txt'), true)
-  check('同目录粘贴后剪贴板还在', workspace.state('demo').clipboard?.path, 'demo/dirB/move-me.txt')
+  check('同目录粘贴后剪贴板还在', workspace.state('demo').clipboard?.paths[0], 'demo/dirB/move-me.txt')
 
   // 目标目录已有同名项：拒绝，两边都不动
   files.set('demo/dirA/dup.txt', 'A\n')
@@ -287,6 +312,125 @@ const tabOf = (project, path) => workspace.state(project).files.find((f) => f.pa
   const tab = workspace.state('demo').files.find((f) => f.path === 'dirB/dup.txt')
   check('移动后标签换了路径', tab?.path, 'dirB/dup.txt')
   check('移动后内容基线还在', tab?.origin, 'A\n')
+}
+
+// ---- 8. 关文件子标签：桌面停在左边那个，只有一个时回快捷设置 ----
+//
+// 桌面的标签栏传 preferAdjacent；移动端的文件子页面不传，仍旧退回打开文件之前
+// 停的固定页（`fileReturnTab`）。两条路都不能丢。
+{
+  workspace.forget('demo')
+  await workspace.ensure('demo')
+  await workspace.openFile('demo', 'demo/other.txt')
+  await workspace.openFile('demo', 'demo/renamed.txt')
+  await workspace.openFile('demo', 'demo/dirB/move-me.txt')
+  workspace.setActive('demo', 'renamed.txt')
+
+  workspace.closeFile('demo', 'renamed.txt', true)
+  check('关中间的标签停在左边那个', workspace.state('demo').activeTab, 'other.txt')
+
+  workspace.closeFile('demo', 'other.txt', true)
+  check('关第一个（没有左边）停在右边那个', workspace.state('demo').activeTab, 'dirB/move-me.txt')
+
+  workspace.closeFile('demo', 'dirB/move-me.txt', true)
+  check('关掉最后一个文件回快捷设置', workspace.state('demo').activeTab, DEFAULT_TAB)
+
+  // 移动端：从「文件」列表打开，关掉之后要回列表而不是停在别的文件上
+  workspace.setActive('demo', FILES_TAB)
+  await workspace.openFile('demo', 'demo/other.txt')
+  workspace.closeFile('demo', 'other.txt')
+  check('移动端关文件回到打开前的位置', workspace.state('demo').activeTab, FILES_TAB)
+}
+
+// ---- 9. 多选剪贴板与撤销 ----
+{
+  workspace.forget('demo')
+  await workspace.ensure('demo')
+
+  // 多选复制：两份都过去，Ctrl+Z 把副本删掉、原件留着
+  files.set('demo/m/copy-a.txt', 'A\n')
+  files.set('demo/m/copy-b.txt', 'B\n')
+  workspace.copyToClipboard('demo', ['demo/m/copy-a.txt', 'demo/m/copy-b.txt'], false)
+  check('多选复制：剪贴板记两项', workspace.state('demo').clipboard?.paths.length, 2)
+  check('多选复制返回 ok', await workspace.pasteInto('demo', 'demo/m/dest'), 'ok')
+  check(
+    '多选复制：两份副本都到位',
+    [files.has('demo/m/dest/copy-a.txt'), files.has('demo/m/dest/copy-b.txt')],
+    [true, true],
+  )
+  check('多选复制：剪贴板清空', workspace.state('demo').clipboard, null)
+  check('撤销多选复制', await workspace.undo('demo'), 'ok')
+  check(
+    '撤销复制：副本删掉',
+    [files.has('demo/m/dest/copy-a.txt'), files.has('demo/m/dest/copy-b.txt')],
+    [false, false],
+  )
+  check('撤销复制：原件还在', [files.has('demo/m/copy-a.txt'), files.has('demo/m/copy-b.txt')], [true, true])
+
+  // 多选剪切：整批搬走，Ctrl+Z 整批搬回来
+  files.set('demo/n/cut-a.txt', 'A\n')
+  files.set('demo/n/cut-b.txt', 'B\n')
+  workspace.copyToClipboard('demo', ['demo/n/cut-a.txt', 'demo/n/cut-b.txt'], true)
+  check('多选剪切返回 ok', await workspace.pasteInto('demo', 'demo/n/dest'), 'ok')
+  check(
+    '多选剪切：原件已搬走、目标到位',
+    [
+      files.has('demo/n/cut-a.txt'),
+      files.has('demo/n/cut-b.txt'),
+      files.has('demo/n/dest/cut-a.txt'),
+      files.has('demo/n/dest/cut-b.txt'),
+    ],
+    [false, false, true, true],
+  )
+  check('撤销多选剪切', await workspace.undo('demo'), 'ok')
+  check(
+    '撤销剪切：整批搬回原目录',
+    [
+      files.has('demo/n/cut-a.txt'),
+      files.has('demo/n/cut-b.txt'),
+      files.has('demo/n/dest/cut-a.txt'),
+      files.has('demo/n/dest/cut-b.txt'),
+    ],
+    [true, true, false, false],
+  )
+
+  // 重命名也进撤销栈
+  files.set('demo/n/ren.txt', 'R\n')
+  await workspace.renameEntryAt('demo', 'demo/n/ren.txt', 'demo/n/ren-2.txt')
+  check('重命名后路径换了', files.has('demo/n/ren-2.txt'), true)
+  check('撤销重命名', await workspace.undo('demo'), 'ok')
+  check('撤销重命名后原名回来', [files.has('demo/n/ren.txt'), files.has('demo/n/ren-2.txt')], [true, false])
+
+  // 删除不可撤销：它会把撤销栈清掉，Ctrl+Z 不会去动更早的操作
+  await workspace.renameEntryAt('demo', 'demo/n/ren.txt', 'demo/n/ren-3.txt')
+  await workspace.removeEntryAt('demo', 'demo/n/ren-3.txt', false)
+  check('删除之后没有可撤销的操作', await workspace.undo('demo'), 'empty')
+}
+
+// ---- 10. 剪切中途失败：剪贴板只留没搬的项 ----
+{
+  workspace.forget('demo')
+  await workspace.ensure('demo')
+
+  files.set('demo/p/a.txt', 'A\n')
+  files.set('demo/p/b.txt', 'B\n')
+  workspace.copyToClipboard('demo', ['demo/p/a.txt', 'demo/p/b.txt'], true)
+  failRenameOnce = 'demo/p/b.txt'
+
+  let failedMidway = false
+  try {
+    await workspace.pasteInto('demo', 'demo/q')
+  } catch {
+    failedMidway = true
+  }
+  check('剪切中途失败会抛错', failedMidway, true)
+  check('失败前搬走的那项已经到位', files.has('demo/q/a.txt'), true)
+  check('失败的那项还在原处', files.has('demo/p/b.txt'), true)
+  check('剪贴板只剩没搬的那项', workspace.state('demo').clipboard?.paths, ['demo/p/b.txt'])
+
+  check('重试只搬剩下的项', await workspace.pasteInto('demo', 'demo/q'), 'ok')
+  check('重试后两项都到位', [files.has('demo/q/a.txt'), files.has('demo/q/b.txt')], [true, true])
+  check('重试成功后剪贴板清空', workspace.state('demo').clipboard, null)
 }
 
 console.log(failed ? `\n${failed} 项不通过` : '\n文件管理器 store 检查全部通过')

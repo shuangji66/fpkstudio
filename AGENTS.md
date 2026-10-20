@@ -73,7 +73,7 @@ frontend/src/
   stores/                    pinia：projects / tabs / workspace / system / logs / theme / layout
   components/project/        项目内的固定页：文件（标签页模式）/ 总览 / 快捷设置 / 图标，
                              以及左栏文件树、文件标签；useCloseFile / useUpload / useDownload /
-                             useOpenFolder 四个小组合函数也在这里（关标签的未保存提醒、
+                             useOpenFolder / useEntrySelection / useFileClipboard 六个小组合函数也在这里（关标签的未保存提醒、
                              带进度的上传、下载并报错（目录挂「正在打包」提示）、
                              在文件管理器里打开项目目录）
   components/editor/         标签页编辑器宿主 + 按路径注册的表单编辑器
@@ -104,6 +104,26 @@ frontend/src/
   「在标签页里复制、切回文件树粘贴不了」。剪贴板粘一次就清空（复制和剪切都是），别把它
   当成「能反复粘」的剪贴板。同理，「关掉一个文件标签」的未保存提醒在
   `components/project/useCloseFile.ts`，桌面标签和移动端子页面都用它。
+- **多选是两个视图各自的界面状态**（`useEntrySelection.ts`）：`Ctrl` / `Cmd` 切换、
+  `Shift` 按可见顺序选一段，带修饰键时**不打开文件、不展开目录**（否则选一批文件会开出
+  一排标签）。选中项只靠行高亮表示，**不要再往工具栏加「已选 N 项」那一组**；多选的
+  「更多 / 右键」菜单是复制 / 剪切 / 删除 / 取消选择。批量删除先过 `dropNestedPaths`，
+  把「父目录 + 子项」收敛成父目录，否则删完父目录会拿着一条已经不存在的路径继续发请求；
+  确认只弹一次。
+- **文件管理器的键盘快捷键**（`useFileClipboard.ts` + `utils/keyboard.ts` 的
+  `isTypingTarget`）：`Ctrl` / `Cmd` + `C` / `X` / `V` / `Z`。两个视图各挂一个
+  window keydown，**必须同时判 `tabs.activeProject`、本视图是否在前台，以及有没有
+  可见的弹窗遮罩**（`hasOpenOverlay`；项目标签是 `v-show` 挂着的，多个项目的监听器会
+  同时收到事件，弹窗按钮上的 Ctrl+C 也不该复制底下的文件）。焦点在输入框 /
+  contenteditable 里一律让给浏览器。撤销栈在 `ProjectState.undoStack`，只记重命名和
+  粘贴（复制 = 删副本、剪切 = 搬回去）；删除不可逆，`removeEntryAt` 会清空栈，别让
+  Ctrl+Z 撤到删除之前的操作。
+- **产物行右侧三个按钮要紧凑**（文件夹 / 下载 / 删除）：删掉 Element Plus 的相邻
+  `.el-button + .el-button` 外边距（`.artifact-actions`），间距只靠 `gap-1`；删除是
+  `type="danger"` 的图标按钮，走 `/api/projects/artifacts/delete`（scope 决定删项目内
+  还是输出目录那份）。后端校验完整产物名用 `safeArtifactFileName`（255 字节），别套
+  `safeArtifactPart` 的 64 字节成分上限；`output` scope 还要校验文件名匹配本项目
+  `appname`，否则共享输出目录里能删到别的项目的产物。
 - **`prepareStage` 不许预建目标目录**。它先 `Remove` 掉 `app/server` 再整份复制（这是
   「替换」语义，不是合并），而复制走的是 `Root.Copy` / `fsx.CopyTree`——两者对**已存在的
   目标**都返回 `ErrExists`。以前那里多了一句 `Mkdir`，于是默认部署（项目根在数据目录内，
@@ -224,6 +244,15 @@ frontend/src/
 - **图片预览（`ImagePreview`，含 svg 的预览面）没有可存的内容**：`EditorHost` 按
   `registry` 里的 `previews` + 当前视图把「还原 / 保存」藏掉（`previewOnly`），
   别再让它们灰在那里占位置。
+- **图标尺寸的基准别搞反**：大图标（`ICON_256.PNG` / `<前缀>_256.png`）跟着取景框的
+  「尺寸」走；小图标（`ICON.PNG` / `<前缀>_64.png`）默认「不变」是**和大图同尺寸**，
+  再按「小图缩放」的 1/2、1/4、1/8 向下乘，不是固定 64px。只写
+  `viewBox` 的小 SVG 进浏览器会按 300×150 的默认视口渲染、在取景框里缩在上半部分——
+  `utils/icon.ts` 的 `svgWithIntrinsicSize` 会按 viewBox 给根 `<svg>` 补固有宽高，
+  改这段要连 `check:icon` 的 viewBox 断言一起看。
+- **设置弹窗顶部三项是同一行的三列**（主题 / 语言 / 界面形态，`SettingsDialog.vue`）：
+  每项「标题一行 + 一个循环按钮一行」，点按钮切到下一档、按钮显示当前值；不要再拆回
+  每项三颗按钮（三项 × 三档会变成九颗，既占地方又像九组独立开关）。
 - **语言偏好（中文 / English / 跟随系统）在 `stores/locale.ts` + `i18n/index.ts`**，
   记在 localStorage 的 `fpkstudio.locale`（默认跟随系统）。切语言要**三处一起换**：
   vue-i18n 的 locale、`html lang`、Element Plus 的语言包——都收在 `applyLocale()` 里。
@@ -420,6 +449,10 @@ frontend/src/
   目录名可取）：项目导出和文件管理器的「下载」都走它，摊平会把 `manifest` / `app/` 直接撒
   在用户选的目标目录里。**空目录也要留下这一个目录条目**——少它就得到一个没有任何成员的
   「空包」，解压工具直接报错。回归在 `fsx.ZipDirKeepsTopLevelDir`。
+- **首页「导出」是白名单，不是黑名单**：`/api/fs/download?layout=package` 只放
+  `manifest`、`ICON.PNG` / `ICON_256.PNG` 和 `app` / `cmd` / `config` / `wizard` / `i18n`
+  这几个顶层项（`server/api_fs.go` 的 `fpkPackageTopLevel`），其余整棵跳过。新增包内目录
+  时记得把它加进白名单，否则导出会少文件；文件管理器的普通下载不走这条，别顺手改成默认。
 - **打包会清掉 manifest 的格式空格**（`stripManifestSpaces`，`Pack` 里对着**暂存副本**跑
   一次）：`appname   =   demo  ` → `appname=demo`。值内部的空格、`"""` 多行值的正文、
   空行与注释都不许动，只去 `key` / `value` 两侧和行尾的空白。判据必须和 `parseManifest`
@@ -441,12 +474,14 @@ frontend/src/
   `utils/entries.ts`（入口 id 只存在键名里）。这个字段要在**每次点开下拉时现读**一次磁盘上
   的 config（`ManifestEditor.refreshLaunchOptions`，并进当前值），不然「刚在入口配置里加的
   入口」在下拉里选不到；读不到不弹错、照样能手输。断言在 `check:duplicate`。
-- **「插入模板」按路径给，`cmd/main` 还按项目类型分两份**（`EditorHost` 的 `templateFor` +
-  `utils/lifecycle.ts`）：非 docker 的启停脚本自己托管进程（pid 文件 / TERM / KILL），
-  docker 应用交给应用中心、脚本只做 status；两份都是官方脚手架的原样文本，别「优化」写法。
+- **「插入模板」按路径给，`cmd/main` 是下拉**（`EditorHost` 的 `templateOptions` +
+  `utils/lifecycle.ts`）：`mainTemplateOptions(docker)` 给「有进程 / 无进程」，docker 项目
+  再多一份「应用中心托管」；其余 `cmd/*`（除 `uninstall_callback`）**不给模板**
+  （按钮不出现），`cmd/uninstall_callback` 仍是按 `$wizard_data_action` 删 / 留数据的
+  脚本。全是官方脚手架的原样文本，别「优化」写法。
   项目类型取 `workspace.state(project).docker`（`ensure()` 填的，项目标签打开时一定就位），
   不要去读项目列表。模板是模板字面量，**`${...}` 少转义一个反斜杠会被当插值吃掉**（脚本里
-  的变量就没了，而且大概率不报错），所以 `check:editor` 钉住两份模板的归属、变量写法与
+  的变量就没了，而且大概率不报错），所以 `check:editor` 钉住各模板的归属、变量写法与
   关键语句。新增模板照这个来：文本放 `utils/lifecycle.ts`（能单独验），组件里只留
   「哪个路径用哪份」的判断。
 

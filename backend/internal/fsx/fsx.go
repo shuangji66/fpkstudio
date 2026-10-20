@@ -545,6 +545,14 @@ func inheritMode(fi os.FileInfo) os.FileMode {
 // "."），硬拼出来的 `./manifest` 不是一层目录，反而会让部分解压工具在目标里再建一个
 // 名字可疑的目录。
 func (x *Root) ZipDir(rel string, w io.Writer) error {
+	return x.ZipDirExcept(rel, w, nil)
+}
+
+// ZipDirExcept 与 ZipDir 相同，但 skip 返回真的路径（相对沙箱根）会被**整棵子树**
+// 跳过。项目导出用它按白名单剪枝（不在包结构里的顶层项整棵跳过）。
+//
+// 剪枝发生在遍历进入之前，不是「逐个文件跳过」——后者仍然会把整个大目录扫一遍。
+func (x *Root) ZipDirExcept(rel string, w io.Writer, skip func(string) bool) error {
 	rel, err := Rel(rel)
 	if err != nil {
 		return err
@@ -560,7 +568,7 @@ func (x *Root) ZipDir(rel string, w io.Writer) error {
 			return err
 		}
 	}
-	err = x.walk(rel, func(cur string, fi os.FileInfo) error {
+	err = x.walkSkip(rel, skip, func(cur string, fi os.FileInfo) error {
 		hdr, err := zip.FileInfoHeader(fi)
 		if err != nil {
 			return err
@@ -670,6 +678,46 @@ func (x *Root) walk(rel string, fn func(string, os.FileInfo) error) error {
 			child = child + "/" + c.Name
 		}
 		if err := x.walk(child, fn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// walkSkip 和 walk 一样深度优先，但 skip 为真的条目整棵跳过（回调也不会收到它）。
+//
+// 单独一份是为了不把「是否跳过」塞进 walk 的签名：walk 还有别的调用方，而剪枝只有
+// ZipDirExcept 需要。
+func (x *Root) walkSkip(rel string, skip func(string) bool, fn func(string, os.FileInfo) error) error {
+	rel, err := Rel(rel)
+	if err != nil {
+		return err
+	}
+	if skip != nil && skip(rel) {
+		return nil
+	}
+	fi, err := x.r.Lstat(rel)
+	if err != nil {
+		return err
+	}
+	if err := fn(rel, fi); err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return nil
+	}
+	children, err := x.List(rel)
+	if err != nil {
+		return err
+	}
+	for _, c := range children {
+		child := rel
+		if child == "." {
+			child = c.Name
+		} else {
+			child = child + "/" + c.Name
+		}
+		if err := x.walkSkip(child, skip, fn); err != nil {
 			return err
 		}
 	}

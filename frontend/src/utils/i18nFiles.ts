@@ -44,7 +44,7 @@ option1Label=""
 option2Label=""
 `
 
-/** 给了模板的 locale（相对项目根，和编辑器里传给 templateFor 的路径同一套写法）。 */
+/** 给了模板的 locale（相对项目根，和编辑器里 templateOptions 用的路径同一套写法）。 */
 const TEMPLATED_LOCALES = ['i18n/en-US', 'i18n/zh-CN']
 
 /**

@@ -159,8 +159,6 @@ interface TargetDef {
   /** 落地目录，相对项目根；空串表示项目根。 */
   dir: string
   labelKey: string
-  /** 基准尺寸；小图再乘上小图缩放比例。 */
-  size: number
   small: boolean
   /** 入口图标只存在于带桌面入口的项目里。 */
   needsUi: boolean
@@ -176,7 +174,6 @@ const TARGET_DEFS: TargetDef[] = [
     path: 'ICON_256.PNG',
     dir: '',
     labelKey: 'iconTab.appLarge',
-    size: 256,
     small: false,
     needsUi: false,
   },
@@ -185,7 +182,6 @@ const TARGET_DEFS: TargetDef[] = [
     path: 'ICON.PNG',
     dir: '',
     labelKey: 'iconTab.appSmall',
-    size: 64,
     small: true,
     needsUi: false,
   },
@@ -194,7 +190,6 @@ const TARGET_DEFS: TargetDef[] = [
     path: 'app/ui/images/icon_256.png',
     dir: ENTRY_ICON_DIR,
     labelKey: 'iconTab.entryLarge',
-    size: 256,
     small: false,
     needsUi: true,
   },
@@ -203,7 +198,6 @@ const TARGET_DEFS: TargetDef[] = [
     path: 'app/ui/images/icon_64.png',
     dir: ENTRY_ICON_DIR,
     labelKey: 'iconTab.entrySmall',
-    size: 64,
     small: true,
     needsUi: true,
   },
@@ -228,7 +222,6 @@ function groupTarget(group: EntryGroup, small: boolean): TargetDef | null {
     path,
     dir: ENTRY_ICON_DIR,
     labelKey: small ? 'iconTab.entrySmall' : 'iconTab.entryLarge',
-    size: side,
     small,
     needsUi: true,
   }
@@ -381,19 +374,21 @@ const maker = ref<InstanceType<typeof IconMaker> | null>(null)
 const saving = ref(false)
 const progress = reactive({ done: 0, total: 0 })
 
-/** 工作尺寸（取景框输出方图的边长）：小图缩放按它算。 */
+/** 工作尺寸（取景框输出方图的边长）：大小图标都按它换算。 */
 const workSize = ref(256)
 /**
  * 小图缩放。
  *
- * 默认「不变」（1）：小图和大图一样大，也就是 ICON.PNG 落成 256px——按需求定的。
- * 想跟文件名（icon_64.png）对上就手动选 1/4，那正好是 64。
+ * 大图标（应用 / 入口的 `*_256.png`）跟着「尺寸」走；小图标默认「不变」（1）——
+ * 这里的「不变」是**和大图标同尺寸**，不是大图的 1/4。想小一些就选 1/2、1/4、1/8，
+ * 比例乘的是同一个工作尺寸。以前大图写死 256、小图跟着工作尺寸，改「尺寸」只会把
+ * 小图放大，真正想输出 512 的应用大图标反而不动。
  */
 const smallScale = ref(1)
 
 function targetSize(target: TargetDef): number {
-  if (!target.small) return target.size
-  return Math.max(1, Math.round(workSize.value * smallScale.value))
+  if (target.small) return Math.max(1, Math.round(workSize.value * smallScale.value))
+  return workSize.value
 }
 
 /**

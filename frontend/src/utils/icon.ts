@@ -90,14 +90,73 @@ export function entryIconPrefixes(fileNames: string[]): string[] {
 }
 
 /**
+ * 从 SVG 源码里取 viewBox 的宽高。
+ *
+ * 小图标常常只写 `viewBox="0 0 16 16"`、不写 width / height。浏览器这时会把 `<img>`
+ * 当成 300×150 的默认视口，内容按 preserveAspectRatio 居中留白；取景框按 300×150
+ * 算「铺满」，方图里就只剩中间一小块（而且贴着上边）——这就是「小 SVG 铺不满画布」。
+ * 返回 null 表示没有可用的 viewBox（那就按文件自己的宽高来）。
+ */
+export function svgViewBoxSize(source: string): { w: number; h: number } | null {
+  const match = /<svg\b[^>]*\bviewBox\s*=\s*["']\s*([^"']+?)\s*["']/i.exec(source)
+  if (!match) return null
+  const parts = match[1]!.split(/[\s,]+/).map(Number)
+  if (parts.length !== 4 || !parts.every((n) => Number.isFinite(n))) return null
+  const w = parts[2]!
+  const h = parts[3]!
+  return w > 0 && h > 0 ? { w, h } : null
+}
+
+/** 把根 `<svg>` 上的 width / height 换成 viewBox 的尺寸（没有就补一个）。 */
+function setSvgSize(tag: string, name: 'width' | 'height', value: number): string {
+  const attr = new RegExp(`\\b${name}\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s/>]+)`, 'i')
+  if (attr.test(tag)) return tag.replace(attr, `${name}="${value}"`)
+  return tag.replace(/<svg\b/i, `<svg ${name}="${value}"`)
+}
+
+/**
+ * 给 SVG 源码补上「按 viewBox 的宽高」的固有尺寸。
+ *
+ * 只改根 `<svg>` 的 width / height，不动内容、不动 preserveAspectRatio：把浏览器
+ * 猜的 300×150 视口换成作者写在 viewBox 里的真实比例，取景框的「铺满」才有意义。
+ * 读不出 viewBox、或者根标签本来就是这个尺寸时返回 null（调用方原样使用）。
+ */
+export function svgWithIntrinsicSize(source: string): string | null {
+  const box = svgViewBoxSize(source)
+  const tag = /<svg\b[^>]*>/i.exec(source)
+  if (!box || !tag) return null
+  const next = setSvgSize(setSvgSize(tag[0], 'width', box.w), 'height', box.h)
+  if (next === tag[0]) return null
+  return source.replace(tag[0], next)
+}
+
+/** 非 SVG 原样返回；SVG 按 viewBox 规整固有尺寸（见 `svgWithIntrinsicSize`）。 */
+async function normalizeSvgFile(file: File): Promise<Blob> {
+  const svg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
+  if (!svg) return file
+  let source = ''
+  try {
+    source = await file.text()
+  } catch {
+    return file
+  }
+  const next = svgWithIntrinsicSize(source)
+  return next ? new Blob([next], { type: 'image/svg+xml' }) : file
+}
+
+/**
  * 读一张本地文件为图片。
  *
  * 返回的 url 是 object URL，**不能在这里 revoke**：调用方还要拿它给 <img> 显示，
  * 撤销了那张 <img> 就永远加载不出来（解码用的那张 Image 已经拿到位图，canvas
  * 操作照旧可用，所以这个坑只表现为「预览空白、导出却正常」）。用完由调用方释放。
+ *
+ * SVG 先按 viewBox 规整固有尺寸（见 `normalizeSvgFile`）：只写 viewBox 的小图标
+ * 否则会被当成 300×150 的视口，取景框里缩在上半部分。
  */
-export function imageFromFile(file: File): Promise<{ image: HTMLImageElement; url: string }> {
-  const url = URL.createObjectURL(file)
+export async function imageFromFile(file: File): Promise<{ image: HTMLImageElement; url: string }> {
+  const blob = await normalizeSvgFile(file)
+  const url = URL.createObjectURL(blob)
   return new Promise((resolve, reject) => {
     const image = new Image()
     image.onload = () => resolve({ image, url })

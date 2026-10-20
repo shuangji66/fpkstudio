@@ -398,6 +398,13 @@ func (s *Server) handleFsDownload(w http.ResponseWriter, r *http.Request) error 
 		return fsError("目标不存在", err)
 	}
 
+	// 首页的「导出」用 layout=package：只交 fpk 包本身该有的东西（白名单），
+	// 其余的（building/、.git、README、本地脚本…）都不进 zip。普通下载不受影响。
+	layout := strings.TrimSpace(r.URL.Query().Get("layout"))
+	if layout != "" && layout != "package" {
+		return badRequest("layout 只支持 package")
+	}
+
 	name := path.Base(rel)
 	if st.Dir {
 		name += ".zip"
@@ -417,7 +424,11 @@ func (s *Server) handleFsDownload(w http.ResponseWriter, r *http.Request) error 
 			_ = os.Remove(tmpName)
 		}()
 
-		if err := root.ZipDir(rel, tmp); err != nil {
+		var skip func(string) bool
+		if layout == "package" {
+			skip = packageSkipper(rel)
+		}
+		if err := root.ZipDirExcept(rel, tmp, skip); err != nil {
 			s.log.Warnf("打包下载 %s 失败: %v", rel, err)
 			return internal("打包目录失败: %v", err)
 		}
@@ -453,6 +464,47 @@ func (s *Server) handleFsDownload(w http.ResponseWriter, r *http.Request) error 
 		s.log.Warnf("下载 %s 中断: %v", rel, err)
 	}
 	return nil
+}
+
+// fpkPackageTopLevel 是 fpk 包允许出现在项目根下的名字。
+//
+// 和 fnpack 的包结构对齐：`manifest`、图标、以及 app / cmd / config / wizard / i18n
+// 这几个脚手架目录。项目目录里还可能有 building（打包工作区）、.git、README、本地
+// 脚本之类，它们都不属于包内容——导出走白名单，只挑这些。
+var fpkPackageTopLevel = map[string]bool{
+	"manifest":     true,
+	"ICON.PNG":     true,
+	"ICON_256.PNG": true,
+	"app":          true,
+	"cmd":          true,
+	"config":       true,
+	"wizard":       true,
+	"i18n":         true,
+}
+
+// packageSkipper 返回 ZipDirExcept 的剪枝判据：顶层名字不在白名单里的整棵跳过。
+//
+// 只判顶层：白名单里的目录（app / cmd / …）内部原样保留，不再逐层过滤。
+func packageSkipper(rel string) func(string) bool {
+	prefix := ""
+	if rel != "." {
+		prefix = rel + "/"
+	}
+	return func(p string) bool {
+		if p == rel {
+			return false
+		}
+		rest := strings.TrimPrefix(p, prefix)
+		if rest == p && prefix != "" {
+			// 正常不会发生（walk 只给 rel 自己和它的子孙）；保守起见不导出。
+			return true
+		}
+		first := rest
+		if i := strings.IndexByte(rest, '/'); i >= 0 {
+			first = rest[:i]
+		}
+		return !fpkPackageTopLevel[first]
+	}
 }
 
 // ctxReader 让「客户端取消」能中断一次正在进行的写入。

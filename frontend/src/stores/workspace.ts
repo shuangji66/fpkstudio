@@ -61,6 +61,21 @@ export type BrowserView = 'list' | 'grid'
  */
 export type PasteOutcome = 'ok' | 'exists' | 'unreadable' | 'invalid' | 'same'
 
+/** 撤销一次文件操作的结果：没有可撤销的（empty）和失败（failed）由界面分别处理。 */
+export type UndoOutcome = 'ok' | 'empty' | 'failed'
+
+/**
+ * 可撤销的文件操作。
+ *
+ * 只记「反着做一遍就能回去」的动作：重命名、粘贴（复制 = 删掉新副本，剪切 = 搬回去）。
+ * **删除不进撤销栈**：它把内容真的删掉了，没有回收站就恢复不了；这时整个栈清空，
+ * 免得用户按 Ctrl+Z 撤销的是删除之前那次无关的重命名。
+ */
+type UndoEntry =
+  | { kind: 'rename'; from: string; to: string }
+  | { kind: 'move'; moves: { from: string; to: string }[] }
+  | { kind: 'copy'; created: { path: string; dir: boolean }[] }
+
 /** 固定子标签的 id 一律是 `__xxx__` 这种形状；文件子标签用的是文件路径。 */
 const isFixedTab = (id: string) => id.startsWith('__') && id.endsWith('__')
 
@@ -140,7 +155,9 @@ export interface ProjectState {
    * 放在 store 而不是组件里，是因为文件树和「文件」标签页是同一批文件的两个视图：
    * 在标签页里复制、切回文件树粘贴必须能连上。
    */
-  clipboard: { path: string; cut: boolean } | null
+  clipboard: { paths: string[]; cut: boolean } | null
+  /** 文件操作的撤销栈（只在本次打开项目期间有效，关标签 / 重开项目就没了）。 */
+  undoStack: UndoEntry[]
 
   /** 是否 docker 应用 / 是否带桌面入口，决定快捷设置与图标页的可选项。 */
   docker: boolean
@@ -173,6 +190,7 @@ function emptyState(name: string): ProjectState {
     browserForward: [],
     browserView: 'list',
     clipboard: null,
+    undoStack: [],
     docker: false,
     ui: false,
     assetRev: 0,
@@ -479,15 +497,33 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return tab
   }
 
-  function closeFile(name: string, rel: string) {
+  /**
+   * 关掉一个文件标签。
+   *
+   * `preferAdjacent` 是桌面子标签的语义：停在相邻的那个文件上（先看左边），
+   * 关掉最后一个才回快捷设置。只有桌面的标签栏会传它；
+   * 移动端的文件是盖住整块区域的子页面，「后退」应该回到打开它之前的位置
+   * （`fileReturnTab`，通常就是「文件」列表），不能跳到另一个文件下面。
+   */
+  function closeFile(name: string, rel: string, preferAdjacent = false) {
     const s = state(name)
     const index = s.files.findIndex((f) => f.path === rel)
     if (index < 0) return
     s.files.splice(index, 1)
     if (s.activeTab !== rel) return
 
+    if (preferAdjacent) {
+      // 先左后右：关掉当前标签时，视线自然落在它左边那个上；关的是第一个才往右。
+      const neighbour = s.files[index - 1] ?? s.files[index]
+      // 一个文件都不剩了才回默认页（快捷设置）——这里**不看** fileReturnTab：
+      // 桌面上「关掉最后一个文件标签」的约定就是回到快捷设置，而不是回到当初
+      // 从哪个固定页打开的文件（那个规则只留给移动端的子页面后退）。
+      s.activeTab = neighbour ? neighbour.path : DEFAULT_TAB
+      return
+    }
+
     // 退回「打开这个文件之前停在哪」。那个位置要是已经没了（原来停在另一个文件上、
-    // 而它已经被关掉），再退回相邻的文件标签 / 总览。
+    // 而它已经被关掉），再退回相邻的文件标签 / 默认页。
     const back = s.fileReturnTab
     const alive = back !== '' && back !== rel && (isFixedTab(back) || s.files.some((f) => f.path === back))
     const next = s.files[index] ?? s.files[index - 1]
@@ -623,13 +659,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   // ---- 剪贴板 ----
 
-  function copyToClipboard(name: string, path: string, cut: boolean) {
-    state(name).clipboard = { path, cut }
+  /** 去掉「父目录和它里面的子项」里被包含的那些路径，只留最外层。 */
+  const topLevelPaths = (paths: string[]) =>
+    paths.filter((path) => !paths.some((other) => other !== path && path.startsWith(`${other}/`)))
+
+  const parentPath = (name: string, path: string) => path.split('/').slice(0, -1).join('/') || name
+
+  function copyToClipboard(name: string, paths: string | string[], cut: boolean) {
+    const list = topLevelPaths((Array.isArray(paths) ? paths : [paths]).filter(Boolean))
+    state(name).clipboard = list.length ? { paths: list, cut } : null
   }
 
+  /** 清掉整份剪贴板；给了 path 就只去掉那一项（目录会连它里面的路径一起清）。 */
   function clearClipboard(name: string, path?: string) {
     const s = state(name)
-    if (!path || s.clipboard?.path === path) s.clipboard = null
+    if (!path || !s.clipboard) {
+      s.clipboard = null
+      return
+    }
+    const paths = s.clipboard.paths.filter(
+      (clip) => clip !== path && !clip.startsWith(`${path}/`),
+    )
+    s.clipboard = paths.length ? { ...s.clipboard, paths } : null
   }
 
   /**
@@ -640,15 +691,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
    */
   function canPasteTo(name: string, destDir: string): boolean {
     const clip = state(name).clipboard
-    if (!clip) return false
-    return destDir !== clip.path && !destDir.startsWith(`${clip.path}/`)
+    if (!clip || !clip.paths.length) return false
+    return clip.paths.every(
+      (path) => destDir !== path && !destDir.startsWith(`${path}/`),
+    )
+  }
+
+  /** 只记「能反着做回去」的操作；删除不记（见 UndoEntry 的注释）。 */
+  function pushUndo(name: string, entry: UndoEntry) {
+    const stack = state(name).undoStack
+    stack.push(entry)
+    if (stack.length > 50) stack.shift()
   }
 
   /**
    * 粘贴：复制走 copy，剪切走 rename（同一个存储卷，就是一次改名）。
    *
-   * 目标重名时复制会自动换个名字（`xxx - 副本`），绝不覆盖；剪切则直接拒绝——
-   * 改名到一个已存在的路径上，轻则报错重则覆盖，不如让用户自己决定。
+   * 多选时按「最外层」逐项处理：选中一个目录和它里面的文件，只搬 / 只复制目录那一次。
+   * 剪切前先整体判重名——一项冲突就整批不动，避免「搬了一半、剩下的报重名」。
+   * 目标重名时复制会自动换名字（`xxx - 副本`），绝不覆盖。
    *
    * 粘一次就把剪贴板清掉（复制和剪切都是）：剪贴板在这里只是「搬一次文件」的中转，
    * 留着它反而容易在切了几层目录之后粘错地方。
@@ -656,11 +717,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function pasteInto(name: string, destDir: string): Promise<PasteOutcome> {
     const s = state(name)
     const clip = s.clipboard
-    if (!clip) return 'invalid'
+    if (!clip || !clip.paths.length) return 'invalid'
     if (!canPasteTo(name, destDir)) return 'invalid'
-    const fileName = clip.path.split('/').pop() ?? ''
-    if (!fileName) return 'invalid'
-    const srcDir = clip.path.split('/').slice(0, -1).join('/') || name
+
+    const items = clip.paths
+      .map((path) => ({ path, fileName: path.split('/').pop() ?? '', srcDir: parentPath(name, path) }))
+      .filter((item) => item.fileName)
+    if (!items.length || items.length !== clip.paths.length) return 'invalid'
 
     // 目标目录的内容必须现拉一次（force）：缓存里那份可能还是空的
     // ——「粘贴时刚好同名」的判据全靠它，读旧了就会把别人的文件覆盖掉。
@@ -672,24 +735,92 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
 
     const siblings = s.dirs[destDir] ?? []
-    const taken = siblings.some((entry) => entry.name === fileName)
 
     if (clip.cut) {
-      // 剪切到同一个目录：什么都不用做（用户多半是点错了），剪贴板留着。
-      if (destDir === srcDir) return 'same'
-      if (taken) return 'exists'
-      // 移动走 moveEntryAt，**不是** renameEntryAt：后者是「同目录改个名字」，
-      // 目标必须还在同一个目录里，拿它当移动用会让剪切粘贴在任何目录组合下都失败。
-      await moveEntryAt(name, clip.path, destDir)
+      // 剪切到同一个目录：这一项什么都不用做（用户多半是点错了）。
+      const moving = items.filter((item) => item.srcDir !== destDir)
+      if (!moving.length) return 'same'
+      const taken = new Set(siblings.map((entry) => entry.name))
+      if (moving.some((item) => taken.has(item.fileName))) return 'exists'
+
+      const moves: { from: string; to: string }[] = []
+      try {
+        for (const item of moving) {
+          const to = `${destDir}/${item.fileName}`
+          await moveEntryAt(name, item.path, destDir)
+          moves.push({ from: item.path, to })
+        }
+      } finally {
+        // 中途失败也把已经搬过去的记下来：撤销能退多少退多少，而不是整批丢掉。
+        if (moves.length) {
+          pushUndo(name, { kind: 'move', moves })
+          // 搬成功的项不能再留在剪贴板里：`moveEntryAt` 正常会把路径迁到新位置，
+          // 但它的 refreshDir 失败时迁移动还没执行，剪贴板仍指着旧路径。两种都去掉，
+          // 这样失败后重试只处理还没搬的项，而不是对着已经不在的源路径报错。
+          if (s.clipboard) {
+            const done = new Set(moves.flatMap(({ from, to }) => [from, to]))
+            const paths = s.clipboard.paths.filter((path) => !done.has(path))
+            s.clipboard = paths.length ? { ...s.clipboard, paths } : null
+          }
+        }
+      }
     } else {
-      const to = `${destDir}/${uniqueName(siblings, fileName, i18n.global.t('tree.copySuffix'))}`
-      await copyEntryAt(name, clip.path, to)
+      const taken = siblings.map((entry) => ({ name: entry.name }))
+      const created: { path: string; dir: boolean }[] = []
+      try {
+        for (const item of items) {
+          const chosen = uniqueName(taken, item.fileName, i18n.global.t('tree.copySuffix'))
+          const to = `${destDir}/${chosen}`
+          const dir = s.dirs[item.srcDir]?.some((entry) => entry.name === item.fileName && entry.dir) ?? false
+          await copyEntry(item.path, to)
+          created.push({ path: to, dir })
+          taken.push({ name: chosen })
+        }
+      } finally {
+        if (created.length) pushUndo(name, { kind: 'copy', created })
+      }
     }
+
     s.clipboard = null
     // 树里 / 列表里当下就能看到粘贴结果；复制和剪切都只刷了源目录，目标目录补一次。
     s.expanded[destDir] = true
     await refreshDir(name, destDir)
     return 'ok'
+  }
+
+  /**
+   * 撤销最近一次可撤销的操作。
+   *
+   * 复制粘贴的撤销 = 删掉刚复制出来的副本；剪切 = 搬回原目录；重命名 = 改回原名。
+   * 删除不进栈（见 UndoEntry），所以这里不会出现「撤销把用户刚删的东西又变出来」的假象。
+   */
+  async function undo(name: string): Promise<UndoOutcome> {
+    const s = state(name)
+    const entry = s.undoStack.pop()
+    if (!entry) return 'empty'
+    try {
+      if (entry.kind === 'rename') {
+        await renameEntry(entry.to, entry.from)
+        applyPathChange(name, entry.to, entry.from)
+        await refreshDir(name, parentPath(name, entry.from))
+      } else if (entry.kind === 'move') {
+        for (const move of [...entry.moves].reverse()) {
+          await renameEntry(move.to, move.from)
+          applyPathChange(name, move.to, move.from)
+          await refreshDir(name, parentPath(name, move.to))
+          await refreshDir(name, parentPath(name, move.from))
+        }
+      } else {
+        // 副本目录深的先删：父目录被删掉之后子路径就不存在了。
+        for (const created of [...entry.created].sort((a, b) => b.path.length - a.path.length)) {
+          await removePath(name, created.path, created.dir)
+        }
+      }
+      return 'ok'
+    } catch (e) {
+      s.error = errText(e)
+      return 'failed'
+    }
   }
 
   // ---- 文件操作 ----
@@ -718,6 +849,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function removeEntryAt(name: string, path: string, dir: boolean) {
+    await removePath(name, path, dir)
+    // 删除不可撤销：成功之后清掉撤销栈，免得 Ctrl+Z 撤掉的是删除之前那次无关的操作。
+    // 删除失败（权限之类）时栈留着，用户还能撤销之前那次操作。
+    state(name).undoStack = []
+  }
+
+  /** 删除的落地实现（不碰撤销栈）。撤销「复制粘贴」时也用它删掉副本。 */
+  async function removePath(name: string, path: string, dir: boolean) {
     await deleteEntry(path, dir)
     const parent = path.split('/').slice(0, -1).join('/') || name
     await refreshDir(name, parent)
@@ -733,8 +872,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     // 直接显示上一个目录的子项」。
     dropDirKeys(name, path)
     // 剪贴板里那条（或它里面的东西）已经不存在了，清掉——留着它之后每次粘贴都会失败。
-    if (s.clipboard && (s.clipboard.path === path || s.clipboard.path.startsWith(`${path}/`))) {
-      s.clipboard = null
+    if (s.clipboard) {
+      const paths = s.clipboard.paths.filter(
+        (clip) => clip !== path && !clip.startsWith(`${path}/`),
+      )
+      s.clipboard = paths.length ? { ...s.clipboard, paths } : null
     }
     // 关掉被删掉的文件标签
     const rel = fileTabPath(name, path)
@@ -786,6 +928,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     await renameEntry(path, to)
     await refreshDir(name, parent)
     applyPathChange(name, path, to)
+    pushUndo(name, { kind: 'rename', from: path, to })
   }
 
   /**
@@ -810,10 +953,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     // 已经不存在的路径去改名 / 复制，后端报「没有那个文件」；而 pasteInto 只在成功之后
     // 才清剪贴板，于是这个坏路径会一直留着，之后每次粘贴都失败。
     if (s.clipboard) {
-      const clip = s.clipboard.path
-      if (clip === path) s.clipboard = { ...s.clipboard, path: to }
-      else if (clip.startsWith(`${path}/`)) {
-        s.clipboard = { ...s.clipboard, path: to + clip.slice(path.length) }
+      s.clipboard = {
+        ...s.clipboard,
+        paths: s.clipboard.paths.map((clip) => {
+          if (clip === path) return to
+          if (clip.startsWith(`${path}/`)) return to + clip.slice(path.length)
+          return clip
+        }),
       }
     }
 
@@ -909,7 +1055,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return res
   }
 
-  const downloadAt = (path: string) => downloadEntry(path)
+  const downloadAt = (path: string, opts: { package?: boolean } = {}) => downloadEntry(path, opts)
 
   // ---- 打包 ----
 
@@ -970,6 +1116,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     clearClipboard,
     canPasteTo,
     pasteInto,
+    undo,
     createEntryAt,
     removeEntryAt,
     renameEntryAt,

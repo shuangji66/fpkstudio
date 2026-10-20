@@ -20,11 +20,14 @@ export function useDownload() {
   const { t } = useI18n()
   const workspace = useWorkspaceStore()
 
-  async function download(path: string, opts: { zip?: boolean } = {}): Promise<void> {
+  async function download(
+    path: string,
+    opts: { zip?: boolean; package?: boolean } = {},
+  ): Promise<void> {
     // duration: 0 = 不自动关闭，由下面 finally 里的 close() 收尾
     const tip = opts.zip ? ElMessage({ message: t('tree.downloadZip'), duration: 0 }) : null
     try {
-      await workspace.downloadAt(path)
+      await workspace.downloadAt(path, { package: opts.package })
     } catch (e) {
       ElMessage.error(
         t('tree.downloadFailed', { error: e instanceof Error ? e.message : String(e) }),

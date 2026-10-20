@@ -199,6 +199,9 @@ const manifestRows = ref<Row[]>([])
 const wizardSections = ref<Section[]>([])
 
 const sections = computed<Section[]>(() => [
+  // 向导里收集的字段排最上面：写生命周期脚本时要填的往往就是这些「用户填过什么」，
+  // 系统变量与运行时反而更像查表。manifest 那组位置不动（仍在运行时之后）。
+  ...wizardSections.value,
   ...STATIC_GROUPS.map((group) => ({
     key: group.key,
     labelKey: group.labelKey,
@@ -221,7 +224,6 @@ const sections = computed<Section[]>(() => [
     noteKey: 'envVars.manifestNote',
     rows: manifestRows.value,
   },
-  ...wizardSections.value,
 ])
 
 /** 读项目里的 manifest 与向导，得到「这个项目自己提供了哪些变量」。 */

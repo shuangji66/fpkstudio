@@ -129,5 +129,7 @@ watch(
   },
 )
 
-const close = (path: string) => void closeFile(props.project, path)
+// 桌面上关文件子标签和关项目标签一样停在左边那个；移动端的标签栏不渲染文件，
+// 这条路径只服务桌面（mobile 时 files 是空数组）。
+const close = (path: string) => void closeFile(props.project, path, { adjacent: true })
 </script>

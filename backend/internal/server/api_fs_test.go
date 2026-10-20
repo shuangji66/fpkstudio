@@ -1,6 +1,7 @@
 package server
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"fpkstudio/internal/config"
@@ -129,6 +131,170 @@ func TestFSCreateRefusesExistingFile(t *testing.T) {
 	// 空 path 不该去动根目录
 	if status, _ = doJSON(t, s, "/api/fs/create", map[string]any{"path": "  "}); status != http.StatusBadRequest {
 		t.Fatalf("空 path：状态码 = %d，期望 400", status)
+	}
+}
+
+// TestFSDownloadPackageLayout：首页「导出」走 layout=package，只交 fpk 包里的东西。
+//
+// 白名单 = manifest、两个根图标、app / cmd / config / wizard / i18n；building、
+// .git、README、本地脚本都不该进 zip。普通下载（不带 layout）仍按整个目录打。
+func TestFSDownloadPackageLayout(t *testing.T) {
+	s, dataDir := newTestServer(t)
+	proj := seedProject(t, dataDir)
+
+	dirs := []string{
+		"app/server", "app/ui/images", "cmd", "config", "wizard", "i18n",
+		"building/platform/arm", ".git",
+	}
+	files := map[string]string{
+		"ICON.PNG":                   "png",
+		"ICON_256.PNG":               "png",
+		"README.md":                  "not part of the package",
+		"notes.txt":                  "not part of the package",
+		"app/server/entry.sh":        "bin",
+		"app/ui/images/icon_64.png":  "png",
+		"cmd/main":                   "#!/bin/sh\n",
+		"config/privilege":           "{}",
+		"wizard/install":             "{}",
+		"i18n/zh-CN":                 "[common]\n",
+		"building/settings.json":     "{}",
+		"building/platform/arm/main": "bin",
+		".git/config":                "secret",
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(proj, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(proj, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	names := func(query string) []string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/fs/download?path=demo&"+query, nil)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("下载 %s：状态码 = %d（%s），期望 200", query, rec.Code, rec.Body.String())
+		}
+		zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+		if err != nil {
+			t.Fatalf("响应不是合法 zip: %v", err)
+		}
+		out := make([]string, 0, len(zr.File))
+		for _, f := range zr.File {
+			out = append(out, f.Name)
+		}
+		return out
+	}
+
+	got := names("layout=package")
+	joined := strings.Join(got, " ")
+	for _, want := range []string{
+		"demo/", "demo/manifest", "demo/ICON.PNG", "demo/ICON_256.PNG",
+		"demo/app/server/entry.sh", "demo/app/ui/images/icon_64.png",
+		"demo/cmd/main", "demo/config/privilege", "demo/wizard/install", "demo/i18n/zh-CN",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("导出包缺少白名单条目 %q：%v", want, got)
+		}
+	}
+	for _, gone := range []string{"demo/building", "demo/.git", "demo/README.md", "demo/notes.txt"} {
+		if strings.Contains(joined, gone) {
+			t.Errorf("非包内容 %q 不该进导出包：%v", gone, got)
+		}
+	}
+
+	// 普通下载不受影响：文件管理器里下载项目目录还是整份。
+	all := strings.Join(names(""), " ")
+	for _, want := range []string{"demo/README.md", "demo/building/settings.json", "demo/.git/config"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("普通下载应当包含 %q：%v", want, all)
+		}
+	}
+
+	bad := httptest.NewRequest(http.MethodGet, "/api/fs/download?path=demo&layout=whatever", nil)
+	badRec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(badRec, bad)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("未知 layout：状态码 = %d，期望 400", badRec.Code)
+	}
+}
+
+// TestProjectArtifactDelete：产物列表里的删除按钮按 scope 删对位置，文件名不能带路径。
+func TestProjectArtifactDelete(t *testing.T) {
+	s, dataDir := newTestServer(t)
+	proj := seedProject(t, dataDir)
+	outDir := filepath.Join(dataDir, "output")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectArtifact := "demo-1.0.0-arm.fpk"
+	outputArtifact := "demo-1.0.0-x86.fpk"
+	if err := os.WriteFile(filepath.Join(proj, projectArtifact), []byte("fpk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, outputArtifact), []byte("fpk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	del := func(scope, file string) (int, map[string]any) {
+		t.Helper()
+		return doJSON(t, s, "/api/projects/artifacts/delete", map[string]any{
+			"name": "demo", "scope": scope, "file": file,
+		})
+	}
+
+	if status, body := del("project", projectArtifact); status != http.StatusOK {
+		t.Fatalf("删项目内产物：状态码 = %d（%v），期望 200", status, body)
+	}
+	if _, err := os.Stat(filepath.Join(proj, projectArtifact)); !os.IsNotExist(err) {
+		t.Fatalf("项目内产物应当被删掉: %v", err)
+	}
+
+	if status, body := del("output", outputArtifact); status != http.StatusOK {
+		t.Fatalf("删输出目录产物：状态码 = %d（%v），期望 200", status, body)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, outputArtifact)); !os.IsNotExist(err) {
+		t.Fatalf("输出目录产物应当被删掉: %v", err)
+	}
+
+	// 完整产物名 = appname-version-platform.fpk，合法名字可能超过单个成分的 64 字节上限。
+	// 删除不能复用 safeArtifactPart，否则列表里能看到的文件会删不掉。
+	longArtifact := strings.Repeat("a", 70) + ".fpk"
+	if err := os.WriteFile(filepath.Join(proj, longArtifact), []byte("fpk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := del("project", longArtifact); status != http.StatusOK {
+		t.Fatalf("删长文件名产物：状态码 = %d（%v），期望 200", status, body)
+	}
+
+	// 输出目录是共享的：不能拿别的项目的产物名删掉它的文件。
+	foreignArtifact := "other-1.0.0-arm.fpk"
+	if err := os.WriteFile(filepath.Join(outDir, foreignArtifact), []byte("fpk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := del("output", foreignArtifact); status != http.StatusBadRequest {
+		t.Errorf("删别的项目的产物：状态码 = %d，期望 400", status)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, foreignArtifact)); err != nil {
+		t.Errorf("别的项目的产物不该被删掉: %v", err)
+	}
+
+	for _, tc := range []struct{ scope, file string }{
+		{"project", "../manifest"},
+		{"project", "manifest"},
+		{"nope", projectArtifact},
+	} {
+		if status, _ := del(tc.scope, tc.file); status != http.StatusBadRequest {
+			t.Errorf("非法删除 %+v：状态码 = %d，期望 400", tc, status)
+		}
+	}
+	if status, _ := del("project", "missing.fpk"); status != http.StatusNotFound {
+		t.Errorf("删除不存在的产物：期望 404，实际 %d", status)
 	}
 }
 
