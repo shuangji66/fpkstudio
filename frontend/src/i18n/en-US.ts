@@ -84,6 +84,7 @@ export default {
     create: {
       title: 'New project',
       name: 'Folder name',
+      nameHint: 'e.g. myapp — 3–32 chars, letters, digits, - _ . only',
       nameRequired: 'Folder name is required',
       kind: 'Project type',
       docker: 'Docker app',

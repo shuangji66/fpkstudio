@@ -82,6 +82,7 @@ export default {
     create: {
       title: '新建项目',
       name: '项目名',
+      nameHint: '例如 myapp，3–32 位，只能包含字母数字和 - _ .',
       nameRequired: '请填写项目名',
       kind: '项目类型',
       docker: 'Docker 应用',

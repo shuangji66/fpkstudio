@@ -74,10 +74,26 @@ async function submit() {
     name.value = ''
     emit('done', info)
   } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
+    ElMessage.error(createErrorText(e))
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * fnpack 对项目名的报错只有英文原话（`app name (…) must be a valid name`），
+ * 用户看不出到底什么名字算合法。只在「fnpack create 失败 + 名字类错误」后面补一句
+ * 本地化规则；权限、磁盘之类的 create 失败不要跟着这条提示，免得误导。
+ */
+function createErrorText(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e)
+  if (
+    !message.includes('fnpack create 失败') ||
+    !/appname|app name|application name|valid name/i.test(message)
+  ) {
+    return message
+  }
+  return `${message}（${t('home.create.nameHint')}）`
 }
 
 /** 回车 = 创建（组词中的回车不算，见 utils/keyboard.ts）。 */
