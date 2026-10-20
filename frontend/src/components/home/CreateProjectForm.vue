@@ -9,7 +9,6 @@
           v-model="name"
           class="w-64"
           size="default"
-          :placeholder="t('home.create.namePlaceholder')"
           @keydown.enter="onEnterKey"
         />
       </div>
