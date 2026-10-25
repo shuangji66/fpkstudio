@@ -196,7 +196,9 @@ export function dumpWizard(model: WizardModel): string {
     if (items.length) out.items = items
     return out
   })
-  return stringifyOrdered(steps)
+  // stepTitle 排在 items 前面：纯字母序是 items 在前，读源码时得先翻完一整屏
+  // 表单项才知道这一步叫什么（见 stringifyOrdered 的 first 参数）。
+  return stringifyOrdered(steps, ['stepTitle', 'items'])
 }
 
 /** 新建字段的骨架。字段名与显示文本由调用方给（要跟着界面语言走）。 */

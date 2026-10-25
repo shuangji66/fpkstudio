@@ -7,7 +7,8 @@
  *  1. 真实的 fpk 向导（含 ${i18n} 占位符、tips、radio 选项）解析后原样回写；
  *  2. 七种字段类型、四种校验规则都能往返，且类型专属的键不会串（开关存布尔、
  *     多选存数组）；
- *  3. 表单里没有的键（fnOS 以后加的字段）原样保留，不会保存一次就丢。
+ *  3. 表单里没有的键（fnOS 以后加的字段）原样保留，不会保存一次就丢；
+ *  4. step 的键序是 stepTitle 在前、items 在后（源码是给人读的）。
  */
 import { dumpWizard, parseWizard, nextWizardField, newWizardItem, newWizardRule } from '../src/utils/wizard.ts'
 
@@ -105,6 +106,18 @@ const byField = (field) => parsed.steps[0].items.find((item) => item.field === f
 const rawItem = (field) => rows[0].items.find((item) => item.field === field)
 
 eq('顶层是数组', Array.isArray(rows), true)
+// 键序：stepTitle 必须排在 items 前面。纯字母序是 items 在前，读源码时要先翻完
+// 一整屏表单项才知道这一步叫什么。
+eq(
+  'step 的键序：stepTitle 在 items 之前（不认识的键排在后面）',
+  Object.keys(rows[0]),
+  ['stepTitle', 'items', 'stepIcon'],
+)
+check(
+  'step 的源码里 stepTitle 出现在 items 之前',
+  text.indexOf('"stepTitle"') < text.indexOf('"items"'),
+  true,
+)
 eq('不认识的 step 键保留', parsed.steps[0].extra, { stepIcon: 'star' })
 eq('不认识的 item 键保留', byField('wizard_field').extra, { placeholder: '请输入' })
 eq('不认识的 rule 键保留', byField('wizard_field').rules[0].extra, { trigger: 'blur' })
@@ -112,8 +125,8 @@ eq('password 默认值', byField('pwd').initValue, 'secret')
 eq('checkbox 存数组', rawItem('langs').initValue, ['zh', 'en'])
 eq('switch 存布尔', rawItem('enable').initValue, true)
 eq('select 默认值', byField('level').initValue, '2')
-// tips 只写 type / label / helpText（没有字段名 / 默认值 / 校验）。label 也要写回：
-// 它在表单里是「显示文本」，不写回就等于改不动（见下面那一节）。
+// tips 只写 type / label / helpText（没有字段名 / 默认值 / 校验）。文件里带着 label 的
+// 要原样写回（表单里不再露出它，但也不该把它删掉）。
 eq(
   'tips 只写 type / label / helpText',
   Object.keys(rows[0].items.find((item) => item.type === 'tips')),
@@ -131,8 +144,9 @@ eq('空数组不报错', parseWizard('[]').steps.length, 0)
 check('坏 JSON 报错', parseWizard('{oops').error !== '', true)
 eq('顶层不是数组报错', parseWizard('{"a":1}').error, 'top level is not an array')
 
-// tips 项的「显示文本」（label）在表单里是可编辑的，必须回写：不回写时序列化结果完全
-// 不变，改它连「未保存」都不会亮、保存按钮也不亮，换个布局再回来字就没了。
+// 提示文字类字段在表单里只露出「辅助文本」（字段标签 / 字段名 / 默认值都藏起来，它的
+// 正文就是辅助文本）。但文件里已经写着的 label 不能因为保存一次就丢——dump 仍原样回写，
+// 这里钉住「保存一次不掉键、改了也确实进得去」。
 {
   const tipsText = JSON.stringify(
     [{ stepTitle: 's', items: [{ type: 'tips', label: '标题', helpText: '说明' }] }],
