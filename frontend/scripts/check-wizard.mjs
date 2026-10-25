@@ -10,7 +10,14 @@
  *  3. 表单里没有的键（fnOS 以后加的字段）原样保留，不会保存一次就丢；
  *  4. step 的键序是 stepTitle 在前、items 在后（源码是给人读的）。
  */
-import { dumpWizard, parseWizard, nextWizardField, newWizardItem, newWizardRule } from '../src/utils/wizard.ts'
+import {
+  dumpWizard,
+  parseWizard,
+  nextWizardField,
+  newWizardItem,
+  newWizardRule,
+  WIZARD_PATTERN_PRESETS,
+} from '../src/utils/wizard.ts'
 
 let failed = 0
 const check = (name, got, want) => {
@@ -164,6 +171,48 @@ eq('顶层不是数组报错', parseWizard('{"a":1}').error, 'top level is not a
 // ---- 4. 默认字段名不重复（它同时是脚本变量名）----
 const used = { steps: [{ ...step, items: [newWizardItem('wizard_field', 'a'), newWizardItem('wizard_field_2', 'b')] }], error: '' }
 eq('跳过已用字段名', nextWizardField(used), 'wizard_field_3')
+
+// ---- 5. 预制正则（界面上的「常用规则」下拉）----
+// 每条都要能编译，并且真的放过该放的、拦住该拦的。正则还得过 Go 的 RE2（fnOS 后端
+// 用它校验），所以预制里不许出现 lookahead / 反向引用——加新预制时注意这一点。
+{
+  const samples = {
+    port: {
+      yes: ['1025', '8080', '30000', '65535'],
+      no: ['1024', '80', '0', '01025', '65536'],
+    },
+    ipv4: {
+      yes: ['0.0.0.0', '192.168.1.1', '255.255.255.255'],
+      no: ['256.1.1.1', '1.2.3', '1.2.3.4.5', '01.2.3.4'],
+    },
+    host: {
+      yes: ['example.com', 'nas.local', 'a-b.c-d.e', 'localhost'],
+      no: ['-bad.com', 'bad-.com', '.bad', 'bad..com'],
+    },
+    url: {
+      yes: ['http://a.b', 'https://example.com/x?y=1'],
+      no: ['ftp://a.b', 'https:/a.b', 'https://'],
+    },
+    password: {
+      yes: ['abc123', 'Abc!@#123', 'a', '~`|}{[]:;?><,./-=_+'],
+      no: ['密码123', 'abc 123', ''],
+    },
+  }
+  eq('预制规则：键与描述一一对应', WIZARD_PATTERN_PRESETS.map((item) => item.key), Object.keys(samples))
+  for (const preset of WIZARD_PATTERN_PRESETS) {
+    let re = null
+    try {
+      re = new RegExp(preset.pattern)
+    } catch {
+      re = null
+    }
+    check(`预制规则 ${preset.key}：正则可以编译`, re !== null, true)
+    if (!re) continue
+    const sample = samples[preset.key]
+    check(`预制规则 ${preset.key}：该放过的都放过`, sample.yes.every((text) => re.test(text)), true)
+    check(`预制规则 ${preset.key}：该拦的都拦住`, sample.no.every((text) => !re.test(text)), true)
+  }
+}
 
 console.log(failed ? `\n${failed} 项不通过` : '\n向导解析 / 回写检查全部通过')
 process.exit(failed ? 1 : 0)

@@ -71,6 +71,40 @@ const KNOWN_STEP_KEYS = ['stepTitle', 'items']
 /** 正则校验的默认值，新建时直接可用。 */
 export const DEFAULT_PATTERN = '^[0-9]+$'
 
+/**
+ * 正则校验的常用预制规则（界面上是「常用规则」下拉，选项只显示描述，选中后把正则
+ * 填进输入框，之后照旧能手改）。
+ *
+ * 这里只放「i18n 键 + 正则」：描述走 `wizard.presets.*`，util 里不引 vue-i18n
+ * （check:wizard 直接跑这个文件）。正则必须是 **Go / RE2 也认**的写法——fnOS 后端
+ * 用 Go 校验，`(?=...)`、反向引用这类在那里编译不过；「密码必须同时有字母和数字」
+ * 就是因此做不了，只能限字符集。
+ */
+export const WIZARD_PATTERN_PRESETS: { key: string; pattern: string }[] = [
+  {
+    key: 'port',
+    // 1025–65535：1024 以下是特权端口，普通应用绑不上
+    pattern:
+      '^(102[5-9]|10[3-9]\\d|1[1-9]\\d\\d|[2-9]\\d{3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])$',
+  },
+  {
+    key: 'ipv4',
+    pattern: '^((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)$',
+  },
+  {
+    key: 'host',
+    // 域名 / 主机名：每段 1–63 字符，不以连字符开头结尾
+    pattern:
+      '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$',
+  },
+  { key: 'url', pattern: '^https?://[^\\s]+$' },
+  {
+    key: 'password',
+    // 字母 / 数字 / 常见 ASCII 标点，不限长度（复杂度类断言 RE2 写不了）
+    pattern: '^[A-Za-z0-9!@#$%^&*()_+\\-=\\[\\]{};:\'",.<>/?\\\\|`~]+$',
+  },
+]
+
 function ruleTypeOf(raw: Record<string, unknown>): string {
   if ('min' in raw || 'max' in raw) return 'min'
   if ('len' in raw) return 'len'

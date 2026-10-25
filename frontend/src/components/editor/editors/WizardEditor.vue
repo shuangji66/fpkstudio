@@ -338,6 +338,24 @@
                         class="w-64"
                         :placeholder="t('wizard.patternPlaceholder')"
                       />
+                      <!--
+                        常用规则：选项只显示描述，选中后把正则填进左边输入框，之后照旧
+                        能手改（预制只是省打字，不是另一种模式）。
+                      -->
+                      <el-dropdown trigger="click" @command="applyPatternPreset(rule, $event)">
+                        <el-button size="default">{{ t('wizard.presets.title') }}</el-button>
+                        <template #dropdown>
+                          <el-dropdown-menu>
+                            <el-dropdown-item
+                              v-for="preset in PATTERN_PRESETS"
+                              :key="preset.key"
+                              :command="preset.pattern"
+                            >
+                              {{ t(`wizard.presets.${preset.key}`) }}
+                            </el-dropdown-item>
+                          </el-dropdown-menu>
+                        </template>
+                      </el-dropdown>
                     </template>
 
                     <el-input
@@ -379,6 +397,7 @@ import { useEditor, type EditorProps } from '../useEditor'
 import TagSelect from '../TagSelect.vue'
 import { useLayoutStore } from '@/stores/layout'
 import {
+  WIZARD_PATTERN_PRESETS,
   WIZARD_RULE_TYPES,
   WIZARD_TYPES,
   dumpWizard,
@@ -402,6 +421,8 @@ const layout = useLayoutStore()
 
 /** 字段类型 / 校验类型在界面上显示什么名字由这里决定（值就是写进 JSON 的键）。 */
 const TYPES = WIZARD_TYPES.map((value) => ({ value, labelKey: `wizard.types.${value}` }))
+/** 正则校验的预制规则（描述在 i18n 里，见 utils/wizard.ts 的说明）。 */
+const PATTERN_PRESETS = WIZARD_PATTERN_PRESETS
 const RULE_TYPES = WIZARD_RULE_TYPES.map((value) => ({ value, labelKey: ruleLabelKey(value) }))
 
 function ruleLabelKey(type: string): string {
@@ -502,6 +523,15 @@ function addRule(item: WizardItem) {
   const rule = newWizardRule('required')
   applyRuleDefaults(rule)
   item.rules.push(rule)
+}
+
+/**
+ * 选中预制正则：只把正则填进去，提示文案不动（用户可能已经自己写过）。
+ *
+ * `command` 是 el-dropdown 透传的 string；这里收窄一下类型，别把 any 带进模型。
+ */
+function applyPatternPreset(rule: WizardRule, command: unknown) {
+  if (typeof command === 'string') rule.pattern = command
 }
 
 /** 换校验类型时按新类型重新填默认提示，避免把上一种类型的文案留下。 */
