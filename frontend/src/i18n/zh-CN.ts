@@ -650,6 +650,8 @@ export default {
       repo: '在 GitHub 上查看源码',
       desc: '飞牛 fnOS 的 fpk 打包工作台：在浏览器里浏览、编辑 fpk 包目录，调官方 fnpack 打包。',
       thanks: '感谢 snltty 制作的在线 fpk 项目一路陪伴。',
+      windows: 'fkpstudio for windows 已上线，欢迎体验。',
+      windowsRepo: '在 GitHub 上查看 fkpstudio for windows',
     },
   },
   trim: {

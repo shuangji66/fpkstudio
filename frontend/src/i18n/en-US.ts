@@ -658,6 +658,8 @@ export default {
       repo: 'View the source on GitHub',
       desc: 'An fpk packaging workbench for fnOS: browse and edit fpk package folders in the browser, then build with the official fnpack.',
       thanks: 'Thanks to snltty for the online fpk project that has been with us all along.',
+      windows: 'fkpstudio for windows is out now — give it a try.',
+      windowsRepo: 'View fkpstudio for windows on GitHub',
     },
   },
   trim: {

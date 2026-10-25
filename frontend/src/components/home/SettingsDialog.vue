@@ -100,7 +100,7 @@
 
       <!--
         关于：仓库地址是写死的常量，不做成配置——它就是「这个程序是哪个」这个事实，
-        没有第二个取值。
+        没有第二个取值。两个仓库（主仓库 / Windows 版）都是常量。
       -->
       <section class="border-t border-slate-200 pt-3 dark:border-slate-700">
         <div class="flex items-center gap-2">
@@ -121,9 +121,7 @@
           >
             <!-- Element Plus 没有 GitHub 图标，这里直接内联官方 mark（16×16） -->
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
-              <path
-                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
-              />
+              <path :d="GITHUB_MARK" />
             </svg>
           </a>
         </div>
@@ -132,6 +130,25 @@
         </p>
         <p class="mt-1.5 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
           {{ t('settings.about.thanks') }}
+        </p>
+        <!--
+          Windows 版：句首那个图标链到 fsfw 仓库（和上面这个仓库不是同一个），
+          所以单独一个常量，别把 REPO_URL 改掉。
+        -->
+        <p class="mt-1.5 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+          <a
+            :href="WINDOWS_REPO_URL"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="mr-1 inline-flex align-[-2px] text-slate-400 transition-colors hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200"
+            :title="t('settings.about.windowsRepo')"
+            :aria-label="t('settings.about.windowsRepo')"
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+              <path :d="GITHUB_MARK" />
+            </svg>
+          </a>
+          {{ t('settings.about.windows') }}
         </p>
       </section>
     </div>
@@ -182,8 +199,15 @@ const LAYOUT_MODES: LayoutMode[] = ['desktop', 'mobile', 'auto']
 /** 开发模式（普通浏览器 / 未注入版本）显示 dev，打包后显示 v1.0.0。 */
 const versionLabel = computed(() => (appVersion === 'dev' ? 'dev' : `v${appVersion}`))
 
-/** 仓库地址：关于一节里的图标链到这里。 */
+/** 仓库地址：关于一节标题旁的图标链到这里。 */
 const REPO_URL = 'https://github.com/shuangji66/fpkstudio'
+
+/** Windows 版的仓库地址：关于一节最后一句句首的图标链到这里。 */
+const WINDOWS_REPO_URL = 'https://github.com/shuangji66/fsfw'
+
+/** GitHub 官方 mark 的路径（16×16 视口），两处图标共用一份。 */
+const GITHUB_MARK =
+  'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z'
 type Translate = (key: string, named?: Record<string, unknown>) => string
 
 const open = defineModel<boolean>({ required: true })
