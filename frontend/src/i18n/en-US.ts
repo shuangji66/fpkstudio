@@ -562,9 +562,8 @@ export default {
     presets: {
       title: 'Presets',
       port: 'Port (1025–65535)',
-      ipv4: 'IPv4 address',
-      host: 'Domain / hostname',
-      url: 'URL (http / https)',
+      host: 'IPv4 / domain (no scheme)',
+      url: 'URL (http / https + IPv4 / domain)',
       password: 'Password (letters, digits, common punctuation)',
     },
     validateMessage: 'Message shown when validation fails',

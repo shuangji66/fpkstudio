@@ -181,17 +181,30 @@ eq('跳过已用字段名', nextWizardField(used), 'wizard_field_3')
       yes: ['1025', '8080', '30000', '65535'],
       no: ['1024', '80', '0', '01025', '65536'],
     },
-    ipv4: {
-      yes: ['0.0.0.0', '192.168.1.1', '255.255.255.255'],
-      no: ['256.1.1.1', '1.2.3', '1.2.3.4.5', '01.2.3.4'],
-    },
     host: {
-      yes: ['example.com', 'nas.local', 'a-b.c-d.e', 'localhost'],
-      no: ['-bad.com', 'bad-.com', '.bad', 'bad..com'],
+      yes: [
+        '192.168.1.1',
+        '0.0.0.0',
+        '255.255.255.255',
+        'example.com',
+        'nas.local',
+        'localhost',
+        'a-b.c-d.e',
+        'sub.domain.co.uk',
+        '123.example.com',
+      ],
+      // 假 IP（999.1.1.1）两条分支都过不了：IP 分支超范围，域名分支要求最后一段字母开头
+      no: ['256.1.1.1', '999.1.1.1', '1.2.3', '01.2.3.4', '-bad.com', 'bad-.com', '.bad', 'bad..com', 'http://example.com', 'my_host.com'],
     },
     url: {
-      yes: ['http://a.b', 'https://example.com/x?y=1'],
-      no: ['ftp://a.b', 'https:/a.b', 'https://'],
+      yes: [
+        'http://example.com',
+        'https://example.com/x?y=1',
+        'https://192.168.1.1:8080/a?b=1#c',
+        'https://example.com?q=1',
+        'http://localhost:3000',
+      ],
+      no: ['ftp://example.com', 'https://', 'http://-bad.com', 'example.com', 'https://256.1.1.1'],
     },
     password: {
       yes: ['abc123', 'Abc!@#123', 'a', '~`|}{[]:;?><,./-=_+'],

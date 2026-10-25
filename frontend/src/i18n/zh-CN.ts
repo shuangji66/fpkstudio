@@ -555,9 +555,8 @@ export default {
     presets: {
       title: '常用规则',
       port: '端口号（1025–65535）',
-      ipv4: 'IPv4 地址',
-      host: '域名 / 主机名',
-      url: 'URL（http / https）',
+      host: 'IPv4 / 域名（不带协议）',
+      url: 'URL（http / https + IPv4 / 域名）',
       password: '密码（字母、数字或常见标点）',
     },
     validateMessage: '校验失败时的提示',
