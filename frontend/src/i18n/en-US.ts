@@ -544,7 +544,7 @@ export default {
     defaultItem: 'Example field',
     defaultTips: 'Please read this before continuing.',
     defaultOptionLabel: 'Option {index}',
-    fieldName: 'Field name (lowercase)',
+    fieldName: 'Field name',
     displayText: 'Label',
     initValue: 'Default',
     helperText: 'Help text',

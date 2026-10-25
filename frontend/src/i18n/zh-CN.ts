@@ -537,7 +537,7 @@ export default {
     defaultItem: '示例项',
     defaultTips: '请阅读以下说明后再继续。',
     defaultOptionLabel: '选项 {index}',
-    fieldName: '字段名（小写）',
+    fieldName: '字段名',
     displayText: '显示文本',
     initValue: '默认值',
     helperText: '辅助文本',
