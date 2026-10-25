@@ -18,8 +18,8 @@
       @pointercancel="endDrag"
       @wheel.prevent="onWheel"
       @dragover.prevent
-      @dragenter.prevent="draggingFile = true"
-      @dragleave.prevent="draggingFile = false"
+      @dragenter.prevent="onDragEnter"
+      @dragleave.prevent="onDragLeave"
       @drop.prevent="onDrop"
       @click="image ? undefined : pick()"
     >
@@ -38,9 +38,14 @@
         {{ t('iconTab.pickHint') }}
       </span>
 
+      <!--
+        遮罩必须 pointer-events-none：它盖在取景框上，一旦参与命中测试，光标移到它上面
+        就会让框收到 dragleave，遮罩自己把自己关掉，然后又重新出现——「松开即可导入」
+        来回闪。见 onDragLeave 的说明。
+      -->
       <div
         v-if="draggingFile"
-        class="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-slate-800/80 text-sm text-sky-600 dark:text-sky-400"
+        class="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-slate-800/80 text-sm text-sky-600 dark:text-sky-400"
       >
         {{ t('iconTab.drop') }}
       </div>
@@ -334,6 +339,27 @@ function onPick(event: Event) {
   const files = Array.from((event.target as HTMLInputElement).files ?? [])
   if (input.value) input.value.value = ''
   if (files[0]) void load(files[0])
+}
+
+/**
+ * 拖动进入 / 离开取景框。
+ *
+ * 不能写成 `@dragenter="draggingFile = true"` + `@dragleave="draggingFile = false"`：
+ * 光标每跨过一个子元素（包括刚显示出来的「松开即可导入」遮罩、还没载图时的提示文字），
+ * 浏览器都会先给子元素发 dragenter、紧接着给框发 dragleave。遮罩被自己的 dragleave
+ * 关掉后，光标又落回框上重新 enter —— 于是提示文字一帧开一帧关，看起来就是闪烁。
+ *
+ * 两道保险：遮罩本身 `pointer-events-none`（不参与命中测试），这里再确认 relatedTarget
+ * 真的不在框里才收起。
+ */
+function onDragEnter() {
+  draggingFile.value = true
+}
+
+function onDragLeave(event: DragEvent) {
+  const box = event.currentTarget as HTMLElement | null
+  const next = event.relatedTarget as Node | null
+  if (!box || !next || !box.contains(next)) draggingFile.value = false
 }
 
 function onDrop(event: DragEvent) {
