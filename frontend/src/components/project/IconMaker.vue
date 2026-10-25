@@ -239,7 +239,7 @@ const imageSize = computed(() => ({
   w: image.value?.naturalWidth ?? 1,
   h: image.value?.naturalHeight ?? 1,
 }))
-/** 缩放滑块的上下限：最小是「铺满」，最大是铺满后再放大 8 倍。 */
+/** 缩放滑块的上下限：最小是「整图放进框」（按长边），最大是再放大 8 倍。 */
 const minZoom = computed(() => fitView(imageSize.value, STAGE).zoom)
 const maxZoom = computed(() => maxZoomOf(imageSize.value, STAGE))
 
@@ -250,7 +250,7 @@ function applyView(next: CropView) {
   zoomSlider.value = next.zoom
 }
 
-/** 复位到「铺满 + 居中」。 */
+/** 复位到「整图放进框 + 居中」。 */
 function resetView() {
   if (!image.value) return
   applyView(fitView(imageSize.value, STAGE))
@@ -375,7 +375,7 @@ function applyImage(next: HTMLImageElement, url: string, revokable = '', svg = f
   imageURL.value = url
   svgSource.value = svg
   backgroundInput.value = ''
-  // 换图后回到「铺满 + 居中」，避免沿用上一张的偏移
+  // 换图后回到「整图放进框 + 居中」，避免沿用上一张的偏移
   resetView()
   clampRadius()
 }

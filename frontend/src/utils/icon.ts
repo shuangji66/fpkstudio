@@ -1,7 +1,9 @@
 /**
  * 图标图片处理（移植自 fnpackup 的图标导入）。
  *
- * 流程：原图 → 按取景框裁成正方形 → 缩放到工作尺寸 → 切圆角 → 按目标尺寸导出 PNG。
+ * 流程：原图 → 按取景框取正方形（图比框小的地方留透明）→ 缩放到工作尺寸 →
+ * 切圆角 → 按目标尺寸导出 PNG。方图的透明底就是这么来的：canvas 新建出来就是
+ * 全透明，`drawImage` 只把原图落在它该在的范围里，不会拉伸去填满。
  * 全部在浏览器里用 canvas 做，后端只负责写入，不需要额外的图像处理依赖。
  *
  * 中间结果统一用 canvas 表示（而不是 data URL 的 <img>）：canvas 之间可以直接
@@ -187,8 +189,10 @@ export function imageFromURL(url: string): Promise<HTMLImageElement> {
 /**
  * 取原图上的一块正方形，输出边长 `out` 的方图（取景框的落地实现）。
  *
- * 源矩形越界时交给 `drawImage` 自己裁剪（规范要求按比例裁目标矩形），
- * 但调用方本来就会把取景框夹在图片范围内，正常不会越界。
+ * 源矩形**允许越界**，这不是异常而是常态：非正方形图按长边放进取景框后，方形的
+ * 源矩形总有一条边落在图外。规范要求此时把源矩形裁到图内、目标矩形按同比例裁，
+ * 于是图外的部分留在画布上就是透明的——方图的透明底靠的就是这条规则，不要自己
+ * 去补齐或拉伸（那会把 logo 变形，或者把留白涂成黑色）。
  */
 export function cropRegion(
   source: Source,
@@ -216,7 +220,7 @@ function resizeSquare(source: Source, side: number): Raster {
  *
  * zoom = 一个图片像素占几个屏幕像素；x/y = 图片左上角相对框左上角的偏移。
  * 这里的几个函数是纯计算，组件只负责把指针 / 滚轮事件换算成参数——取景框的
- * 「不留空白」「以指针为锚缩放」这些约束最容易写错，单独放着也方便验证。
+ * 「整图放进框」「以指针为锚缩放」这些约束最容易写错，单独放着也方便验证。
  */
 export interface CropView {
   x: number
@@ -229,28 +233,43 @@ export interface ImageSize {
   h: number
 }
 
-/** 最小缩放：图片刚好铺满取景框（再小就会露出空白）。 */
+/**
+ * 最小缩放：整张图刚好放进取景框（长边贴住框边，短边两侧留空）。
+ *
+ * 按**长边**算而不是短边：非正方形的 logo（横的长条、竖的字标）按短边放大会被
+ * 框裁掉两边，用户看到的永远是中间一截。按长边放进来，方图里就是完整的 logo，
+ * 空出来的地方保持透明。
+ */
 export function fitZoom(size: ImageSize, stage: number): number {
-  return stage / Math.min(size.w, size.h)
+  return stage / Math.max(size.w, size.h)
 }
 
-/** 最大缩放：铺满后再放大 8 倍，够看局部细节。 */
+/** 最大缩放：整图放进框之后再放大 8 倍，够看局部细节。 */
 export function maxZoomOf(size: ImageSize, stage: number): number {
   return Math.max(fitZoom(size, stage) * 8, 1)
 }
 
-/** 把视图夹住：任何时候图片都要盖满取景框。 */
+/**
+ * 单轴夹取。
+ *
+ * 缩放后的尺寸比框小：这一轴没有可拖的余量，固定在中间（拖动不改位置）；
+ * 比框大：盖满这一轴，边缘不许拖进框内露白。
+ */
+function clampAxis(pos: number, scaled: number, stage: number): number {
+  if (scaled <= stage) return (stage - scaled) / 2
+  return Math.min(0, Math.max(stage - scaled, pos))
+}
+
+/** 把视图夹住：比框小的轴居中，比框大的轴不许拖出空白。 */
 export function clampView(view: CropView, size: ImageSize, stage: number): CropView {
-  const w = size.w * view.zoom
-  const h = size.h * view.zoom
   return {
     zoom: view.zoom,
-    x: Math.min(0, Math.max(stage - w, view.x)),
-    y: Math.min(0, Math.max(stage - h, view.y)),
+    x: clampAxis(view.x, size.w * view.zoom, stage),
+    y: clampAxis(view.y, size.h * view.zoom, stage),
   }
 }
 
-/** 初始视图：铺满 + 居中。 */
+/** 初始视图：整图放进框 + 居中。 */
 export function fitView(size: ImageSize, stage: number): CropView {
   const zoom = fitZoom(size, stage)
   return clampView(
@@ -279,7 +298,12 @@ export function zoomView(
   )
 }
 
-/** 取景框当前覆盖的原图区域（正方形）。 */
+/**
+ * 取景框当前覆盖的原图区域（正方形）。
+ *
+ * 最小缩放时边长 = 图片长边，另一轴必然越出图片范围，那部分就是透明留白；
+ * 放大到「铺满」之后才会整个落在图内、变成真正的裁切。
+ */
 export function viewToSource(
   view: CropView,
   stage: number,

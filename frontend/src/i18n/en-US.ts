@@ -259,7 +259,7 @@ export default {
     pickHint: 'Click to choose, or drop an image here',
     pickTip: 'The crop frame is square — what you see is the rounded result',
     drop: 'Drop to import',
-    cropTip: 'Drag to pan; wheel or the slider below to zoom',
+    cropTip: 'The whole image is fitted by its long edge; the rest stays transparent. Drag to pan; wheel or slider to zoom in',
     dragTip: 'Drag to pan the image',
     zoom: 'Zoom',
     size: 'Size',
