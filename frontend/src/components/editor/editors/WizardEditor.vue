@@ -146,20 +146,17 @@
               </div>
               <div class="flex min-w-0 flex-col gap-1">
                 <span class="text-sm text-slate-500 dark:text-slate-400">{{ t('wizard.initValue') }}</span>
-                <!-- 文本默认值同样可能是一段话；密码框保持单行（textarea 做不了遮挡） -->
+                <!--
+                  文本 / 密码的默认值都可能是一段话：和辅助文本一样自动撑高。
+                  **密码不遮挡**：这是打包工具，默认值本来就要写进向导、给装包的人看见，
+                  在编辑器里打码只是让自己看不见（打包时照样是明文）。
+                -->
                 <el-input
-                  v-if="item.type === 'text'"
+                  v-if="item.type === 'text' || item.type === 'password'"
                   v-model="item.initValue"
                   type="textarea"
                   :autosize="{ minRows: 1, maxRows: 6 }"
                   resize="none"
-                />
-                <el-input
-                  v-else-if="item.type === 'password'"
-                  v-model="item.initValue"
-                  size="default"
-                  type="password"
-                  show-password
                 />
                 <el-switch
                   v-else-if="item.type === 'switch'"
